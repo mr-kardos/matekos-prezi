@@ -11,14 +11,54 @@ export const emptyDoc = () => ({type: 'doc', content: [{type: 'paragraph'}]});
 export const textDoc = (...paras) => ({type: 'doc', content: paras.map(runs => ({type: 'paragraph', content: runs.length ? runs : undefined}))});
 export const T = text => ({type: 'text', text});
 export const M = tex => ({type: 'math', attrs: {tex, display: false}});
+const cellP = content => ({type: 'tableCell', content: [{type: 'paragraph', ...(content ? {content} : {})}]});
+/** A table object's document: exactly one table. */
+export const tableDoc = (rows, cols, fill) => ({type: 'doc', content: [{type: 'table', content: Array.from({length: rows}, (_, r) =>
+  ({type: 'tableRow', content: Array.from({length: cols}, (_, c) => cellP(fill?.(r, c)))}))}]});
+
+/* ---------- objects, groups ---------- */
+/** All objects of a list, including the members of groups (depth first). */
+export const flatObjects = list => list.flatMap(o => o.type === 'group' ? [o, ...flatObjects(o.children)] : [o]);
+export function findObject(list, id) {
+  for (const o of list) { if (o.id === id) return o; if (o.type === 'group') { const r = findObject(o.children, id); if (r) return r; } }
+  return null;
+}
+/** The group that directly contains `id` (or null for top-level objects). */
+export function parentGroup(list, id, parent = null) {
+  for (const o of list) { if (o.id === id) return parent; if (o.type === 'group') { const r = parentGroup(o.children, id, o); if (r !== undefined) return r; } }
+  return undefined;
+}
+/** Axis-aligned bounds of a (possibly rotated) object. */
+export function bounds(o) {
+  const t = (o.rot || 0) * Math.PI / 180, c = Math.abs(Math.cos(t)), s = Math.abs(Math.sin(t));
+  const w = o.w * c + o.h * s, h = o.w * s + o.h * c, cx = o.x + o.w / 2, cy = o.y + o.h / 2;
+  return {x: cx - w / 2, y: cy - h / 2, w, h};
+}
+export function fitGroup(g) {
+  if (!g.children.length) return g;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const c of g.children) { if (c.type === 'group') fitGroup(c); const b = bounds(c); x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
+  Object.assign(g, {x: Math.round(x0), y: Math.round(y0), w: Math.round(x1 - x0), h: Math.round(y1 - y0), rot: 0});
+  return g;
+}
+export function moveObject(o, dx, dy) { o.x += dx; o.y += dy; if (o.type === 'group') o.children.forEach(c => moveObject(c, dx, dy)); }
+/** Scale an object (and a group's members) from its original copy `o0` about the point (ax, ay). */
+export function scaleFrom(o, o0, k, ax, ay) {
+  o.x = ax + (o0.x - ax) * k; o.y = ay + (o0.y - ay) * k; o.w = o0.w * k; o.h = o0.h * k;
+  if (o.type === 'text' || o.type === 'table') o.size = Math.max(4, o0.size * k);
+  if (o.type === 'shape' && o0.strokeWidth) o.strokeWidth = o0.strokeWidth * k;
+  if (o.type === 'group') o.children.forEach((c, i) => scaleFrom(c, o0.children[i], k, ax, ay));
+}
 
 /** Animation pieces of a text box: top-level blocks; lists count item by item. */
 export function blockCount(o) {
+  if (o.type !== 'text') return 1;
   let n = 0;
   for (const b of o.doc?.content ?? []) n += (b.type === 'bulletList' || b.type === 'orderedList') ? (b.content?.length || 1) : 1;
   return n;
 }
 export function isEmptyText(o) {
+  if (o.type === 'table') return false;
   const walk = n => n.type === 'math' || n.type === 'table' || (n.type === 'text' && n.text.trim()) || (n.content || []).some(walk);
   return !walk(o.doc ?? emptyDoc());
 }
@@ -106,10 +146,23 @@ export function migrate(d) {
       Object.assign(t, {ownBg: true, bgColor: '#ffffff', showMaster: false}); delete t.fixed; delete t.placeholders;
     }
   }
-  for (const g of [d.master, ...Object.values(d.templates), ...d.slides]) g.objects.forEach(migrateObject);
+  for (const g of [d.master, ...Object.values(d.templates), ...d.slides]) {
+    g.objects.forEach(migrateObject);
+    // version 0.1: tables lived inside text boxes – they become table objects below the text
+    for (const o of [...g.objects]) {
+      if (o.type !== 'text' || !o.doc?.content?.some(b => b.type === 'table')) continue;
+      let y = o.y + o.h + 10, at = g.objects.indexOf(o) + 1;
+      for (const b of o.doc.content.filter(b => b.type === 'table')) {
+        g.objects.splice(at++, 0, {id: uid(), name: 'Táblázat', type: 'table', x: o.x, y, w: o.w, h: 100, rot: 0, size: o.size, color: o.color, align: 'left', doc: {type: 'doc', content: [b]}});
+        y += 110;
+      }
+      o.doc.content = o.doc.content.filter(b => b.type !== 'table');
+      if (!o.doc.content.length) o.doc.content = [{type: 'paragraph'}];
+    }
+  }
   for (const s of d.slides) {
     for (const a of s.anims) { const o = s.objects.find(q => q.id === a.target); if (o?.byParagraph && a.byParagraph == null) a.byParagraph = true; }
     for (const o of s.objects) delete o.byParagraph;
   }
-  d.version = 3; return d;
+  d.version = 4; return d;
 }

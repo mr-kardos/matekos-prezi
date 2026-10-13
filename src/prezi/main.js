@@ -10,8 +10,9 @@ import { tableContext } from '../editor/extensions.js';
 import { svg as svgIcon } from '../icons.js';
 import { isTauri, savePresentation, saveExport, openPresentation, openPathFile, watchOpenedFiles, setCurrentPath, autosave, loadAutosave } from '../files.js';
 import { Anim } from './anim.js';
-import { W, H, uid, clone, emptyDoc, textDoc, T, M, isEmptyText, blockCount, makeBackground, phName, ph, TITLE_PROMPT,
-  defaultMaster, defaultTemplates, newSlide as makeSlide, syncPlaceholders as syncPh, migrate } from './model.js';
+import { W, H, uid, clone, emptyDoc, textDoc, tableDoc, T, M, isEmptyText, blockCount, makeBackground, phName, ph, TITLE_PROMPT,
+  defaultMaster, defaultTemplates, newSlide as makeSlide, syncPlaceholders as syncPh, migrate,
+  flatObjects, findObject, parentGroup, bounds, fitGroup, moveObject, scaleFrom } from './model.js';
 import { renderStatic, pieceEls, mountEditor, setTextHooks, mathPending } from './textview.js';
 import { buildPptx, buildPdf } from './export.js';
 
@@ -21,23 +22,27 @@ const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(
 const r1 = v => Math.round(v * 10) / 10;
 const PT = 0.75, MM = 96 / 25.4;
 const CLS_COLOR = {entr: '#1f9d55', emph: '#c98a0b', exit: '#c0392b'};
-const LS = {left: 'matekosprezi.leftw', panel: 'matekosprezi.panel', badges: 'matekosprezi.badges'};
+const LS = {left: 'matekosprezi.leftw', panel: 'matekosprezi.panel', badges: 'matekosprezi.badges', sections: 'matekosprezi.sections'};
 const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
 
 startMathJax();
 
 /* ================================================================== state */
-let doc, media = {}, cur = 0, sel = null, curAnim = null;
+let doc, media = {}, cur = 0, curAnim = null;
+let selIds = [];                                  // selected objects (top level of the slide, or one group member being edited)
+let sel = null;                                   // the single selected object (null when 0 or several are selected)
 let mode = 'slides', tcur = 'master';            // 'slides' | 'template' (template builder)
 let editing = null, ed = null;                    // id of the text box being edited, its TipTap editor
 let history = [], hIdx = -1, dirty = false;
 let showBadges = lsGet(LS.badges) !== '0';
 
 const tgt = () => mode === 'slides' ? doc.slides[cur] : tcur === 'master' ? doc.master : doc.templates[tcur];
-const objById = id => tgt().objects.find(o => o.id === id);
+const objById = id => id ? findObject(tgt().objects, id) : null;
 const selObj = () => sel && objById(sel);
-const isText = o => o?.type === 'text', isShape = o => o?.type === 'shape';
+const isText = o => o?.type === 'text', isShape = o => o?.type === 'shape', isTable = o => o?.type === 'table';
+const isTextLike = o => isText(o) || isTable(o);
+const kindOf = o => isTable(o) ? 'table' : 'text';
 const layoutOf = s => doc.templates[s.template] ?? Object.values(doc.templates)[0];
 const newSlide = t => makeSlide(doc, t);
 const syncPlaceholders = s => syncPh(doc, s);
@@ -68,13 +73,16 @@ function demoDoc() {
     {id: uid(), target: ell.id, effect: 'pulse', trigger: 'after', delay: 200}];
   const s3 = newSlide('csakcim');
   s3.objects[0].doc = textDoc([T('Értéktáblázat')]);
-  s3.objects.push({id: uid(), name: 'Táblázat', type: 'text', x: 60, y: 160, w: 760, h: 200, rot: 0, size: 29.33, color: '#1a1a1a', align: 'left', doc: {type: 'doc', content: [
-    {type: 'table', content: [
-      {type: 'tableRow', content: [['x', '#e8eef5'], ['-1', '#e8eef5'], ['0', '#e8eef5'], ['1', '#e8eef5'], ['2', '#e8eef5']].map(([t, bg]) => ({type: 'tableCell', attrs: {background: bg}, content: [{type: 'paragraph', content: [M(t)]}]}))},
-      {type: 'tableRow', content: ['f(x)=x^2', '1', '0', '1', '4'].map(t => ({type: 'tableCell', content: [{type: 'paragraph', content: [M(t)]}]}))}]},
-    {type: 'paragraph', content: [T('A függvény grafikonja '), {type: 'text', marks: [{type: 'bold'}], text: 'parabola'}, T('.')]}]}});
+  const vals = [['x', '-1', '0', '1', '2'], ['f(x)=x^2', '1', '0', '1', '4']];
+  const tbl = tableDoc(2, 5, (r, c) => [M(vals[r][c])]);
+  tbl.content[0].content[0].content.forEach(cell => cell.attrs = {background: '#e8eef5'});
+  s3.objects.push({id: uid(), name: 'Táblázat 1', type: 'table', x: 60, y: 160, w: 760, h: 100, rot: 0, size: 29.33, color: '#1a1a1a', align: 'left', doc: tbl});
+  s3.objects.push({id: uid(), name: 'Szöveg 1', type: 'text', x: 60, y: 290, w: 760, h: 50, rot: 0, size: 29.33, color: '#1a1a1a', align: 'left',
+    doc: textDoc([T('A függvény grafikonja '), {type: 'text', marks: [{type: 'bold'}], text: 'parabola'}, T('.')])});
   doc.slides = [s1, s2, s3];
 }
+
+function setSel(ids) { selIds = [...new Set(ids.filter(Boolean))]; sel = selIds.length === 1 ? selIds[0] : null; }
 
 /* ================================================================== history */
 function snapshot() { return JSON.stringify({doc, cur, mode, tcur}); }
@@ -94,18 +102,21 @@ function restore(i) {
   if (editing) stopEditor();
   hIdx = i; const s = JSON.parse(history[i]); doc = s.doc; mode = s.mode ?? 'slides'; tcur = s.tcur ?? 'master';
   cur = Math.min(s.cur, doc.slides.length - 1); if (mode === 'template' && tcur !== 'master' && !doc.templates[tcur]) tcur = 'master';
-  if (sel && !objById(sel)) sel = null; renderAll(); saveSoon();
+  selIds = selIds.filter(id => objById(id)); sel = selIds.length === 1 ? selIds[0] : null; renderAll(); saveSoon();
 }
 const undo = () => { if (editing) return ed.commands.undo(); if (hIdx > 0) restore(hIdx - 1); };
 const redo = () => { if (editing) return ed.commands.redo(); if (hIdx < history.length - 1) restore(hIdx + 1); };
 
 /* ================================================================== rendering */
 function shapeSVG(o) {
+  const line = o.shape === 'line';
   const sw = o.stroke ? (o.strokeWidth ?? 3) : 0, h2 = sw / 2, {w, h} = o;
-  const fill = o.fill || 'none', st = o.stroke ? ` stroke="${o.stroke}" stroke-width="${sw}" stroke-linejoin="round"` : '';
+  const fill = o.fill || 'none', st = o.stroke ? ` stroke="${o.stroke}" stroke-width="${sw}" stroke-linejoin="round"${line ? ' stroke-linecap="round"' : ''}` : '';
   let body;
   if (o.shape === 'rect') body = `<rect x="${h2}" y="${h2}" width="${Math.max(0, w - sw)}" height="${Math.max(0, h - sw)}" rx="${o.radius ?? 0}" fill="${fill}"${st}/>`;
   else if (o.shape === 'ellipse') body = `<ellipse cx="${w / 2}" cy="${h / 2}" rx="${Math.max(0, w / 2 - h2)}" ry="${Math.max(0, h / 2 - h2)}" fill="${fill}"${st}/>`;
+  else if (o.shape === 'triangle') body = `<polygon points="${r1(w / 2)},${r1(h2 * 1.2)} ${r1(w - h2 * 1.2)},${r1(h - h2)} ${r1(h2 * 1.2)},${r1(h - h2)}" fill="${fill}"${st}/>`;
+  else if (line) body = `<line x1="${r1(Math.min(h2, w / 2))}" y1="${h / 2}" x2="${r1(Math.max(w / 2, w - h2))}" y2="${h / 2}" fill="none"${st}/>`;
   else {
     const hl = Math.min(h * 0.9, w * 0.45), t = h * 0.22, m = h / 2;
     const pts = [[h2, m - t], [w - hl, m - t], [w - hl, h2], [w - h2, m], [w - hl, h - h2], [w - hl, m + t], [h2, m + t]];
@@ -119,24 +130,26 @@ function txtStyle(t, o) {
 }
 let measureT = 0;
 const onMathRendered = () => { clearTimeout(measureT); measureT = setTimeout(() => { measureTexts(); drawSelection(); drawBadges(); }, 30); };
-function objEl(o, rmode, tpl = false) {
+/** One object as DOM. (ox, oy) = origin of the parent (a group's top-left corner). */
+function objEl(o, rmode, tpl = false, ox = 0, oy = 0) {
   const el = document.createElement('div');
-  el.className = `obj ${o.type}${tpl ? ' tpl' : ''}${o.placeholder ? ' placeholder' : ''}`;
+  el.className = `obj ${o.type}${tpl ? ' tpl' : ''}${o.placeholder ? ' placeholder' : ''}${o.locked ? ' locked' : ''}${o.shape ? ' s-' + o.shape : ''}`;
   el.dataset.id = o.id;
-  Object.assign(el.style, {left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', height: o.h + 'px'});
+  Object.assign(el.style, {left: (o.x - ox) + 'px', top: (o.y - oy) + 'px', width: o.w + 'px', height: o.h + 'px'});
   const r = document.createElement('div'); r.className = 'rot';
   if (o.rot) r.style.transform = `rotate(${o.rot}deg)`;
   el.appendChild(r);
-  if (o.type === 'text') {
+  if (o.type === 'group') { for (const c of o.children) r.appendChild(objEl(c, rmode, tpl, o.x, o.y)); return el; }
+  if (o.type === 'text' || o.type === 'table') {
     const empty = isEmptyText(o);
     if (o.placeholder && mode === 'template' && !tpl) { el.classList.add('phbox'); el.dataset.label = phName(o.placeholder); }
     if (!empty) el.classList.add('filled');
     if (empty && rmode !== 'edit') el.style.visibility = 'hidden';
     const t = document.createElement('div'); t.className = 'txt' + (empty && rmode === 'edit' && o.prompt ? ' empty' : ''); t.dataset.prompt = o.prompt ?? '';
     txtStyle(t, o); r.appendChild(t);
-    renderStatic(t, o.doc, rmode === 'edit' ? onMathRendered : null);
+    renderStatic(t, o.doc, rmode === 'edit' ? onMathRendered : null, kindOf(o));
   } else if (o.type === 'shape') r.innerHTML = shapeSVG(o);
-  else if (o.type === 'image') r.innerHTML = `<img src="${media[o.media] ?? ''}" alt="" draggable="false">`;
+  else if (o.type === 'image') { r.innerHTML = `<img src="${media[o.media] ?? ''}" alt="" draggable="false">`; if (o.opacity != null) r.style.opacity = o.opacity; }
   return el;
 }
 function paintBackground(clip, src) {
@@ -177,44 +190,67 @@ function fitStage() {
   stage.style.setProperty('--inv', 1 / scale);
   drawTableHandles(); drawMathCaret();
 }
+const groupOf = id => parentGroup(tgt().objects, id) || null;
+/** Position of an element relative to its parent group. */
+function placeEl(el, o) {
+  const g = groupOf(o.id);
+  Object.assign(el.style, {left: (o.x - (g ? g.x : 0)) + 'px', top: (o.y - (g ? g.y : 0)) + 'px', width: o.w + 'px'});
+  if (o.type !== 'text' && o.type !== 'table') el.style.height = o.h + 'px';
+  el.querySelector(':scope > .rot').style.transform = o.rot ? `rotate(${o.rot}deg)` : '';
+}
 function renderStage() {
   const keep = editing && stage.querySelector(`.obj[data-id="${editing}"]`);
   if (mode === 'slides') renderSlide(tgt(), stage, 'edit'); else renderTemplate(tcur, stage, 'edit');
   if (keep) {                                     // the live editor survives re-rendering
     const fresh = stage.querySelector(`.obj[data-id="${editing}"]`), o = objById(editing);
-    if (fresh && o) {
-      fresh.replaceWith(keep);
-      Object.assign(keep.style, {left: o.x + 'px', top: o.y + 'px', width: o.w + 'px'});
-      keep.querySelector('.rot').style.transform = o.rot ? `rotate(${o.rot}deg)` : '';
-      txtStyle(keep.querySelector('.txt'), o);
-    }
+    if (fresh && o) { fresh.replaceWith(keep); keep.classList.add('editing'); placeEl(keep, o); txtStyle(keep.querySelector('.txt'), o); }
   }
   document.body.classList.toggle('tplmode', mode === 'template');
   measureTexts(); drawSelection(); drawBadges(); drawTableHandles();
 }
-/** Text boxes grow with their content; the measured height is stored in the model (export uses it). */
+/** Text boxes and tables grow with their content; the measured height is stored in the model (export uses it). */
 function measureTexts() {
-  for (const el of stage.querySelectorAll('.obj.text:not(.tpl)')) {
+  let groups = false;
+  for (const el of stage.querySelectorAll('.obj.text:not(.tpl), .obj.table:not(.tpl)')) {
     const o = objById(el.dataset.id); if (!o) continue;
     const h = el.firstChild.offsetHeight;
-    if (h && Math.abs(h - o.h) > .5) { o.h = h; el.style.height = h + 'px'; }
+    if (h && Math.abs(h - o.h) > .5) { o.h = h; el.style.height = h + 'px'; if (groupOf(o.id)) groups = true; }
+  }
+  if (groups) for (const g of tgt().objects) if (g.type === 'group') {
+    fitGroup(g); const ge = stage.querySelector(`.obj[data-id="${g.id}"]`);
+    if (ge) { Object.assign(ge.style, {left: g.x + 'px', top: g.y + 'px', width: g.w + 'px', height: g.h + 'px'}); for (const c of g.children) { const ce = ge.querySelector(`.obj[data-id="${c.id}"]`); if (ce) placeEl(ce, c); } }
   }
 }
 function renderAll() { renderStage(); renderThumbs(); renderProps(); updateRibbon(); }
 
 /* ================================================================== selection frame + animation badges */
+const HANDLES_FULL = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'], HANDLES_W = ['nw', 'ne', 'e', 'se', 'sw', 'w'];
 function drawSelection() {
-  stage.querySelector('#sel')?.remove();
-  const o = selObj(); if (!o) return;
-  const d = document.createElement('div'); d.id = 'sel';
-  if (editing === o.id) d.className = 'editing';
-  Object.assign(d.style, {left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', height: o.h + 'px', transform: o.rot ? `rotate(${o.rot}deg)` : ''});
-  const hs = o.type === 'text' ? ['nw', 'ne', 'e', 'se', 'sw', 'w'] : ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+  stage.querySelectorAll('.self').forEach(x => x.remove());
+  const objs = selIds.map(objById).filter(Boolean);
+  if (!objs.length) return;
+  const frame = (o, cls) => {
+    const d = document.createElement('div'); d.className = 'self ' + cls;
+    const g = groupOf(o.id);   // a member being edited inside a group: absolute position
+    Object.assign(d.style, {left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', height: o.h + 'px', transform: o.rot ? `rotate(${o.rot}deg)` : ''});
+    stage.appendChild(d); return d;
+  };
+  if (objs.length > 1) {                        // several: a thin frame for each and one frame around all
+    objs.forEach(o => frame(o, 'multi'));
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const o of objs) { const b = bounds(o); x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
+    const d = frame({x: x0, y: y0, w: x1 - x0, h: y1 - y0}, 'all');
+    d.innerHTML = '<div class="stem"></div><div class="h move" data-h="move" title="A kijelöltek mozgatása">' + svgIcon('move') + '</div>';
+    return;
+  }
+  const o = objs[0], d = frame(o, 'one' + (editing === o.id ? ' editing' : '') + (o.locked ? ' locked' : ''));
+  d.id = 'sel';
+  if (o.locked) return;
+  const widthOnly = isTextLike(o) || o.shape === 'line', hs = widthOnly ? HANDLES_W : HANDLES_FULL;
   const pos = {nw: [0, 0], n: [50, 0], ne: [100, 0], e: [100, 50], se: [100, 100], s: [50, 100], sw: [0, 100], w: [0, 50]};
   const cr = {nw: 'nwse', se: 'nwse', ne: 'nesw', sw: 'nesw', n: 'ns', s: 'ns', e: 'ew', w: 'ew'};
   d.innerHTML = '<div class="stem"></div><div class="h move" data-h="move" title="Mozgatás (Alt: illesztés nélkül)">' + svgIcon('move') + '</div>'
-    + hs.map(h => `<div class="h" data-h="${h}" style="left:${pos[h][0]}%;top:${pos[h][1]}%;cursor:${cr[h]}-resize"></div>`).join('');
-  stage.appendChild(d);
+    + (o.shape === 'line' ? ['e', 'w'] : hs).map(h => `<div class="h" data-h="${h}" style="left:${pos[h][0]}%;top:${pos[h][1]}%;cursor:${cr[h]}-resize"></div>`).join('');
 }
 function drawBadges() {
   stage.querySelectorAll('.badges').forEach(b => b.remove());
@@ -223,10 +259,8 @@ function drawBadges() {
   for (const a of s.anims) if (rg[a.id]) (map[a.target] ??= []).push({r: rg[a.id], cls: Anim.EFFECTS[a.effect].cls});
   for (const [id, arr] of Object.entries(map)) {
     const o = objById(id); if (!o) continue;
-    const b = document.createElement('div'); b.className = 'badges';
-    const t = (o.rot || 0) * Math.PI / 180, c = Math.abs(Math.cos(t)), sn = Math.abs(Math.sin(t));
-    const bw = o.w * c + o.h * sn, bh = o.w * sn + o.h * c;
-    Object.assign(b.style, {left: o.x + o.w / 2 - bw / 2 + 'px', top: o.y + o.h / 2 - bh / 2 + 'px'});
+    const b = document.createElement('div'), bb = bounds(o); b.className = 'badges';
+    Object.assign(b.style, {left: bb.x + 'px', top: bb.y + 'px'});
     b.innerHTML = arr.map(({r, cls}) => `<span class="badge ${cls}" title="${Anim.CLASSES[cls]}">${r[0] === r[1] ? r[0] : r[0] + '–' + r[1]}</span>`).join('');
     stage.appendChild(b);
   }
@@ -236,7 +270,7 @@ function drawBadges() {
 const slidesNav = $('#slides'), mainEl = $('#main');
 function setLeftWidth(w) {
   w = Math.max(130, Math.min(420, Math.round(w)));
-  mainEl.style.setProperty('--lw', w + 'px');
+  mainEl.style.setProperty('--lw', w + 'px'); document.body.style.setProperty('--lw', w + 'px');
   mainEl.style.setProperty('--tk', ((w - 46) / W).toFixed(4));
   return w;
 }
@@ -279,8 +313,9 @@ function renderSlideList() {
   $('#sDup').onclick = () => { if (editing) exitEdit(); const s = clone(tgt()); const ids = {};
     s.id = uid(); s.objects.forEach(o => { ids[o.id] = uid(); o.id = ids[o.id]; });
     s.anims.forEach(a => { a.id = uid(); a.target = ids[a.target]; });
-    doc.slides.splice(cur + 1, 0, s); cur++; sel = null; commit(); };
-  $('#sDel').onclick = () => { if (doc.slides.length < 2) return; if (editing) exitEdit(); doc.slides.splice(cur, 1); cur = Math.min(cur, doc.slides.length - 1); sel = null; commit(); };
+    doc.slides.splice(cur + 1, 0, s); cur++; setSel([]); commit(); };
+  $('#sDel').onclick = () => { if (doc.slides.length < 2) return;
+    if (!confirm(`Biztosan törlöd a(z) ${cur + 1}. diát?`)) return; if (editing) exitEdit(); doc.slides.splice(cur, 1); cur = Math.min(cur, doc.slides.length - 1); setSel([]); commit(); };
   list.querySelector('.slide-actions')?.scrollIntoView({block: 'nearest'});
 }
 function layoutThumb(k, L, cls = 'lthumb') {
@@ -292,15 +327,9 @@ function layoutThumb(k, L, cls = 'lthumb') {
 $('#popNewSlide').onopen = () => {
   const gal = $('#lgalNew'); gal.innerHTML = '';
   for (const [k, L] of Object.entries(doc.templates)) gal.appendChild(layoutThumb(k, L));
-  $('#layoutList').innerHTML = Object.entries(doc.templates).map(([k, L]) => `<button class="pitem${k === tgt().template ? ' on' : ''}" data-k="${k}">${esc(L.name)}</button>`).join('');
 };
 $('#lgalNew').addEventListener('click', e => { const b = e.target.closest('[data-k]'); if (!b) return; closePops(); if (editing) exitEdit();
-  doc.slides.splice(cur + 1, 0, newSlide(b.dataset.k)); cur++; sel = null; commit(); });
-$('#layoutList').addEventListener('click', e => { const b = e.target.closest('[data-k]'); if (!b) return; closePops(); if (editing) exitEdit();
-  tgt().template = b.dataset.k; syncPlaceholders(tgt()); commit(); });
-$('#resetPh').addEventListener('click', () => { closePops(); if (editing) exitEdit();
-  for (const q of tgt().objects) if (q.placeholder) { delete q.phMoved; delete q.phStyled; } syncPlaceholders(tgt()); commit(); });
-
+  doc.slides.splice(cur + 1, 0, newSlide(b.dataset.k)); cur++; setSel([]); commit(); });
 function renderTemplateList() {
   slidesNav.innerHTML = `<div class="plist"><div class="tplbar"><b>Sablonszerkesztő</b><button class="btn primary" id="tClose">Sablon bezárása</button></div>
     <div class="phint" style="margin:0 0 10px">A mester elemei minden elrendezésen megjelennek. Az elrendezésekből készülnek az új diák.</div><div id="tlist"></div></div>`;
@@ -330,15 +359,15 @@ function renderTemplateList() {
   if (tcur === 'master') { const a = document.createElement('div'); a.className = 'slide-actions'; a.innerHTML = `<button class="tb" id="lAdd">${svgIcon('plus')}<span>Új elrendezés</span></button>`; list.appendChild(a); }
   $('#tClose').onclick = closeTemplateBuilder;
   $('#lAdd').onclick = () => { if (editing) exitEdit(); const k = 'l' + uid(); doc.templates[k] = {name: 'Új elrendezés', ownBg: false, background: null, bgColor: '#ffffff', showMaster: true,
-    objects: [ph('title', 60, 40, 1160, 33, '#2f5d8a', true, 'left', TITLE_PROMPT)]}; tcur = k; sel = null; commit(); };
+    objects: [ph('title', 60, 40, 1160, 33, '#2f5d8a', true, 'left', TITLE_PROMPT)]}; tcur = k; setSel([]); commit(); };
   $('#lDup') && ($('#lDup').onclick = () => { if (editing) exitEdit(); const k = 'l' + uid(), c = clone(doc.templates[tcur]); c.name += ' (másolat)'; c.objects.forEach(o => o.id = uid());
-    doc.templates[k] = c; tcur = k; sel = null; commit(); });
+    doc.templates[k] = c; tcur = k; setSel([]); commit(); });
   $('#lDel') && ($('#lDel').onclick = () => {
     const used = doc.slides.filter(s => s.template === tcur).length;
     if (used && !confirm(`${used} dia használja ezt az elrendezést. Ezek az első elrendezésre váltanak. Törlöd?`)) return;
     if (editing) exitEdit();
     delete doc.templates[tcur]; const first = Object.keys(doc.templates)[0];
-    doc.slides.forEach(s => { if (!doc.templates[s.template]) s.template = first; }); tcur = first; sel = null; commit(); });
+    doc.slides.forEach(s => { if (!doc.templates[s.template]) s.template = first; }); tcur = first; setSel([]); commit(); });
 }
 function moveLayout(from, to) {
   const e = Object.entries(doc.templates), i = e.findIndex(x => x[0] === from), j = e.findIndex(x => x[0] === to);
@@ -349,83 +378,121 @@ function moveSlide(from, to) {
   if (editing) exitEdit();
   const [s] = doc.slides.splice(from, 1); doc.slides.splice(to, 0, s); cur = to; commit();
 }
-function gotoSlide(i) { if (editing) exitEdit(); cur = i; sel = null; curAnim = null; renderAll(); }
-function gotoTemplate(k) { if (editing) exitEdit(); tcur = k; sel = null; renderAll(); }
+function gotoSlide(i) { if (editing) exitEdit(); cur = i; setSel([]); curAnim = null; renderAll(); }
+function gotoTemplate(k) { if (editing) exitEdit(); tcur = k; setSel([]); renderAll(); }
 function openTemplateBuilder() {
   if (editing) exitEdit(); closePops();
-  mode = 'template'; tcur = doc.slides[cur] ? doc.slides[cur].template : 'master'; sel = null; renderAll(); fitStage();
+  mode = 'template'; tcur = doc.slides[cur] ? doc.slides[cur].template : 'master'; setSel([]); renderAll(); fitStage();
 }
 function closeTemplateBuilder() {
   if (editing) exitEdit(); closePops();
   for (const s of doc.slides) syncPlaceholders(s);
-  mode = 'slides'; sel = null; commit(); fitStage();
+  mode = 'slides'; setSel([]); commit(); fitStage();
 }
 
 /* ================================================================== pointer interaction on the slide */
 const toStage = e => { const r = stage.getBoundingClientRect(); return {x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale}; };
 const toStageRect = rr => { const s = stage.getBoundingClientRect(); return {x: (rr.left - s.left) / scale, y: (rr.top - s.top) / scale, w: rr.width / scale, h: rr.height / scale}; };
 let action = null, lastDown = null;
+/** The top-level object element under an event target (members of a group resolve to the group). */
+const topObjEl = t => { let el = t.closest('.obj:not(.tpl)'); while (el && el.parentElement?.closest('.obj:not(.tpl)')) el = el.parentElement.closest('.obj:not(.tpl)'); return el; };
 
 stage.addEventListener('pointerdown', e => {
   if (e.button !== 0) return;
   if (e.target.closest('#tblHandles')) return;
   const p = toStage(e), h = e.target.closest('.h');
   if (h) { startHandle(h.dataset.h, p, e); return; }
-  const oel = e.target.closest('.obj:not(.tpl)');
   if (editing) {
-    if (oel?.dataset.id === editing) return;                // the editor handles its own clicks
+    const edEl = stage.querySelector(`.obj[data-id="${editing}"]`);
+    if (edEl && edEl.contains(e.target)) return;            // the editor handles its own clicks
     exitEdit();
   }
-  if (!oel) { select(null); lastDown = null; return; }
-  const id = oel.dataset.id, now = performance.now();
-  if (lastDown && lastDown.id === id && now - lastDown.t < 450 && oel.classList.contains('text')) {
+  const oel = topObjEl(e.target), multi = e.shiftKey || e.ctrlKey || e.metaKey;
+  if (!oel) {                                              // empty area: rubber-band selection
+    if (!multi) setSel([]);
+    action = {type: 'marquee', p0: p, base: [...selIds]};
+    stage.setPointerCapture(e.pointerId); drawSelection(); renderProps(); updateRibbon();
+    return;
+  }
+  const id = oel.dataset.id, o = objById(id), now = performance.now();
+  if (multi) {                                             // add to / remove from the selection
+    setSel(selIds.includes(id) ? selIds.filter(x => x !== id) : [...selIds, id]);
+    curAnim = null; lastDown = null; drawSelection(); renderProps(); updateRibbon(); e.preventDefault(); return;
+  }
+  if (isTable(o)) { e.preventDefault(); select(id); enterEdit(id, e); return; }   // tables: always ready to edit
+  if (lastDown && lastDown.id === id && now - lastDown.t < 450) {
     lastDown = null; e.preventDefault();
-    if (mode === 'template' && objById(id)?.placeholder) { select(id); toast('A helykitöltő mintaszövegét a jobb oldali panelen adhatod meg.'); return; }
-    enterEdit(id, e); return;
+    // double click: edit the text box (also a text box inside a group)
+    let tEl = e.target.closest('.obj.text:not(.tpl)');
+    if (tEl && o.type === 'group') { select(tEl.dataset.id); enterEdit(tEl.dataset.id, e); return; }
+    if (isText(o)) {
+      if (mode === 'template' && o.placeholder) { toast('A helykitöltő mintaszövegét a jobb oldali panelen adhatod meg.'); return; }
+      enterEdit(id, e); return;
+    }
   }
   lastDown = {id, t: now};
-  select(id);
-  const o = objById(id);
-  action = {type: 'move', p0: p, x0: o.x, y0: o.y, moved: false};
-  stage.setPointerCapture(e.pointerId);
-  e.preventDefault();
+  if (!selIds.includes(id)) select(id);
+  startMove(p, e);
 });
+function startMove(p, e) {
+  const objs = selIds.map(objById).filter(o => o && !o.locked);
+  if (!objs.length) return;
+  action = {type: 'move', p0: p, starts: objs.map(o => ({o, x: o.x, y: o.y})), moved: false};
+  stage.setPointerCapture(e.pointerId); e.preventDefault();
+}
 stage.addEventListener('pointermove', e => {
   if (!action) return;
-  const p = toStage(e), o = selObj(); if (!o) return;
+  const p = toStage(e);
+  if (action.type === 'marquee') {
+    let m = stage.querySelector('.marquee'); if (!m) { m = document.createElement('div'); m.className = 'marquee'; stage.appendChild(m); }
+    const x0 = Math.min(p.x, action.p0.x), y0 = Math.min(p.y, action.p0.y), x1 = Math.max(p.x, action.p0.x), y1 = Math.max(p.y, action.p0.y);
+    Object.assign(m.style, {left: x0 + 'px', top: y0 + 'px', width: (x1 - x0) + 'px', height: (y1 - y0) + 'px'});
+    const hit = tgt().objects.filter(o => !o.locked && !(isEmptyText(o) && o.placeholder && false)).filter(o => { const b = bounds(o); return b.x < x1 && b.x + b.w > x0 && b.y < y1 && b.y + b.h > y0; }).map(o => o.id);
+    setSel([...action.base, ...hit]); drawSelection();
+    return;
+  }
   if (action.type === 'move') {
-    let x = action.x0 + p.x - action.p0.x, y = action.y0 + p.y - action.p0.y;
-    if (!action.moved && Math.hypot(p.x - action.p0.x, p.y - action.p0.y) < 2) return;
+    let dx = p.x - action.p0.x, dy = p.y - action.p0.y;
+    if (!action.moved && Math.hypot(dx, dy) < 2) return;
     action.moved = true;
-    [x, y] = e.altKey ? [x, y] : snap(o, x, y);
-    o.x = Math.round(x); o.y = Math.round(y);
-  } else if (action.type === 'resize') doResize(o, p, e.shiftKey);
+    const lead = action.starts[0];
+    if (!e.altKey && action.starts.length === 1) { const [x, y] = snap(lead.o, lead.x + dx, lead.y + dy); dx = x - lead.x; dy = y - lead.y; }
+    for (const s of action.starts) moveObject(s.o, Math.round(s.x + dx) - s.o.x, Math.round(s.y + dy) - s.o.y);
+    action.starts.forEach(s => updateObjLive(s.o, true)); drawSelection(); drawBadges();
+    if (action.starts.length === 1) syncGeometryInputs(lead.o);
+    return;
+  }
+  const o = selObj(); if (!o) return;
+  if (action.type === 'resize') doResize(o, p, e.shiftKey);
   updateObjLive(o);
 });
 stage.addEventListener('pointerup', () => {
   if (!action) return;
-  stage.querySelectorAll('.guide').forEach(g => g.remove());
-  const moved = action.moved; action = null;
-  if (moved) { const o = selObj(); if (o?.placeholder && mode === 'slides') o.phMoved = true; commit(); }
+  stage.querySelectorAll('.guide, .marquee').forEach(g => g.remove());
+  const a = action; action = null;
+  if (a.type === 'marquee') { renderProps(); updateRibbon(); return; }
+  if (a.moved) { for (const s of a.starts ?? [{o: selObj()}]) if (s.o?.placeholder && mode === 'slides') s.o.phMoved = true; commit(); }
 });
 function startHandle(h, p, e) {
-  const o = selObj(); if (!o) return;
-  if (h === 'move') action = {type: 'move', p0: p, x0: o.x, y0: o.y, moved: false};
-  else action = {type: 'resize', h, p0: p, o0: {x: o.x, y: o.y, w: o.w, h: o.h, rot: o.rot || 0}, moved: true};
+  if (h === 'move') { startMove(p, e); e.stopPropagation(); return; }
+  const o = selObj(); if (!o || o.locked) return;
+  action = {type: 'resize', h, p0: p, o0: clone(o), moved: true};
   stage.setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation();
 }
-/** Resize in the object's rotated frame, keeping the opposite handle fixed. */
+/** Resize in the object's rotated frame, keeping the opposite handle fixed. Groups scale uniformly. */
 function doResize(o, p, keepRatio) {
-  const {h, p0, o0} = action, t = o0.rot * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
+  const {h, p0, o0} = action, t = (o0.rot || 0) * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
   const dx = p.x - p0.x, dy = p.y - p0.y;
   const lx = dx * c + dy * s, ly = -dx * s + dy * c;
   const sx = h.includes('e') ? 1 : h.includes('w') ? -1 : 0, sy = h.includes('s') ? 1 : h.includes('n') ? -1 : 0;
   let w = Math.max(16, o0.w + sx * lx), hh = Math.max(16, o0.h + sy * ly);
-  if (o.type === 'text') hh = o0.h;
-  else if ((keepRatio || o.type === 'image') && sx && sy) { const k = Math.max(w / o0.w, hh / o0.h); w = o0.w * k; hh = o0.h * k; }
+  if (isTextLike(o) || o.shape === 'line') hh = o0.h;
+  else if ((keepRatio || o.type === 'image' || o.type === 'group') && sx && sy) { const k = Math.max(w / o0.w, hh / o0.h); w = o0.w * k; hh = o0.h * k; }
+  else if (o.type === 'group') { const k = sx ? w / o0.w : hh / o0.h; w = o0.w * k; hh = o0.h * k; }
   const cx0 = o0.x + o0.w / 2, cy0 = o0.y + o0.h / 2, ax = -sx * o0.w / 2, ay = -sy * o0.h / 2;
   const Ax = cx0 + ax * c - ay * s, Ay = cy0 + ax * s + ay * c, nx = sx * w / 2, ny = sy * hh / 2;
   const cx = Ax + nx * c - ny * s, cy = Ay + nx * s + ny * c;
+  if (o.type === 'group') { const k = w / o0.w; scaleFrom(o, o0, k, o0.x, o0.y); moveObject(o, Math.round(cx - w / 2) - o.x, Math.round(cy - hh / 2) - o.y); return; }
   o.w = Math.round(w); o.h = Math.round(hh); o.x = Math.round(cx - w / 2); o.y = Math.round(cy - hh / 2);
 }
 function snap(o, x, y) {
@@ -443,34 +510,34 @@ function guide(dir, v) {
   Object.assign(g.style, dir === 'v' ? {left: v + 'px', top: 0, width: 1 / scale + 'px', height: H + 'px'} : {top: v + 'px', left: 0, height: 1 / scale + 'px', width: W + 'px'});
   stage.appendChild(g);
 }
-function updateObjLive(o) {
+/** Redraw one object after a geometry / style change (without a full re-render). */
+function updateObjLive(o, quiet) {
   const el = stage.querySelector(`.obj[data-id="${o.id}"]`); if (!el) return;
-  if (editing === o.id) {
-    Object.assign(el.style, {left: o.x + 'px', top: o.y + 'px', width: o.w + 'px'});
-    el.querySelector('.rot').style.transform = o.rot ? `rotate(${o.rot}deg)` : '';
-    txtStyle(el.querySelector('.txt'), o);
-  } else el.replaceWith(objEl(o, 'edit'));
-  if (o.type === 'text') measureTexts();
-  drawSelection(); drawBadges(); syncGeometryInputs(o); drawTableHandles();
+  const g = groupOf(o.id);
+  if (editing === o.id) { placeEl(el, o); txtStyle(el.querySelector('.txt'), o); }
+  else if (g) { const ge = stage.querySelector(`.obj[data-id="${g.id}"]`); fitGroup(g); ge?.replaceWith(objEl(g, 'edit')); }
+  else el.replaceWith(objEl(o, 'edit'));
+  if (isTextLike(o) || g) measureTexts();
+  if (!quiet) { drawSelection(); drawBadges(); syncGeometryInputs(o); drawTableHandles(); }
 }
 function select(id) {
-  if (sel === id) return;
-  sel = id; curAnim = null; drawSelection(); renderProps(); updateRibbon();
+  if (sel === id && selIds.length === 1) return;
+  setSel(id ? [id] : []); curAnim = null; drawSelection(); renderProps(); updateRibbon();
 }
 
 /* ================================================================== text editing (Matekos Doksi editor) */
 setTextHooks({onEdit: (pos, node) => openMath(pos, node), onRendered: onMathRendered, onPreview: p => showPreview(p)});
 function enterEdit(id, ev) {
-  const o = objById(id); if (!isText(o)) return;
-  if (sel !== id) { sel = id; curAnim = null; }
+  const o = objById(id); if (!isTextLike(o) || o.locked) return;
+  if (sel !== id) { setSel([id]); curAnim = null; }
   editing = id;
   const el = stage.querySelector(`.obj[data-id="${id}"]`), txt = el.querySelector('.txt');
-  txt.classList.remove('empty');
+  txt.classList.remove('empty'); el.classList.add('editing');
   ed = mountEditor(txt, o.doc, {
     onUpdate: () => { measureTexts(); drawSelection(); drawTableHandles(); },
     onSelection: () => { updateRibbon(); drawTableHandles(); drawMathCaret(); },
     onBlur: () => { drawMathCaret(); showPreview(null); }
-  });
+  }, kindOf(o));
   ed.view.dom.addEventListener('keydown', ke => { if (ke.key === 'Escape' && !isMathEditorOpen()) { ke.preventDefault(); exitEdit(); } });
   let pos = null;
   if (ev && ev.clientX != null) { const hit = ed.view.posAtCoords({left: ev.clientX, top: ev.clientY}); if (hit) pos = hit.pos; }
@@ -491,16 +558,16 @@ function exitEdit() {
   if (!o) { renderAll(); return; }
   const changed = JSON.stringify(r.json) !== JSON.stringify(o.doc);
   o.doc = r.json;
-  if (isEmptyText(o) && !o.placeholder) {
-    tgt().objects = tgt().objects.filter(q => q !== o);
+  if (isText(o) && isEmptyText(o) && !o.placeholder) {
+    const g = groupOf(o.id), list = g ? g.children : tgt().objects; list.splice(list.indexOf(o), 1); if (g) fitGroup(g);
     if (tgt().anims) tgt().anims = tgt().anims.filter(a => a.target !== o.id);
-    sel = null; commit(); return;
+    setSel([]); commit(); return;
   }
   if (changed) commit(); else renderAll();
 }
 /** Run a TipTap command on the selected text box: directly while editing, otherwise on its whole content. */
 function withEditor(fn) {
-  const o = selObj(); if (!isText(o)) return;
+  const o = selObj(); if (!isTextLike(o) || o.locked) return;
   if (editing === o.id) { fn(ed.chain().focus()); return; }
   if (mode === 'template' && o.placeholder) { toast('A helykitöltő formázását a menüszalag betű- és igazítás-gombjaival állíthatod.'); return; }
   enterEdit(o.id); ed.commands.selectAll(); fn(ed.chain().focus()); exitEdit();
@@ -509,7 +576,7 @@ function withEditor(fn) {
 function ensureEditing() {
   const o = selObj();
   if (editing) return true;
-  if (isText(o) && !(mode === 'template' && o.placeholder)) { enterEdit(o.id); ed.commands.focus('end'); return true; }
+  if (isTextLike(o) && !o.locked && !(mode === 'template' && o.placeholder)) { enterEdit(o.id); ed.commands.focus('end'); return true; }
   const n = addObject({type: 'text', name: nextName('Szöveg'), w: 760, size: 32, color: '#1a1a1a', align: 'left', doc: emptyDoc()});
   renderAll(); enterEdit(n.id); return true;
 }
@@ -604,30 +671,17 @@ function forCells(scope, fn) {
 function fillTableFields() {
   const c = curTable(); if (!c) return;
   const act = document.activeElement;
-  if (act !== $('#tpWidth')) $('#tpWidth').value = c.table.attrs.width || 100;
   const row = c.table.child(Math.min(c.rect.top, c.table.childCount - 1));
   if (act !== $('#tpRowH')) $('#tpRowH').value = row.attrs.height || '';
   const cell = c.table.nodeAt(c.map.map[c.rect.top * c.map.width + c.rect.left]);
   if (act !== $('#tpColW')) $('#tpColW').value = cell && cell.attrs.colwidth && cell.attrs.colwidth[0] ? Math.round(cell.attrs.colwidth[0] / MM * 10) / 10 : '';
   for (const b of $$('#tableBar [data-talign]')) b.classList.toggle('on', (c.table.attrs.align || 'left') === b.dataset.talign);
 }
-for (const id of ['#tpWidth', '#tpRowH', '#tpColW']) {
+for (const id of ['#tpRowH', '#tpColW']) {
   $(id).addEventListener('focus', rememberTable);
   $(id).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); e.target.dispatchEvent(new Event('change')); } });
 }
 function setTableAttrs(attrs) { const c = curTable(); if (!c) return; ed.view.dispatch(ed.state.tr.setNodeMarkup(c.pos, undefined, {...c.table.attrs, ...attrs})); reselectCells(curTable()); }
-$('#tpWidth').addEventListener('change', e => {
-  const pct = Math.max(10, Math.min(100, +e.target.value || 100)), c = curTable(); if (!c) return;
-  const tr = ed.state.tr; tr.setNodeMarkup(c.pos, undefined, {...c.table.attrs, width: pct === 100 ? null : pct});
-  const cells = []; let all = true, sum = 0;
-  c.table.firstChild.forEach(cell => { const w = cell.attrs.colwidth; if (!w || !w[0]) all = false; else sum += w.reduce((x, y) => x + (y || 0), 0); });
-  if (all && sum > 0) {
-    const k = (ed.view.dom.clientWidth * pct / 100) / sum;
-    c.table.descendants((n, rel) => { if (n.type.spec.tableRole?.includes('cell') && n.attrs.colwidth) cells.push([rel, n]); return !n.type.spec.tableRole?.includes('cell'); });
-    for (const [rel, n] of cells) tr.setNodeMarkup(c.start + rel, undefined, {...n.attrs, colwidth: n.attrs.colwidth.map(w => Math.round(w * k))});
-  }
-  ed.view.dispatch(tr); reselectCells(curTable());
-});
 $('#tpRowH').addEventListener('change', e => {
   const v = e.target.value === '' ? null : Math.max(3, +e.target.value), c = curTable(); if (!c) return;
   const tr = ed.state.tr; c.table.forEach((row, o, i) => { if (i >= c.rect.top && i < c.rect.bottom) tr.setNodeMarkup(c.start + o, undefined, {...row.attrs, height: v}); });
@@ -697,26 +751,39 @@ const tg = $('#tgrid');
 for (let r = 1; r <= 8; r++) for (let c = 1; c <= 8; c++) { const d = document.createElement('button'); d.className = 'tc'; d.dataset.r = r; d.dataset.c = c; d.setAttribute('aria-label', r + ' × ' + c); tg.appendChild(d); }
 const hl = (r, c) => { for (const d of tg.children) d.classList.toggle('on', +d.dataset.r <= r && +d.dataset.c <= c); $('#tlabel').textContent = r ? r + ' × ' + c + ' táblázat' : 'Válassz méretet'; };
 tg.addEventListener('pointerover', e => { const d = e.target.closest('.tc'); if (d) hl(+d.dataset.r, +d.dataset.c); });
-tg.addEventListener('click', e => { const d = e.target.closest('.tc'); if (!d) return; closePops(); ensureEditing(); ed.chain().focus().insertTable({rows: +d.dataset.r, cols: +d.dataset.c, withHeaderRow: false}).run(); });
+tg.addEventListener('click', e => { const d = e.target.closest('.tc'); if (!d) return; closePops(); addTable(+d.dataset.r, +d.dataset.c); });
 $('#popTable').onopen = () => hl(0, 0);
 
 /* ================================================================== inserting objects */
-function nextName(base) { return `${base} ${tgt().objects.filter(o => o.name?.startsWith(base)).length + 1}`; }
+function nextName(base) { return `${base} ${flatObjects(tgt().objects).filter(o => o.name?.startsWith(base)).length + 1}`; }
 function addObject(o) {
   const n = tgt().objects.length % 8;
-  o = {id: uid(), x: 300 + n * 20, y: 200 + n * 20, w: 400, h: 60, rot: 0, ...o};
-  tgt().objects.push(o); sel = o.id; return o;
+  o = {id: uid(), x: Math.round(W / 2 - (o.w ?? 400) / 2 + n * 20), y: Math.round(H / 2 - (o.h ?? 60) / 2 + n * 20), w: 400, h: 60, rot: 0, ...o};
+  tgt().objects.push(o); setSel([o.id]); curAnim = null; return o;
 }
+// default shapes are regular: square, circle, equilateral triangle
+const SHAPES = {
+  rect: {name: 'Téglalap', w: 200, h: 200, fill: '#d6eaf8', stroke: '#2f5d8a', strokeWidth: 3, radius: 0},
+  ellipse: {name: 'Ellipszis', w: 200, h: 200, fill: '#d6eaf8', stroke: '#2f5d8a', strokeWidth: 3},
+  triangle: {name: 'Háromszög', w: 220, h: Math.round(220 * Math.sqrt(3) / 2), fill: '#d6eaf8', stroke: '#2f5d8a', strokeWidth: 3},
+  arrow: {name: 'Nyíl', w: 80, h: 27, fill: '#2f5d8a', stroke: null, strokeWidth: 0},
+  line: {name: 'Vonal', w: 300, h: 20, fill: null, stroke: '#2f5d8a', strokeWidth: 4}
+};
 function addShape(shape) {
   if (editing) exitEdit();
-  const names = {rect: 'Téglalap', ellipse: 'Ellipszis', arrow: 'Nyíl'};
-  const base = shape === 'arrow' ? {w: 240, h: 80, fill: '#2f5d8a', stroke: null, strokeWidth: 0} : {w: 260, h: 170, fill: '#d6eaf8', stroke: '#2f5d8a', strokeWidth: 3, radius: 0};
-  addObject({type: 'shape', shape, name: nextName(names[shape]), ...base}); commit();
+  const {name, ...base} = SHAPES[shape];
+  addObject({type: 'shape', shape, name: nextName(name), ...base}); commit();
 }
 function addText() {
   if (editing) exitEdit();
   const o = addObject({type: 'text', name: nextName('Szöveg'), w: 620, size: 32, color: '#1a1a1a', align: 'left', doc: emptyDoc()});
   renderAll(); enterEdit(o.id);
+}
+function addTable(rows, cols) {
+  if (editing) exitEdit();
+  const w = Math.min(1100, Math.max(240, cols * 150));
+  const o = addObject({type: 'table', name: nextName('Táblázat'), w, h: rows * 50, size: 26.67, color: '#1a1a1a', align: 'left', doc: tableDoc(rows, cols)});
+  commit(); enterEdit(o.id);
 }
 let imageCb = null;
 function pickImage(cb) { imageCb = cb; $('#fImage').click(); }
@@ -738,50 +805,119 @@ function pickImageURL(maxSide, cb) {
   inp.click();
 }
 
+/* grouping, locking, deleting */
+function groupSelected() {
+  const objs = tgt().objects.filter(o => selIds.includes(o.id));
+  if (objs.length < 2) return;
+  if (editing) exitEdit();
+  const at = tgt().objects.indexOf(objs.at(-1));
+  const g = fitGroup({id: uid(), type: 'group', name: nextName('Csoport'), x: 0, y: 0, w: 1, h: 1, rot: 0, children: objs});
+  tgt().objects.splice(at, 1, g);
+  tgt().objects = tgt().objects.filter(o => !objs.includes(o));
+  // members are animated together with the group from now on
+  if (tgt().anims) tgt().anims = tgt().anims.filter(a => !objs.some(o => flatObjects([o]).some(q => q.id === a.target)));
+  setSel([g.id]); commit();
+}
+function ungroupSelected() {
+  const g = selObj(); if (g?.type !== 'group') return;
+  if (editing) exitEdit();
+  const list = tgt().objects, at = list.indexOf(g);
+  list.splice(at, 1, ...g.children);
+  if (tgt().anims) tgt().anims = tgt().anims.filter(a => a.target !== g.id);
+  setSel(g.children.map(c => c.id)); commit();
+}
+function toggleLock(id) {
+  const o = objById(id); if (!o) return;
+  if (editing === id) exitEdit();
+  o.locked = !o.locked || undefined; commit();
+}
+function deleteSelected() {
+  const ids = selIds.filter(id => !objById(id)?.locked); if (!ids.length) return;
+  for (const id of ids) {
+    const g = groupOf(id), list = g ? g.children : tgt().objects, o = objById(id);
+    if (o) list.splice(list.indexOf(o), 1);
+    if (g) { if (g.children.length) fitGroup(g); else tgt().objects.splice(tgt().objects.indexOf(g), 1); }
+  }
+  if (tgt().anims) tgt().anims = tgt().anims.filter(a => objById(a.target));
+  setSel([]); commit();
+}
+
 /* ================================================================== right panel */
 const props = $('#props');
 const fld = (label, html, full) => `<label class="fld${full ? ' full' : ''}">${label}${html}</label>`;
 const slider = (id, label, v, min, max, step = 1, dis = '') => `<div class="sl"><span>${label}</span><input type="range" id="${id}R" min="${min}" max="${max}" step="${step}" value="${v}" ${dis}><input type="number" id="${id}" min="${min}" max="${max}" step="${step}" value="${v}" ${dis}></div>`;
-function panelVisible(v) { mainEl.classList.toggle('noprops', !v); lsSet(LS.panel, v ? '1' : '0'); updateRibbon(); fitStage(); }
+function panelVisible(v) { mainEl.classList.toggle('noprops', !v); document.body.classList.toggle('noprops-on', !v); lsSet(LS.panel, v ? '1' : '0'); fitStage(); }
+$('#panelOpen').onclick = () => panelVisible(true);
+let secState = {}; try { secState = JSON.parse(lsGet(LS.sections) || '{}'); } catch (e) { secState = {}; }
+const section = (key, title, body) => `<section class="psec${secState[key] ? ' closed' : ''}" data-sec="${key}">
+  <button class="psec-h" data-sec-toggle="${key}" aria-expanded="${!secState[key]}">${svgIcon('chev')}<span>${title}</span></button><div class="psec-b">${body}</div></section>`;
+const TYPE_LABEL = {text: 'Szöveg', table: 'Táblázat', image: 'Kép', group: 'Csoport'};
+const typeIcon = o => o.type === 'shape' ? o.shape : o.type === 'group' ? 'group' : o.type === 'table' ? 'table' : o.type === 'image' ? 'image' : 'textbox';
+
+function positionBody() {
+  const objs = selIds.map(objById).filter(Boolean);
+  if (objs.length > 1) return `<div class="phint" style="margin:0">${objs.length} objektum kijelölve. Húzd bármelyiket a közös mozgatáshoz, vagy csoportosítsd őket a Rétegek résznél (Ctrl/⌘+G).</div>`;
+  const o = objs[0];
+  if (!o) return '<div class="phint" style="margin:0">Jelölj ki egy objektumot a dián vagy a Rétegek listában. Több objektum: Shift+kattintás, vagy húzz keretet az üres területen.</div>';
+  const round = Math.round, rot = o.rot > 180 ? o.rot - 360 : (o.rot || 0), lk = o.locked ? 'disabled' : '';
+  return `${o.locked ? `<div class="phint lockhint">${svgIcon('lock')} Zárolva – a Rétegek résznél oldható fel.</div>` : ''}
+    ${slider('pX', 'Vízszintes', round(o.x), -round(o.w) + 10, W - 10, 1, lk)}
+    ${slider('pY', 'Függőleges', round(o.y), -round(o.h) + 10, H - 10, 1, lk)}
+    ${slider('pW', 'Szélesség', round(o.w), 16, W, 1, lk)}
+    ${slider('pH', 'Magasság', round(o.h), 16, H, 1, isTextLike(o) || o.shape === 'line' ? 'disabled title="A magasság a tartalomhoz igazodik"' : lk)}
+    ${slider('pR', 'Elforgatás (°)', round(rot), -180, 180, 1, o.type === 'group' ? 'disabled title="Csoport nem forgatható – a tagjai igen"' : lk)}
+    ${o.type === 'shape' ? slider('pSW', o.shape === 'line' ? 'Vastagság (px)' : 'Körvonal (px)', o.stroke ? (o.strokeWidth || 0) : 0, o.shape === 'line' ? 1 : 0, 30, 1, lk) : ''}
+    ${o.shape === 'rect' ? slider('pRad', 'Lekerekítés', o.radius || 0, 0, Math.round(Math.min(o.w, o.h) / 2), 1, lk) : ''}
+    ${o.type === 'image' ? slider('pOp', 'Átlátszatlanság (%)', round((o.opacity ?? 1) * 100), 10, 100, 1, lk) : ''}
+    ${o.placeholder && mode === 'template' ? fld('Helykitöltő mintaszövege (csak szerkesztés közben látszik)', `<input type="text" id="pPrompt" value="${esc(o.prompt ?? '')}">`, true) : ''}
+    ${o.placeholder && mode === 'slides' ? `<div class="phint">${esc(phName(o.placeholder))} helykitöltő – helye és formája az elrendezést követi, amíg itt nem módosítod.</div>` : ''}`;
+}
+function layersBody() {
+  const objs = tgt().objects, one = selObj(), top = one && tgt().objects.includes(one);
+  const dis = top && !one.locked ? '' : 'disabled';
+  const multiTop = tgt().objects.filter(o => selIds.includes(o.id)).length > 1;
+  const rows = [...objs].reverse().map(o => `<div class="lyr${selIds.includes(o.id) ? ' on' : ''}${o.locked ? ' isl' : ''}" draggable="true" data-id="${o.id}">
+    <span class="grip">${svgIcon('grip')}</span>${svgIcon(typeIcon(o))}<span class="lname">${esc(o.name ?? TYPE_LABEL[o.type] ?? '')}${o.type === 'group' ? ` <small>(${o.children.length})</small>` : ''}</span>
+    <button class="lk${o.locked ? ' on' : ''}" data-lock="${o.id}" title="${o.locked ? 'Feloldás' : 'Zárolás: nem mozdítható, nem jelölhető ki a dián'}">${svgIcon(o.locked ? 'lock' : 'unlock')}</button></div>`).join('');
+  return `<div class="btnrow arr">
+      <button class="tb" data-arr="toFront" ${dis} title="Előtérbe hozás (legfelülre)">${svgIcon('toFront')}</button>
+      <button class="tb" data-arr="forward" ${dis} title="Előrébb hozás egy szinttel">${svgIcon('front')}</button>
+      <button class="tb" data-arr="backward" ${dis} title="Hátrébb küldés egy szinttel">${svgIcon('back')}</button>
+      <button class="tb" data-arr="toBack" ${dis} title="Háttérbe küldés (legalulra)">${svgIcon('toBack')}</button>
+      <span class="sp"></span>
+      <button class="tb" data-arr="group" ${multiTop ? '' : 'disabled'} title="Csoportosítás (Ctrl/⌘+G)">${svgIcon('group')}</button>
+      <button class="tb" data-arr="ungroup" ${one?.type === 'group' ? '' : 'disabled'} title="Csoport bontása (Ctrl/⌘+Shift+G)">${svgIcon('ungroup')}</button></div>
+    <div class="layers" id="layerList">${rows || '<div class="phint" style="margin:4px 0">Ezen a dián még nincs objektum.</div>'}</div>
+    <div class="phint">Legfelül az előtérben lévő. Húzással átrendezhető; Shift+kattintás: több kijelölése.</div>`;
+}
 function renderProps() {
   const o = selObj(); let h = '';
-  const head = t => `<div class="phead2"><b>${t}</b><button class="md-x" id="propsX" title="Panel bezárása" aria-label="Panel bezárása">×</button></div>`;
-  if (o) {
-    const round = Math.round, rot = o.rot > 180 ? o.rot - 360 : (o.rot || 0);
-    h += head(esc(o.name ?? 'Objektum'));
-    h += `<section><h3>Elhelyezés</h3>
-      ${slider('pX', 'Vízszintes', round(o.x), -round(o.w) + 10, W - 10)}
-      ${slider('pY', 'Függőleges', round(o.y), -round(o.h) + 10, H - 10)}
-      ${slider('pW', 'Szélesség', round(o.w), 16, W)}
-      ${slider('pH', 'Magasság', round(o.h), 16, H, 1, o.type === 'text' ? 'disabled title="A szövegdoboz magassága a tartalomhoz igazodik"' : '')}
-      ${slider('pR', 'Elforgatás (°)', round(rot), -180, 180)}
-      ${o.type === 'shape' ? slider('pSW', 'Körvonal (px)', o.stroke ? (o.strokeWidth || 0) : 0, 0, 30) : ''}
-      ${o.shape === 'rect' ? slider('pRad', 'Lekerekítés', o.radius || 0, 0, Math.round(Math.min(o.w, o.h) / 2)) : ''}
-      ${o.type === 'image' ? slider('pOp', 'Átlátszatlanság (%)', round((o.opacity ?? 1) * 100), 10, 100) : ''}
-      ${o.placeholder && mode === 'template' ? fld('Helykitöltő mintaszövege (csak szerkesztés közben látszik)', `<input type="text" id="pPrompt" value="${esc(o.prompt ?? '')}">`, true) : ''}
-      ${o.placeholder && mode === 'slides' ? `<div class="phint">${esc(phName(o.placeholder))} helykitöltő – helye és formája az elrendezést követi, amíg itt nem módosítod.</div>` : ''}
-      </section>`;
-  } else if (mode === 'slides') {
-    h += head(`${cur + 1}. dia`);
-    h += `<section><div class="phint" style="margin:0">Dupla kattintás egy szövegdobozon: szerkesztés. Képlet: írd <b>$…$</b> közé, vagy Ctrl/⌘+M. Bemásolt TeX-kód ($…$, \\(…\\)) magától képletté alakul.</div></section>`;
-  } else {
+  const title = selIds.length > 1 ? `${selIds.length} objektum` : o ? esc(o.name ?? TYPE_LABEL[o.type] ?? 'Objektum') : mode === 'slides' ? `${cur + 1}. dia` : tcur === 'master' ? 'Mester' : 'Elrendezés';
+  h += `<div class="phead2"><b>${title}</b><button class="tb" id="propsX" title="Jobb oldali panel bezárása">${svgIcon('panel')}</button></div>`;
+  if (mode === 'template' && !selIds.length) {
     const isM = tcur === 'master', L = tgt();
-    h += head(isM ? 'Mester' : 'Elrendezés');
     h += `<section><div class="fgrid">
       ${isM ? '' : fld('Név', `<input type="text" id="pName" value="${esc(L.name)}">`, true)}
       ${isM ? '' : `<label class="chk full"><input type="checkbox" id="pShowM" ${L.showMaster ? 'checked' : ''}> A mester elemeinek megjelenítése</label>`}
-      ${isM ? '' : `<label class="chk full"><input type="checkbox" id="pOwnBg" ${L.ownBg ? 'checked' : ''}> Saját háttér (a mesteré helyett)</label>`}</div></section>`;
-    if (isM || L.ownBg) h += `<section><h3>Háttér</h3><div class="fgrid">
+      ${isM ? '' : `<label class="chk full"><input type="checkbox" id="pOwnBg" ${L.ownBg ? 'checked' : ''}> Saját háttér (a mesteré helyett)</label>`}</div>`;
+    if (isM || L.ownBg) h += `<div class="fgrid" style="margin-top:10px">
       ${fld('Háttérszín', `<input type="color" id="pBgColor" value="${L.bgColor || '#ffffff'}">`)}
-      <div class="fld">Háttérkép<div class="imgpick">${L.background ? `<img src="${media[L.background]}" alt="">` : ''}<button class="btn" id="pBgPick">Kép…</button>${L.background ? '<button class="btn" id="pBgClear">Eltávolítás</button>' : ''}</div></div>
-      </div><div class="phint">A háttérkép kitölti a diát (1280×720 képpont, 16:9).</div></section>`;
-    h += `<section><div class="phint" style="margin:0">${isM ? 'Ami ide kerül (logó, lábléc, díszítés), minden elrendezésen megjelenik.' : 'Helykitöltőt a menüszalag „Helykitöltő” gombjával adhatsz hozzá. Az új diák ezeket kapják meg.'}</div></section>`;
+      <div class="fld">Háttérkép<div class="imgpick">${L.background ? `<img src="${media[L.background]}" alt="">` : ''}<button class="btn" id="pBgPick">Kép…</button>${L.background ? '<button class="btn" id="pBgClear">Eltávolítás</button>' : ''}</div></div></div>`;
+    h += `<div class="phint">${isM ? 'Ami a mesterre kerül (logó, lábléc, díszítés), minden elrendezésen megjelenik.' : 'Helykitöltőt a menüszalag „Helykitöltő” gombjával adhatsz hozzá.'}</div></section>`;
   }
-  if (mode === 'slides') h += animSection();
+  h += section('pos', 'Elhelyezés', positionBody());
+  h += section('layers', 'Rétegek', layersBody());
+  if (mode === 'slides') h += section('anim', 'Animációk', animBody());
   props.innerHTML = h;
   bindProps(o);
 }
+props.addEventListener('click', e => {
+  const t = e.target.closest('[data-sec-toggle]'); if (!t) return;
+  const k = t.dataset.secToggle; secState[k] = !secState[k]; lsSet(LS.sections, JSON.stringify(secState));
+  const sec = t.closest('.psec'); sec.classList.toggle('closed', !!secState[k]); t.setAttribute('aria-expanded', String(!secState[k]));
+});
 function syncGeometryInputs(o) {
+  if (o.id !== sel) return;
   const set = (id, v) => { for (const el of [$('#' + id), $('#' + id + 'R')]) if (el && document.activeElement !== el) el.value = Math.round(v); };
   set('pX', o.x); set('pY', o.y); set('pW', o.w); set('pH', o.h); set('pR', o.rot > 180 ? o.rot - 360 : (o.rot || 0));
 }
@@ -796,24 +932,54 @@ function bindProps(o) {
   on('pBgClear', 'click', () => { tgt().background = null; commit(); });
   on('pPrompt', 'change', e => { o.prompt = e.target.value; commit(); });
   if (o) {
+    let o0 = null;
     const SETTERS = {
-      pX: v => { o.x = v; }, pY: v => { o.y = v; }, pW: v => { o.w = Math.max(16, v); }, pH: v => { o.h = Math.max(16, v); },
-      pR: v => { o.rot = ((v % 360) + 360) % 360; }, pSW: v => { o.strokeWidth = Math.max(0, v); if (v > 0 && !o.stroke) o.stroke = '#2f5d8a'; if (!v) o.stroke = null; },
+      pX: v => moveObject(o, v - o.x, 0), pY: v => moveObject(o, 0, v - o.y),
+      pW: v => { if (o.type === 'group') { o0 ??= clone(o); scaleFrom(o, o0, Math.max(16, v) / o0.w, o0.x, o0.y); } else o.w = Math.max(16, v); },
+      pH: v => { if (o.type === 'group') { o0 ??= clone(o); scaleFrom(o, o0, Math.max(16, v) / o0.h, o0.x, o0.y); } else o.h = Math.max(16, v); },
+      pR: v => { o.rot = ((v % 360) + 360) % 360; }, pSW: v => { o.strokeWidth = Math.max(0, v); if (v > 0 && !o.stroke) o.stroke = '#2f5d8a'; if (!v && o.shape !== 'line') o.stroke = null; },
       pRad: v => { o.radius = Math.max(0, v); }, pOp: v => { o.opacity = v / 100; }
     };
     for (const [id, set] of Object.entries(SETTERS)) for (const suffix of ['', 'R']) {
       const el = $('#' + id + suffix); if (!el) continue;
       el.addEventListener('input', () => { const v = parseFloat(el.value); if (!isFinite(v)) return; set(v); const twin = $('#' + id + (suffix ? '' : 'R')); if (twin) twin.value = el.value; updateObjLive(o); });
-      el.addEventListener('change', () => { if (o.placeholder && mode === 'slides' && /p[XYWHR]$/.test(id)) o.phMoved = true; commit(); });
+      el.addEventListener('change', () => { o0 = null; if (o.placeholder && mode === 'slides' && /p[XYWHR]$/.test(id)) o.phMoved = true; commit(); });
     }
   }
-  bindAnims();
+  // layers
+  props.querySelectorAll('[data-arr]').forEach(b => b.onclick = () => ({toFront: () => reorder((i, n) => n), forward: () => reorder((i, n) => Math.min(n, i + 1)),
+    backward: () => reorder(i => Math.max(0, i - 1)), toBack: () => reorder(() => 0), group: groupSelected, ungroup: ungroupSelected})[b.dataset.arr]());
+  bindLayers();
+  if (mode === 'slides') bindAnims();
 }
-function deleteSelected() {
-  if (!sel) return;
-  tgt().objects = tgt().objects.filter(o => o.id !== sel);
-  if (tgt().anims) tgt().anims = tgt().anims.filter(a => a.target !== sel);
-  sel = null; commit();
+function reorder(fn) { const o = selObj(); if (!o || !tgt().objects.includes(o)) return; if (editing) syncEditor(); const a = tgt().objects, i = a.indexOf(o); a.splice(i, 1); a.splice(fn(i, a.length), 0, o); commit(); }
+let dragId = null;
+function bindLayers() {
+  const list = $('#layerList'); if (!list) return;
+  list.addEventListener('dragstart', e => { const r = e.target.closest('.lyr'); dragId = r?.dataset.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragId || ''); r?.classList.add('dragging'); });
+  list.addEventListener('dragend', () => { dragId = null; list.querySelectorAll('.lyr').forEach(r => r.classList.remove('dragging', 'above', 'below')); });
+  list.addEventListener('dragover', e => {
+    const r = e.target.closest('.lyr'); if (!r || !dragId) return; e.preventDefault();
+    const below = e.clientY > r.getBoundingClientRect().top + r.offsetHeight / 2;
+    list.querySelectorAll('.lyr').forEach(x => x.classList.remove('above', 'below'));
+    if (r.dataset.id !== dragId) r.classList.add(below ? 'below' : 'above');
+  });
+  list.addEventListener('drop', e => {
+    e.preventDefault(); const r = e.target.closest('.lyr'); if (!r || !dragId || r.dataset.id === dragId) return;
+    if (editing) syncEditor();
+    const below = r.classList.contains('below'), order = [...tgt().objects].reverse();
+    const moving = order.splice(order.findIndex(o => o.id === dragId), 1)[0];
+    order.splice(order.findIndex(o => o.id === r.dataset.id) + (below ? 1 : 0), 0, moving);
+    tgt().objects = order.reverse(); setSel([moving.id]); dragId = null; commit();
+  });
+  list.addEventListener('click', e => {
+    const lk = e.target.closest('[data-lock]'); if (lk) { toggleLock(lk.dataset.lock); return; }
+    const r = e.target.closest('.lyr'); if (!r) return;
+    if (editing) exitEdit();
+    const id = r.dataset.id;
+    if (e.shiftKey || e.ctrlKey || e.metaKey) setSel(selIds.includes(id) ? selIds.filter(x => x !== id) : [...selIds, id]); else setSel([id]);
+    curAnim = null; drawSelection(); renderProps(); updateRibbon();
+  });
 }
 
 /* animations: cards, timeline */
@@ -826,6 +992,7 @@ function addAnimation(effect, byParagraph) {
   if (editing) syncEditor();
   const a = {id: uid(), target: o.id, effect, trigger: 'click'};
   if (byParagraph && isText(o) && blockCount(o) > 1 && !o.rot) a.byParagraph = true;
+  if (groupOf(o.id)) return toast('Csoport tagja nem animálható külön – az egész csoportot animáld.');
   tgt().anims.push(a); curAnim = a.id; commit();
 }
 function timelineHTML(list) {
@@ -847,7 +1014,7 @@ function timelineHTML(list) {
   }
   return h + '</div>';
 }
-function animSection() {
+function animBody() {
   const s = tgt(), list = Anim.expand(s), rg = Anim.ranges(list), o = selObj();
   const rows = s.anims.map((a, i) => {
     const t = objById(a.target); if (!t) return '';
@@ -862,22 +1029,22 @@ function animSection() {
       ${canPara ? `<label class="chk opts"><input type="checkbox" data-k="byParagraph" ${a.byParagraph ? 'checked' : ''} ${t.rot ? 'disabled title="Elforgatott szövegdoboznál nem érhető el"' : ''}> Bekezdésenként</label>` : ''}
     </div>`;
   }).join('');
-  const dis = o ? '' : 'disabled title="Előbb jelölj ki egy objektumot"';
-  return `<section><h3>Animációk</h3>
-    <div class="btnrow addrow"><button class="btn" data-add="entr" ${dis} style="--c:${CLS_COLOR.entr}">+ Belépő</button><button class="btn" data-add="emph" ${dis} style="--c:${CLS_COLOR.emph}">+ Kiemelés</button><button class="btn" data-add="exit" ${dis} style="--c:${CLS_COLOR.exit}">+ Kilépő</button></div>
+  const dis = o ? '' : 'disabled title="Előbb jelölj ki egy objektumot (vagy csoportot)"';
+  return `<div class="btnrow addrow"><button class="btn" data-add="entr" ${dis} style="--c:${CLS_COLOR.entr}">+ Belépő</button><button class="btn" data-add="emph" ${dis} style="--c:${CLS_COLOR.emph}">+ Kiemelés</button><button class="btn" data-add="exit" ${dis} style="--c:${CLS_COLOR.exit}">+ Kilépő</button></div>
     ${s.anims.length ? `<h4>Idővonal</h4>${timelineHTML(list)}` : ''}
     <div class="anim-list" id="animList">${rows || '<div class="phint" style="margin-top:0">Ezen a dián nincs animáció.</div>'}</div>
-    <div class="btnrow"><button class="btn" id="aPlay">Lejátszás innen</button></div></section>`;
+    <div class="btnrow"><button class="btn" id="aPlay">Lejátszás innen</button><label class="chk"><input type="checkbox" id="aBadges" ${showBadges ? 'checked' : ''}> Sorszámok a dián</label></div>`;
 }
 function bindAnims() {
   const s = tgt();
   props.querySelectorAll('[data-add]').forEach(b => b.onclick = () => addAnimation(Anim.DEFAULT[b.dataset.add], false));
   $('#aPlay')?.addEventListener('click', () => startShow(cur));
+  $('#aBadges')?.addEventListener('change', e => { showBadges = e.target.checked; lsSet(LS.badges, showBadges ? '1' : '0'); drawBadges(); });
   props.querySelector('.tl')?.addEventListener('click', e => {
     const r = e.target.closest('.tl-row'); if (!r) return;
     const a = s.anims.find(x => x.id === r.dataset.id); if (!a) return;
     if (editing && editing !== a.target) exitEdit();
-    curAnim = a.id; sel = a.target; drawSelection(); renderProps(); updateRibbon();
+    curAnim = a.id; setSel([a.target]); drawSelection(); renderProps(); updateRibbon();
     props.querySelector(`.anim[data-id="${a.id}"]`)?.scrollIntoView({block: 'nearest'});
   });
   const list = $('#animList'); if (!list) return;
@@ -887,7 +1054,7 @@ function bindAnims() {
     if (act === 'up' && i > 0) { [s.anims[i - 1], s.anims[i]] = [s.anims[i], s.anims[i - 1]]; commit(); return; }
     if (act === 'down' && i < s.anims.length - 1) { [s.anims[i + 1], s.anims[i]] = [s.anims[i], s.anims[i + 1]]; commit(); return; }
     if (act === 'del') { s.anims.splice(i, 1); commit(); return; }
-    if (!e.target.closest('select, input, label')) { if (editing && editing !== s.anims[i].target) exitEdit(); curAnim = s.anims[i].id; sel = s.anims[i].target; drawSelection(); renderProps(); updateRibbon(); }
+    if (!e.target.closest('select, input, label')) { if (editing && editing !== s.anims[i].target) exitEdit(); curAnim = s.anims[i].id; setSel([s.anims[i].target]); drawSelection(); renderProps(); updateRibbon(); }
   });
   list.addEventListener('change', e => {
     const row = e.target.closest('.anim'), a = s.anims.find(x => x.id === row.dataset.id), k = e.target.dataset.k;
@@ -904,22 +1071,21 @@ function bindAnims() {
 /* ================================================================== ribbon */
 for (const b of $$('[data-icon]')) b.insertAdjacentHTML('afterbegin', svgIcon(b.dataset.icon));
 const styled = o => { if (o.placeholder && mode === 'slides') o.phStyled = true; };
-const inEdit = () => { const o = selObj(); return isText(o) && editing === o.id; };
+const inEdit = () => { const o = selObj(); return isTextLike(o) && editing === o.id; };
 /** Bold, italic, …: while editing on the selection (marks), otherwise on the whole box. */
 function boxOrMark(mark, boxKey) {
-  const o = selObj(); if (!isText(o)) return;
+  const o = selObj(); if (!isTextLike(o)) return;
   if (inEdit()) { const fn = 'toggle' + mark[0].toUpperCase() + mark.slice(1); ed.chain().focus()[fn]().run(); return; }
   o[boxKey] = !o[boxKey]; styled(o); commit();
 }
 function setAlign(a) {
-  const o = selObj(); if (!isText(o)) return;
+  const o = selObj(); if (!isTextLike(o)) return;
   if (inEdit()) { ed.chain().focus().setTextAlign(a).run(); return; }
   o.align = a; styled(o);
   // whole box: paragraph alignments set in the editor give way to the box alignment
   const strip = n => { if (n.attrs?.textAlign) n.attrs.textAlign = null; (n.content || []).forEach(strip); }; strip(o.doc);
   commit();
 }
-function reorder(fn) { const o = selObj(); if (!o) return; if (editing) syncEditor(); const a = tgt().objects, i = a.indexOf(o); a.splice(i, 1); a.splice(fn(i, a.length), 0, o); commit(); }
 const COMMANDS = {
   undo, redo,
   bold: () => boxOrMark('bold', 'bold'), italic: () => boxOrMark('italic', 'italic'),
@@ -930,11 +1096,8 @@ const COMMANDS = {
   indent: () => withEditor(c => ed.isActive('listItem') ? c.sinkListItem('listItem').run() : c.shiftIndent(1).run()),
   outdent: () => withEditor(c => ed.isActive('listItem') ? c.liftListItem('listItem').run() : c.shiftIndent(-1).run()),
   text: addText, math: () => openMath(null, null), image: () => pickImage(null),
-  rect: () => addShape('rect'), ellipse: () => addShape('ellipse'), arrow: () => addShape('arrow'),
-  toFront: () => reorder((i, n) => n), forward: () => reorder((i, n) => Math.min(n, i + 1)), backward: () => reorder(i => Math.max(0, i - 1)), toBack: () => reorder(() => 0),
-  delete: () => { if (editing) stopEditor(); deleteSelected(); },
-  badges: () => { showBadges = !showBadges; lsSet(LS.badges, showBadges ? '1' : '0'); drawBadges(); updateRibbon(); },
-  panel: () => panelVisible(mainEl.classList.contains('noprops'))
+  rect: () => addShape('rect'), ellipse: () => addShape('ellipse'), triangle: () => addShape('triangle'), arrow: () => addShape('arrow'), line: () => addShape('line'),
+  delete: () => { if (editing) { const id = editing; exitEdit(); if (!objById(id)) return; } deleteSelected(); }
 };
 const ribbon = $('#ribbon');
 ribbon.addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
@@ -944,9 +1107,18 @@ ribbon.addEventListener('click', e => {
   COMMANDS[b.dataset.cmd]?.();
 });
 $('#styleSel').addEventListener('change', e => { const v = e.target.value; withEditor(c => (v === 'p' ? c.setParagraph() : c.setHeading({level: +v[1]})).run()); });
+/** Remove explicit font sizes from the text (they would override the box size – e.g. on pasted text and formulas). */
+function stripFontSizes(json) {
+  const walk = n => { if (n.marks) { n.marks.forEach(m => { if (m.type === 'textStyle' && m.attrs) m.attrs.fontSize = null; });
+    n.marks = n.marks.filter(m => m.type !== 'textStyle' || Object.values(m.attrs || {}).some(v => v != null)); if (!n.marks.length) delete n.marks; }
+    (n.content || []).forEach(walk); };
+  walk(json); return json;
+}
 const setSize = v => {
-  const p = parseFloat(String(v).replace(',', '.')), o = selObj(); if (!isText(o) || !(p > 0 && p < 400)) return;
+  const p = parseFloat(String(v).replace(',', '.')), o = selObj(); if (!isTextLike(o) || !(p > 0 && p < 400)) return;
   if (inEdit() && !ed.state.selection.empty) { ed.chain().focus().setFontSize(p + 'pt').run(); return; }
+  if (inEdit()) { ed.commands.setContent(stripFontSizes(ed.getJSON()), {emitUpdate: false}); }
+  else stripFontSizes(o.doc);
   o.size = Math.round(p / PT * 100) / 100; styled(o); commit();
 };
 $('#sizeIn').addEventListener('change', e => setSize(e.target.value));
@@ -955,20 +1127,21 @@ $('#sizeIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preve
 function updateRibbon() {
   const o = selObj(), edit = inEdit();
   for (const b of $$('[data-k]', ribbon)) {
-    const k = b.dataset.k; b.disabled = k === 'any' ? !o : k === 'text' ? !isText(o) : !isShape(o);
+    const k = b.dataset.k; b.disabled = k === 'any' ? !selIds.length : k === 'text' ? !isTextLike(o) || !!o.locked : !isShape(o) || !!o.locked;
   }
-  $('#sizeIn').disabled = !isText(o);
+  $('#sizeIn').disabled = !isTextLike(o);
+  if (o?.shape === 'line') ribbon.querySelector('[data-pop=popFill]').disabled = true;
   ribbon.querySelector('[data-cmd=undo]').disabled = !edit && hIdx <= 0;
   ribbon.querySelector('[data-cmd=redo]').disabled = !edit && hIdx >= history.length - 1;
-  const act = (m, box) => isText(o) && (edit ? ed.isActive(m) : !!o[box]);
+  const act = (m, box) => isTextLike(o) && (edit ? ed.isActive(m) : !!o[box]);
   for (const [c, m] of [['bold', 'bold'], ['italic', 'italic'], ['underline', 'underline'], ['strike', 'strike']]) ribbon.querySelector(`[data-cmd=${c}]`).classList.toggle('on', act(m, c));
   ribbon.querySelector('[data-cmd=superscript]').classList.toggle('on', edit && ed.isActive('superscript'));
   ribbon.querySelector('[data-cmd=subscript]').classList.toggle('on', edit && ed.isActive('subscript'));
   ribbon.querySelector('[data-cmd=bulletList]').classList.toggle('on', edit && ed.isActive('bulletList'));
   ribbon.querySelector('[data-cmd=orderedList]').classList.toggle('on', edit && ed.isActive('orderedList'));
   for (const [c, a] of [['alignLeft', 'left'], ['alignCenter', 'center'], ['alignRight', 'right'], ['alignJustify', 'justify']])
-    ribbon.querySelector(`[data-cmd=${c}]`).classList.toggle('on', isText(o) && (edit && ed.isActive({textAlign: a}) || (!edit || !['left', 'center', 'right', 'justify'].some(x => ed.isActive({textAlign: x}))) && o.align === a));
-  if (isText(o)) {
+    ribbon.querySelector(`[data-cmd=${c}]`).classList.toggle('on', isTextLike(o) && (edit && ed.isActive({textAlign: a}) || (!edit || !['left', 'center', 'right', 'justify'].some(x => ed.isActive({textAlign: x}))) && o.align === a));
+  if (isTextLike(o)) {
     let size = o.size * PT, color = o.color;
     if (edit) { try { const d = ed.view.domAtPos(ed.state.selection.from), el = d.node.nodeType === 1 ? d.node : d.node.parentElement; if (el && ed.view.dom.contains(el)) { const cs = getComputedStyle(el); size = parseFloat(cs.fontSize) * PT; color = cs.color; } } catch (e) { /* ignore */ } }
     if (document.activeElement !== $('#sizeIn')) $('#sizeIn').value = Math.round(size * 2) / 2;
@@ -978,9 +1151,6 @@ function updateRibbon() {
   $('#styleSel').disabled = !isText(o);
   $('#fillBar').style.background = isShape(o) ? (o.fill || 'transparent') : '#c9d1da';
   $('#strokeBar').style.background = isShape(o) ? (o.stroke || 'transparent') : '#c9d1da';
-  ribbon.querySelector('[data-pop=popAnim]').disabled = !o || mode !== 'slides';
-  ribbon.querySelector('[data-cmd=badges]').classList.toggle('on', showBadges);
-  ribbon.querySelector('[data-cmd=panel]').classList.toggle('on', !mainEl.classList.contains('noprops'));
   $('#bTpl').classList.toggle('primary', mode === 'template');
   $('#bTpl').textContent = mode === 'template' ? 'Sablon bezárása' : 'Sablon';
   if (!edit || !ed?.isActive('table')) $('#tableBar').hidden = true;
@@ -1011,7 +1181,7 @@ function swatches(box, colors, onPick, noneLabel) {
 }
 const TEXT_COLORS = ['#111111', '#5d6875', '#c0392b', '#d35400', '#b7950b', '#1e8449', '#117a65', '#1f5f74', '#2e4a9e', '#7d3c98', '#ad1457'];
 swatches($('#swText'), TEXT_COLORS, c => {
-  const o = selObj(); if (!isText(o)) return;
+  const o = selObj(); if (!isTextLike(o)) return;
   if (inEdit() && !ed.state.selection.empty) { ed.chain().focus().setColor(c).run(); return; }
   o.color = c; styled(o); commit();
 });
@@ -1020,7 +1190,7 @@ swatches($('#swCell'), ['#e8eef5', '#eaf4e4', '#fdf3d7', '#f9e1e1', '#ece6f5', '
 swatches($('#swBorder'), ['#7d8590', '#111111', '#1f5f74', '#2e4a9e', '#c0392b', '#1e8449', '#b7950b'], c => forCells(borderScope === 'table' ? 'table' : 'cells', () => ({borderColor: c === 'none' ? null : c})), 'Alapértelmezett');
 swatches($('#swFill'), ['#d6eaf8', '#dbe9ee', '#eaf4e4', '#fdf3d7', '#f9e1e1', '#ece6f5', '#eeeeee', '#f6d365', '#2f5d8a', '#1f5f74', '#1e8449', '#c0392b', '#d35400', '#ffffff', '#111111'],
   c => { const o = selObj(); if (isShape(o)) { o.fill = c === 'none' ? null : c; commit(); } }, 'Nincs kitöltés');
-swatches($('#swStroke'), TEXT_COLORS, c => { const o = selObj(); if (!isShape(o)) return; o.stroke = c === 'none' ? null : c; if (o.stroke && !o.strokeWidth) o.strokeWidth = 3; commit(); }, 'Nincs körvonal');
+swatches($('#swStroke'), TEXT_COLORS, c => { const o = selObj(); if (!isShape(o)) return; o.stroke = c === 'none' ? (o.shape === 'line' ? o.stroke : null) : c; if (o.stroke && !o.strokeWidth) o.strokeWidth = 3; commit(); }, 'Nincs körvonal');
 $('#bwStroke').innerHTML = [1, 2, 3, 4, 6, 8].map(w => `<button class="pitem" data-w="${w}">${w} px</button>`).join('');
 $('#bwStroke').onclick = e => { const b = e.target.closest('button'), o = selObj(); if (!b || !isShape(o)) return; o.strokeWidth = +b.dataset.w; if (!o.stroke) o.stroke = '#2f5d8a'; closePops(); commit(); };
 $('#popStroke').onopen = () => { const o = selObj(); for (const b of $('#bwStroke').children) b.classList.toggle('on', isShape(o) && !!o.stroke && +b.dataset.w === o.strokeWidth); };
@@ -1046,39 +1216,7 @@ $('#popPara').onopen = () => {
 };
 $('#popPara').addEventListener('change', e => { const k = e.target.dataset.pf; if (!k) return; const v = e.target.type === 'checkbox' ? e.target.checked : (e.target.value === '' ? null : +e.target.value); withEditor(c => c.setParaAttrs({[k]: v}).run()); });
 
-/* object order list */
-const TYPE_ICON = {text: 'textbox', image: 'image'};
-function renderLayers() {
-  const list = $('#layerList'), objs = tgt().objects;
-  if (!objs.length) { list.innerHTML = '<div class="phint" style="margin:4px">Ezen a dián még nincs objektum.</div>'; return; }
-  list.innerHTML = [...objs].reverse().map(o => `<div class="lyr${o.id === sel ? ' on' : ''}" draggable="true" data-id="${o.id}">
-    <span class="grip">${svgIcon('grip')}</span>${svgIcon(o.type === 'shape' ? o.shape : TYPE_ICON[o.type])}<span class="lname">${esc(o.name ?? '')}</span></div>`).join('');
-}
-$('#popLayers').onopen = renderLayers;
-const layerList = $('#layerList'); let dragId = null;
-layerList.addEventListener('dragstart', e => { const r = e.target.closest('.lyr'); dragId = r?.dataset.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragId); r?.classList.add('dragging'); });
-layerList.addEventListener('dragend', () => { dragId = null; layerList.querySelectorAll('.lyr').forEach(r => r.classList.remove('dragging', 'above', 'below')); });
-layerList.addEventListener('dragover', e => {
-  const r = e.target.closest('.lyr'); if (!r || !dragId) return; e.preventDefault();
-  const below = e.clientY > r.getBoundingClientRect().top + r.offsetHeight / 2;
-  layerList.querySelectorAll('.lyr').forEach(x => x.classList.remove('above', 'below'));
-  if (r.dataset.id !== dragId) r.classList.add(below ? 'below' : 'above');
-});
-layerList.addEventListener('drop', e => {
-  e.preventDefault(); const r = e.target.closest('.lyr'); if (!r || !dragId || r.dataset.id === dragId) return;
-  if (editing) syncEditor();
-  const below = r.classList.contains('below'), order = [...tgt().objects].reverse();
-  const moving = order.splice(order.findIndex(o => o.id === dragId), 1)[0];
-  order.splice(order.findIndex(o => o.id === r.dataset.id) + (below ? 1 : 0), 0, moving);
-  tgt().objects = order.reverse(); sel = moving.id; dragId = null; commit(); renderLayers();
-});
-layerList.addEventListener('click', e => { const r = e.target.closest('.lyr'); if (r) { if (editing) exitEdit(); select(r.dataset.id); renderLayers(); } });
-
 /* animation gallery, placeholders, template builder */
-$('#animGal').innerHTML = Object.entries(Anim.CLASSES).map(([c, label]) => `<div class="acol"><div class="ptitle" style="color:${CLS_COLOR[c]}">${label}</div>${
-  Object.entries(Anim.EFFECTS).filter(([, e]) => e.cls === c).map(([k, e]) => `<button class="pitem" data-eff="${k}">${e.label}</button>`).join('')}</div>`).join('');
-$('#animGal').onclick = e => { const b = e.target.closest('[data-eff]'); if (!b) return; closePops(); addAnimation(b.dataset.eff, $('#animByPara').checked); };
-$('#popAnim').onopen = () => { const o = selObj(), ok = isText(o) && blockCount(o) > 1 && !o.rot; $('#animByPara').disabled = !ok; if (!ok) $('#animByPara').checked = false; };
 $('#popPh').addEventListener('click', e => {
   const b = e.target.closest('[data-ph]'); closePops();
   if (!b || mode !== 'template' || tcur === 'master') { if (b && tcur === 'master') toast('Helykitöltő csak elrendezésre tehető.'); return; }
@@ -1087,7 +1225,7 @@ $('#popPh').addEventListener('click', e => {
   while (L.objects.some(o => o.placeholder === key)) key = b.dataset.ph + n++;
   const def = {title: [60, 40, 1160, 33, '#2f5d8a', true, TITLE_PROMPT], subtitle: [240, 380, 800, 22, '#4a5866', false, 'Alcím'], body: [60, 150, 1160, 22, '#1a1a1a', false, 'Szöveg']}[b.dataset.ph];
   const o = ph(key, def[0], def[1] + (n > 2 ? 40 : 0), def[2], def[3], def[4], def[5], 'left', def[6]);
-  L.objects.push(o); sel = o.id; commit();
+  L.objects.push(o); setSel([o.id]); commit();
 });
 $('#bTpl').onclick = () => mode === 'template' ? closeTemplateBuilder() : openTemplateBuilder();
 
@@ -1196,7 +1334,7 @@ async function doSave(saveAs) {
 }
 function loadDocument(d, m, name, path) {
   doc = d; media = m; if (name) doc.title = doc.title || name.replace(/\.mprezi$/i, '');
-  mode = 'slides'; cur = 0; sel = null; curAnim = null; setCurrentPath(path ?? null);
+  mode = 'slides'; cur = 0; setSel([]); curAnim = null; setCurrentPath(path ?? null);
   resetHistory(); renderAll(); fitStage();
 }
 async function openResult(r) {
@@ -1255,29 +1393,33 @@ addEventListener('keydown', e => {
   if (mod && k === 'm') { e.preventDefault(); openMath(null, null); return; }
   if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (mod && k === 'y') { e.preventDefault(); redo(); return; }
-  if (mod && 'biu'.includes(k) && isText(selObj())) { e.preventDefault(); COMMANDS[{b: 'bold', i: 'italic', u: 'underline'}[k]](); return; }
+  if (mod && 'biu'.includes(k) && isTextLike(selObj())) { e.preventDefault(); COMMANDS[{b: 'bold', i: 'italic', u: 'underline'}[k]](); return; }
+  if (mod && k === 'a') { e.preventDefault(); setSel(tgt().objects.filter(q => !q.locked).map(q => q.id)); drawSelection(); renderProps(); updateRibbon(); return; }
+  if (mod && k === 'g') { e.preventDefault(); e.shiftKey ? ungroupSelected() : groupSelected(); return; }
   const o = selObj();
   if (mod && k === 'c' && o) { clipboard = clone(o); return; }
   if (mod && (k === 'v' || k === 'd') && (clipboard || o)) {
     const c = clone(k === 'd' ? o : clipboard); if (!c) return; e.preventDefault();
-    c.id = uid(); c.x += 20; c.y += 20; delete c.placeholder; tgt().objects.push(c); sel = c.id; if (k === 'v') clipboard = clone(c); commit(); return;
+    const reid = q => { q.id = uid(); if (q.children) q.children.forEach(reid); }; reid(c);
+    moveObject(c, 20, 20); delete c.placeholder; delete c.locked; tgt().objects.push(c); setSel([c.id]); if (k === 'v') clipboard = clone(c); commit(); return;
   }
-  if ((k === 'delete' || k === 'backspace') && o) { e.preventDefault(); deleteSelected(); return; }
+  if ((k === 'delete' || k === 'backspace') && selIds.length) { e.preventDefault(); deleteSelected(); return; }
   if (k === 'escape') { select(null); return; }
-  if (k === 'enter' && isText(o) && !(mode === 'template' && o.placeholder)) { e.preventDefault(); enterEdit(o.id); return; }
-  if (o && k.startsWith('arrow')) {
+  if (k === 'enter' && isTextLike(o) && !o.locked && !(mode === 'template' && o.placeholder)) { e.preventDefault(); enterEdit(o.id); return; }
+  if (selIds.length && k.startsWith('arrow')) {
     e.preventDefault(); const d = e.shiftKey ? 10 : 1;
-    if (k === 'arrowleft') o.x -= d; if (k === 'arrowright') o.x += d; if (k === 'arrowup') o.y -= d; if (k === 'arrowdown') o.y += d;
-    if (o.placeholder && mode === 'slides') o.phMoved = true;
-    updateObjLive(o); clearTimeout(nudgeT); nudgeT = setTimeout(commit, 400); return;
+    const dx = k === 'arrowleft' ? -d : k === 'arrowright' ? d : 0, dy = k === 'arrowup' ? -d : k === 'arrowdown' ? d : 0;
+    for (const q of selIds.map(objById)) { if (!q || q.locked) continue; moveObject(q, dx, dy); if (q.placeholder && mode === 'slides') q.phMoved = true; updateObjLive(q, true); }
+    drawSelection(); drawBadges(); if (o) syncGeometryInputs(o);
+    clearTimeout(nudgeT); nudgeT = setTimeout(commit, 400); return;
   }
-  if (!mod && !e.altKey) { if (k === 't') addText(); else if (k === 'r') addShape('rect'); else if (k === 'e') addShape('ellipse'); else if (k === 'a') addShape('arrow'); }
+  if (!mod && !e.altKey) { if (k === 't') addText(); else if (k === 'r') addShape('rect'); else if (k === 'e') addShape('ellipse'); else if (k === 'a') addShape('arrow'); else if (k === 'l') addShape('line'); }
 });
 addEventListener('beforeunload', e => { if (dirty && !isTauri()) e.preventDefault(); });
 
 /* ================================================================== start */
 (async function init() {
-  if (lsGet(LS.panel) === '0') mainEl.classList.add('noprops');
+  if (lsGet(LS.panel) === '0') { mainEl.classList.add('noprops'); document.body.classList.add('noprops-on'); }
   const saved = await loadAutosave();
   if (saved?.doc) { try { doc = migrate(saved.doc); media = saved.media || {}; doc.title = saved.title || doc.title; } catch (e) { demoDoc(); } }
   else demoDoc();
@@ -1291,6 +1433,6 @@ addEventListener('beforeunload', e => { if (dirty && !isTauri()) e.preventDefaul
 })();
 
 // hooks for automated tests
-window.mprezi = {get doc() { return doc; }, get media() { return media; }, get editor() { return ed; }, get sel() { return sel; }, set sel(v) { select(v); },
+window.mprezi = {get doc() { return doc; }, get media() { return media; }, get editor() { return ed; }, get sel() { return sel; }, set sel(v) { select(v); }, get selIds() { return selIds; }, setSel: ids => { setSel(ids); drawSelection(); renderProps(); updateRibbon(); }, groupSelected, ungroupSelected, addShape, addTable, toggleLock,
   gotoSlide, enterEdit, exitEdit, commit, renderAll, buildPptx: () => buildPptx(doc, renderSlide, layoutOf, () => {}),
   buildPdf: m => buildPdf(doc, renderSlide, layoutOf, m, () => {}), renderSlide, packMprezi, unpackMprezi, loadDocument, Anim};

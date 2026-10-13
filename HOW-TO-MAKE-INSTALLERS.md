@@ -8,7 +8,7 @@ You only do this once per new version.
 2. Click **+** (top right) → **New repository**. Name it `matekos-prezi`.
    Choose **Public** (then your peers can download without an account), and click **Create repository**.
 3. On the next page click **uploading an existing file**.
-4. Unzip `matekos-prezi-0.1-source.zip`, open the `matekos-prezi` folder, select **everything inside it**
+4. Unzip `matekos-prezi-0.2-source.zip`, open the `matekos-prezi` folder, select **everything inside it**
    and drag it into the browser window. Wait until all files are listed, then click **Commit changes**.
 
 ## 2. Add the build recipe
@@ -25,8 +25,8 @@ Folders starting with a dot are often hidden, so add this one by hand:
 
 ## 4. Share
 Open **Releases** (right side of the repository's main page). The newest release has:
-* `Matekos.Prezi_0.1.0_x64-setup.exe` – Windows installer wizard
-* `Matekos.Prezi_0.1.0_universal.dmg` – Mac (Apple Silicon and Intel)
+* `Matekos.Prezi_0.2.0_x64-setup.exe` – Windows installer wizard
+* `Matekos.Prezi_0.2.0_universal.dmg` – Mac (Apple Silicon and Intel)
 
 Send your peers the link to that Releases page. The installation steps are written there in Hungarian and English.
 

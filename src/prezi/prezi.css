@@ -87,13 +87,13 @@
 .tpl{ pointer-events:none; }
 
 /* selection frame (counter-scaled like Doksi's #imgFrame) */
-#sel{ position:absolute; pointer-events:none; outline:calc(1.5px * var(--inv)) solid var(--sel); }
-#sel .h{ position:absolute; width:calc(12px * var(--inv)); height:calc(12px * var(--inv)); background:#fff;
+.self{ position:absolute; pointer-events:none; outline:calc(1.5px * var(--inv)) solid var(--sel); }
+.self .h{ position:absolute; width:calc(12px * var(--inv)); height:calc(12px * var(--inv)); background:#fff;
   border:calc(1.5px * var(--inv)) solid var(--sel); border-radius:2px; pointer-events:auto; transform:translate(-50%, -50%); touch-action:none; }
-#sel .h.move{ top:calc(-30px * var(--inv)); left:50%; width:calc(24px * var(--inv)); height:calc(24px * var(--inv)); border-radius:50%;
+.self .h.move{ top:calc(-30px * var(--inv)); left:50%; width:calc(24px * var(--inv)); height:calc(24px * var(--inv)); border-radius:50%;
   cursor:move; display:grid; place-items:center; color:var(--sel); }
-#sel .h.move svg{ width:72%; height:72%; }
-#sel .stem{ position:absolute; left:50%; top:calc(-18px * var(--inv)); height:calc(18px * var(--inv)); border-left:calc(1.5px * var(--inv)) solid var(--sel); }
+.self .h.move svg{ width:72%; height:72%; }
+.self .stem{ position:absolute; left:50%; top:calc(-18px * var(--inv)); height:calc(18px * var(--inv)); border-left:calc(1.5px * var(--inv)) solid var(--sel); }
 .guide{ position:absolute; background:#e0367a; pointer-events:none; }
 
 /* animation badges */
@@ -170,7 +170,7 @@ body.tplmode .slideonly{ display:none !important; }
 .txt.empty::before{ content:attr(data-prompt); position:absolute; left:8px; top:8px; right:8px; color:#9aa6b2; pointer-events:none; }
 .obj.text .ProseMirror[contenteditable="true"]{ cursor:text; }
 .obj.text .ProseMirror[contenteditable="false"], .obj.text .ProseMirror:not([contenteditable]){ cursor:default; user-select:none; }
-#sel.editing{ outline-style:dashed; }
+.self.editing{ outline-style:dashed; }
 /* slide list: actions right below the current slide */
 .slide-actions{ display:flex; gap:2px; margin:-4px 0 10px 22px; padding:3px; border:1px solid var(--line); border-radius:7px; background:var(--chrome-2); width:max-content; max-width:100%; }
 .slide-actions .tb{ height:28px; min-width:28px; font-size:12.5px; font-weight:500; padding:0 6px; gap:3px; }
@@ -196,3 +196,47 @@ body.tplmode .slideonly{ display:none !important; }
 #tblHandles{ position:absolute; left:0; top:0; z-index:6; }
 #stage #fcaret{ position:absolute; z-index:5; width:0; border-left:1.5px solid #111; animation:fblink 1.06s steps(1) infinite; pointer-events:none; }
 
+
+/* selection frames */
+.self.multi{ outline-style:dashed; outline-width:calc(1px * var(--inv)); }
+.self.all{ outline:calc(1px * var(--inv)) dashed var(--sel); outline-offset:calc(4px * var(--inv)); }
+.self.locked{ outline-style:dotted; }
+.marquee{ position:absolute; border:calc(1px * var(--inv)) solid var(--sel); background:rgba(47,111,219,.08); pointer-events:none; z-index:7; }
+.obj.locked{ pointer-events:none; }
+/* table objects: the object box is the table itself */
+.obj.table .txt{ padding:0; }
+.obj.table .txt > .ProseMirror > .tableWrapper{ padding-bottom:0; }
+.obj.table:not(.editing) .txt{ cursor:pointer; }
+/* right panel: collapsible sections */
+#props .psec{ padding:0; }
+.psec-h{ display:flex; align-items:center; gap:6px; width:100%; border:0; background:none; color:var(--ink); font:600 13px var(--ui); padding:11px 14px; cursor:pointer; text-align:left; }
+.psec-h:hover{ background:var(--hover); }
+.psec-h svg{ width:15px; height:15px; transition:transform .15s; }
+.psec.closed .psec-h svg{ transform:rotate(-90deg); }
+.psec-b{ padding:2px 14px 14px; }
+.psec.closed .psec-b{ display:none; }
+@media (prefers-reduced-motion: reduce){ .psec-h svg{ transition:none; } }
+.phead2 .tb{ min-width:30px; height:30px; }
+.phead2 .tb svg{ width:17px; height:17px; }
+.lockhint{ display:flex; align-items:center; gap:6px; margin:0 0 8px; }
+.lockhint svg{ width:14px; height:14px; }
+.arr{ align-items:center; gap:2px; margin-bottom:8px; }
+.arr .tb{ min-width:30px; height:30px; padding:0 5px; }
+.arr .tb svg{ width:17px; height:17px; }
+.arr .sp{ flex:1; }
+#props .layers{ width:auto; max-height:300px; }
+.lyr .lk{ border:0; background:none; color:var(--ink-2); width:24px; height:24px; border-radius:4px; display:grid; place-items:center; cursor:pointer; opacity:.45; padding:0; }
+.lyr:hover .lk,.lyr .lk.on{ opacity:1; }
+.lyr .lk.on{ color:var(--accent); }
+.lyr .lk:hover{ background:var(--hover); }
+.lyr.isl .lname{ color:var(--ink-2); }
+.lyr .lname small{ color:var(--ink-2); font-weight:400; }
+.btnrow .chk{ margin-left:auto; font-size:12.5px; }
+/* re-open button for the right panel */
+.main{ position:relative; }
+.panelopen{ position:absolute; right:12px; top:10px; z-index:8; display:none !important; background:var(--chrome-2); border:1px solid var(--line); box-shadow:var(--shadow); }
+.main.noprops .panelopen{ display:inline-flex !important; }
+.panelopen svg{ width:18px; height:18px; }
+/* table toolbar floats over the workspace only (never over the side panels) */
+.ctxbar{ left:calc(var(--lw, 176px) + 6px); right:300px; border-left:1px solid var(--line); border-right:1px solid var(--line); border-radius:0 0 8px 8px; }
+body.noprops-on .ctxbar{ right:0; }

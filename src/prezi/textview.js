@@ -2,6 +2,7 @@
 // pasted TeX, formula editor), tables and lists. A box that is not being edited is drawn from the same
 // document with the same HTML, CSS and MathJax rendering, so it looks exactly like the live editor.
 import { Editor, generateHTML } from '@tiptap/core';
+import Document from '@tiptap/extension-document';
 import StarterKit from '@tiptap/starter-kit';
 import { TextStyle, Color, FontSize } from '@tiptap/extension-text-style';
 import TextAlign from '@tiptap/extension-text-align';
@@ -16,18 +17,21 @@ import { emptyDoc } from './model.js';
 const hooks = {onEdit: null, onRendered: null, onPreview: null};
 export function setTextHooks(h) { Object.assign(hooks, h); }
 
-function extensions() {
+/** kind 'text': text boxes (no tables); kind 'table': table objects (the document is exactly one table). */
+function extensions(kind = 'text') {
+  const table = kind === 'table';
   return [
     StarterKit.configure({
-      heading: {levels: [1, 2, 3]}, code: false, codeBlock: false, blockquote: false, horizontalRule: false,
-      link: false, bulletList: false, orderedList: false, listItem: false, dropcursor: {color: '#2f6fdb', width: 2}
+      heading: table ? false : {levels: [1, 2, 3]}, code: false, codeBlock: false, blockquote: false, horizontalRule: false,
+      link: false, bulletList: false, orderedList: false, listItem: false, dropcursor: {color: '#2f6fdb', width: 2},
+      ...(table ? {document: false} : {})
     }),
+    ...(table ? [Document.extend({content: 'table'}), KvTable, KvTableRow, KvTableHeader, KvTableCell] : []),
     ListItem, KvBulletList, KvOrderedList, ListMarkers,
     TextStyle, Color, FontSize,
     Highlight.configure({multicolor: true}),
-    TextAlign.configure({types: ['heading', 'paragraph']}),
+    TextAlign.configure({types: table ? ['paragraph'] : ['heading', 'paragraph']}),
     Subscript, Superscript,
-    KvTable, KvTableRow, KvTableHeader, KvTableCell,
     ParaFormat,
     MathNode.configure({
       onEdit: (pos, node) => hooks.onEdit?.(pos, node),
@@ -36,7 +40,7 @@ function extensions() {
     })
   ];
 }
-const STATIC_EXT = extensions();
+const STATIC_EXT = {text: extensions('text'), table: extensions('table')};
 
 /* ---------- list markers for the static view (same output as the ListMarkers plugin) ---------- */
 function ordinal(n, style) {
@@ -72,10 +76,10 @@ function addMarkers(root, depth = 0) {
 }
 
 /** Draw a text document into `host` (a .txt element) without an editor. Returns the content element. */
-export function renderStatic(host, json, onRendered) {
+export function renderStatic(host, json, onRendered, kind = 'text') {
   const pm = document.createElement('div'); pm.className = 'ProseMirror';
   let html = '';
-  try { html = generateHTML(json || emptyDoc(), STATIC_EXT); } catch (e) { html = '<p></p>'; }
+  try { html = generateHTML(json || emptyDoc(), STATIC_EXT[kind]); } catch (e) { html = kind === 'table' ? '' : '<p></p>'; }
   pm.innerHTML = html;
   for (const t of pm.querySelectorAll(':scope > table')) { const w = document.createElement('div'); w.className = 'tableWrapper'; t.replaceWith(w); w.appendChild(t); }
   addMarkers(pm);
@@ -99,11 +103,11 @@ export function pieceEls(txt) {
 export function mathPending(root) { return !!root.querySelector('.math .mpending:not(.merr)'); }
 
 /** Live editor inside a text box. */
-export function mountEditor(host, json, {onUpdate, onSelection, onFocus, onBlur} = {}) {
+export function mountEditor(host, json, {onUpdate, onSelection, onFocus, onBlur} = {}, kind = 'text') {
   host.innerHTML = '';
   return new Editor({
     element: host,
-    extensions: extensions(),
+    extensions: extensions(kind),
     content: json || emptyDoc(),
     editorProps: {
       attributes: {spellcheck: 'true', lang: 'hu'},

@@ -27,6 +27,7 @@ export const Anim = (() => {
     return o.type === 'text' && !o.rot && blockCount(o) > 1 && slide.anims.some(a => a.target === o.id && a.byParagraph);
   }
   function pieceKeys(slide, o) {
+    if (o.type === 'group') return o.children.flatMap(c => pieceKeys(slide, c));
     return splitsByParagraph(slide, o) ? Array.from({length: blockCount(o)}, (_, i) => `${o.id}#${i}`) : [o.id];
   }
   /** One entry per animated piece. Whole-object animations on a split box drive all its pieces together. */

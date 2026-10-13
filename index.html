@@ -62,11 +62,13 @@
     <div class="grp">
       <button class="tb" data-cmd="text" data-icon="textbox" title="Szövegdoboz (T)"><span class="lbl">Szövegdoboz</span></button>
       <button class="tb" data-cmd="math" data-icon="sigma" title="Képlet (Ctrl/⌘+M) – vagy írd $…$ közé a szövegben"><span class="lbl">Képlet</span></button>
-      <button class="tb" data-pop="popTable" data-icon="table" title="Táblázat beszúrása"></button>
+      <button class="tb" data-pop="popTable" data-icon="table" title="Táblázat beszúrása (önálló objektumként)"></button>
       <button class="tb" data-cmd="image" data-icon="image" title="Kép beszúrása"></button>
       <button class="tb" data-cmd="rect" data-icon="rect" title="Téglalap (R)"></button>
       <button class="tb" data-cmd="ellipse" data-icon="ellipse" title="Ellipszis (E)"></button>
+      <button class="tb" data-cmd="triangle" data-icon="triangle" title="Háromszög"></button>
       <button class="tb" data-cmd="arrow" data-icon="arrow" title="Nyíl (A)"></button>
+      <button class="tb" data-cmd="line" data-icon="line" title="Vonal (L)"></button>
       <button class="tb tplonly" data-pop="popPh" data-icon="placeholder" title="Helykitöltő hozzáadása az elrendezéshez"><span class="lbl">Helykitöltő</span></button>
     </div>
     <div class="grp">
@@ -74,20 +76,9 @@
       <button class="tb cbtn" data-pop="popStroke" data-k="shape" data-icon="stroke" title="Körvonal: szín és vastagság"><i class="cbar" id="strokeBar"></i></button>
     </div>
     <div class="grp">
-      <button class="tb" data-cmd="toFront" data-k="any" data-icon="toFront" title="Előtérbe hozás (legfelülre)"></button>
-      <button class="tb" data-cmd="forward" data-k="any" data-icon="front" title="Előrébb hozás egy szinttel"></button>
-      <button class="tb" data-cmd="backward" data-k="any" data-icon="back" title="Hátrébb küldés egy szinttel"></button>
-      <button class="tb" data-cmd="toBack" data-k="any" data-icon="toBack" title="Háttérbe küldés (legalulra)"></button>
-      <button class="tb" data-pop="popLayers" data-icon="layers" title="Objektumok sorrendje – húzással átrendezhető"><span class="lbl">Sorrend</span></button>
       <button class="tb" data-cmd="delete" data-k="any" data-icon="trash" title="Törlés (Delete)"></button>
     </div>
-    <div class="grp slideonly">
-      <button class="tb" data-pop="popAnim" data-k="any" data-icon="star" title="Animáció hozzáadása a kijelölt objektumhoz"><span class="lbl">Animáció</span></button>
-      <button class="tb" data-cmd="badges" data-icon="eye" title="Animációs sorszámok mutatása / elrejtése a dián"></button>
-    </div>
-    <div class="grp">
-      <button class="tb" data-cmd="panel" data-icon="panel" title="Jobb oldali panel megjelenítése / elrejtése"></button>
-    </div>
+
   </div>
   <div class="ctxbar" id="tableBar" hidden>
     <span class="ctxlabel">Táblázat</span>
@@ -102,7 +93,6 @@
     <button class="tb" data-pop="popCell" data-icon="fill" title="Cella kitöltőszíne"></button>
     <button class="tb" data-pop="popBorders" data-icon="borders" title="Cellaszegélyek: elrejtés, vastagság, szín"></button>
     <span class="ctxsep"></span>
-    <label class="tsz" data-icon="tWidth" title="Táblázat szélessége (a szövegszélesség %-ában)"><input type="number" id="tpWidth" min="10" max="100" step="5">%</label>
     <label class="tsz" data-icon="rowH" title="A kijelölt sorok magassága (üres = automatikus)"><input type="number" id="tpRowH" min="3" step="1" placeholder="auto">mm</label>
     <label class="tsz" data-icon="colW" title="A kijelölt oszlopok szélessége (üres = automatikus)"><input type="number" id="tpColW" min="5" step="1" placeholder="auto">mm</label>
     <span class="ctxsep"></span>
@@ -117,6 +107,7 @@
   <div class="lsplit" id="lsplit" title="Húzd a panel szélességének állításához" role="separator" aria-orientation="vertical"></div>
   <main id="work" class="ws"><div id="stageWrap"><div id="stage" class="slide"></div></div></main>
   <aside id="props" aria-label="Tulajdonságok"></aside>
+  <button class="tb panelopen" id="panelOpen" data-icon="panel" title="Jobb oldali panel megnyitása"></button>
 </div>
 
 <!-- popovers: text and table tools as in Matekos Doksi -->
@@ -194,22 +185,12 @@
   <div class="ptitle">Helykitöltő hozzáadása</div>
   <button class="pitem" data-ph="title">Cím</button><button class="pitem" data-ph="subtitle">Alcím</button><button class="pitem" data-ph="body">Szöveg</button>
 </div>
-<div class="pop" id="popLayers" hidden>
-  <div class="ptitle">Objektumok sorrendje – legfelül az előtérben lévő. Húzással átrendezhető.</div>
-  <div class="layers" id="layerList"></div>
-</div>
-<div class="pop" id="popAnim" hidden>
-  <div class="agal" id="animGal"></div>
-  <label class="chk" style="margin:8px 4px 2px"><input type="checkbox" id="animByPara"> Szövegnél bekezdésenként</label>
-</div>
+
+
 <div class="pop" id="popNewSlide" hidden>
   <div class="ptitle">Új dia ezzel az elrendezéssel</div>
   <div class="lgal" id="lgalNew"></div>
-  <div class="psep"></div>
-  <div class="ptitle">Az aktuális dia elrendezése</div>
-  <div id="layoutList"></div>
-  <div class="psep"></div>
-  <button class="pitem" id="resetPh">Helykitöltők visszaállítása az elrendezés szerint</button>
+
 </div>
 <div class="pop" id="popExport" hidden>
   <div class="ptitle">Exportálás</div>
