@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Matekos Prezi</title>
+</head>
+<body>
+<header class="app" id="app">
+  <div class="bar1">
+    <div class="brand" id="brand" title="Matekos Prezi"><span class="logo">P</span><span class="bname">Matekos Prezi</span></div>
+    <input id="docTitle" class="title" value="Névtelen bemutató" aria-label="Bemutató címe">
+    <span id="status" class="status"></span>
+    <div class="spacer"></div>
+    <button class="btn" id="bNew">Új</button>
+    <button class="btn" id="bOpen" title="Matekos Prezi bemutató megnyitása (Ctrl/⌘+O)">Megnyitás</button>
+    <button class="btn primary" id="bSave" title="Mentés (Ctrl/⌘+S)">Mentés</button>
+    <button class="btn" id="bExport" title="Exportálás PowerPoint-bemutatóba vagy PDF-be">Exportálás</button>
+    <button class="btn" id="bTpl" title="Sablonszerkesztő: mester és elrendezések (mint a PowerPoint diaminta-nézete)">Sablon</button>
+    <button class="btn" id="bPlay" title="Lejátszás az aktuális diától (F5)">Lejátszás</button>
+    <select id="zoomSel" class="sel" title="Nagyítás" aria-label="Nagyítás">
+      <option value="auto">Illesztés</option><option value="50">50%</option><option value="75">75%</option><option value="100">100%</option><option value="125">125%</option><option value="150">150%</option>
+    </select>
+  </div>
+  <div class="ribbon" id="ribbon">
+    <div class="grp">
+      <button class="tb" data-cmd="undo" data-icon="undo" title="Visszavonás (Ctrl/⌘+Z)"></button>
+      <button class="tb" data-cmd="redo" data-icon="redo" title="Mégis (Ctrl/⌘+Shift+Z)"></button>
+    </div>
+    <div class="grp">
+      <select id="styleSel" class="sel style" title="Bekezdésstílus" aria-label="Bekezdésstílus" data-k="text">
+        <option value="p">Normál</option><option value="h1">Címsor 1</option><option value="h2">Címsor 2</option><option value="h3">Címsor 3</option>
+      </select>
+      <input id="sizeIn" class="sel size" list="sizeList" inputmode="decimal" title="Betűméret (pt)" aria-label="Betűméret" value="24">
+      <datalist id="sizeList"><option value="12"><option value="14"><option value="16"><option value="18"><option value="20"><option value="24"><option value="28"><option value="32"><option value="36"><option value="40"><option value="44"><option value="54"><option value="60"><option value="72"></datalist>
+    </div>
+    <div class="grp">
+      <button class="tb" data-cmd="bold" data-k="text" title="Félkövér (Ctrl/⌘+B) – szerkesztés közben a kijelölésre, egyébként az egész dobozra"><b>B</b></button>
+      <button class="tb" data-cmd="italic" data-k="text" title="Dőlt (Ctrl/⌘+I)"><i class="ital">I</i></button>
+      <button class="tb" data-cmd="underline" data-k="text" title="Aláhúzott (Ctrl/⌘+U)"><u>U</u></button>
+      <button class="tb" data-cmd="strike" data-k="text" title="Áthúzott"><s>S</s></button>
+      <button class="tb" data-cmd="superscript" data-k="text" title="Felső index">x²</button>
+      <button class="tb" data-cmd="subscript" data-k="text" title="Alsó index">x₂</button>
+      <button class="tb cbtn" data-pop="popColor" data-k="text" data-icon="colorA" title="Betűszín"><i class="cbar" id="colorBar"></i></button>
+      <button class="tb cbtn" data-pop="popHi" data-k="text" data-icon="marker" title="Kijelölt szöveg kiemelése"><i class="cbar" style="background:#fff176"></i></button>
+    </div>
+    <div class="grp">
+      <button class="tb" data-cmd="alignLeft" data-k="text" data-icon="alignL" title="Balra igazítás"></button>
+      <button class="tb" data-cmd="alignCenter" data-k="text" data-icon="alignC" title="Középre zárás"></button>
+      <button class="tb" data-cmd="alignRight" data-k="text" data-icon="alignR" title="Jobbra igazítás"></button>
+      <button class="tb" data-cmd="alignJustify" data-k="text" data-icon="alignJ" title="Sorkizárt"></button>
+    </div>
+    <div class="grp">
+      <button class="tb" data-cmd="bulletList" data-k="text" data-icon="bul" title="Felsorolás"></button>
+      <button class="tb mini" data-pop="popBullet" data-k="text" data-icon="chev" title="Felsorolásjel: szimbólum vagy kép"></button>
+      <button class="tb" data-cmd="orderedList" data-k="text" data-icon="num" title="Számozott lista"></button>
+      <button class="tb mini" data-pop="popNum" data-k="text" data-icon="chev" title="Számozás stílusa"></button>
+      <button class="tb" data-cmd="outdent" data-k="text" data-icon="outdent" title="Behúzás csökkentése (listában Shift+Tab)"></button>
+      <button class="tb" data-cmd="indent" data-k="text" data-icon="indent" title="Behúzás növelése (listában Tab)"></button>
+      <button class="tb" data-pop="popLine" data-k="text" data-icon="lineH" title="Sorköz"></button>
+    </div>
+    <div class="grp">
+      <button class="tb" data-cmd="text" data-icon="textbox" title="Szövegdoboz (T)"><span class="lbl">Szövegdoboz</span></button>
+      <button class="tb" data-cmd="math" data-icon="sigma" title="Képlet (Ctrl/⌘+M) – vagy írd $…$ közé a szövegben"><span class="lbl">Képlet</span></button>
+      <button class="tb" data-pop="popTable" data-icon="table" title="Táblázat beszúrása"></button>
+      <button class="tb" data-cmd="image" data-icon="image" title="Kép beszúrása"></button>
+      <button class="tb" data-cmd="rect" data-icon="rect" title="Téglalap (R)"></button>
+      <button class="tb" data-cmd="ellipse" data-icon="ellipse" title="Ellipszis (E)"></button>
+      <button class="tb" data-cmd="arrow" data-icon="arrow" title="Nyíl (A)"></button>
+      <button class="tb tplonly" data-pop="popPh" data-icon="placeholder" title="Helykitöltő hozzáadása az elrendezéshez"><span class="lbl">Helykitöltő</span></button>
+    </div>
+    <div class="grp">
+      <button class="tb cbtn" data-pop="popFill" data-k="shape" data-icon="fill" title="Kitöltés"><i class="cbar" id="fillBar"></i></button>
+      <button class="tb cbtn" data-pop="popStroke" data-k="shape" data-icon="stroke" title="Körvonal: szín és vastagság"><i class="cbar" id="strokeBar"></i></button>
+    </div>
+    <div class="grp">
+      <button class="tb" data-cmd="toFront" data-k="any" data-icon="toFront" title="Előtérbe hozás (legfelülre)"></button>
+      <button class="tb" data-cmd="forward" data-k="any" data-icon="front" title="Előrébb hozás egy szinttel"></button>
+      <button class="tb" data-cmd="backward" data-k="any" data-icon="back" title="Hátrébb küldés egy szinttel"></button>
+      <button class="tb" data-cmd="toBack" data-k="any" data-icon="toBack" title="Háttérbe küldés (legalulra)"></button>
+      <button class="tb" data-pop="popLayers" data-icon="layers" title="Objektumok sorrendje – húzással átrendezhető"><span class="lbl">Sorrend</span></button>
+      <button class="tb" data-cmd="delete" data-k="any" data-icon="trash" title="Törlés (Delete)"></button>
+    </div>
+    <div class="grp slideonly">
+      <button class="tb" data-pop="popAnim" data-k="any" data-icon="star" title="Animáció hozzáadása a kijelölt objektumhoz"><span class="lbl">Animáció</span></button>
+      <button class="tb" data-cmd="badges" data-icon="eye" title="Animációs sorszámok mutatása / elrejtése a dián"></button>
+    </div>
+    <div class="grp">
+      <button class="tb" data-cmd="panel" data-icon="panel" title="Jobb oldali panel megjelenítése / elrejtése"></button>
+    </div>
+  </div>
+  <div class="ctxbar" id="tableBar" hidden>
+    <span class="ctxlabel">Táblázat</span>
+    <button class="tb wide" data-pop="popTblIns" data-icon="tblAdd" title="Sorok vagy oszlopok beszúrása"><span class="lbl">Beszúrás ▾</span></button>
+    <button class="tb wide" data-pop="popTblDel" data-icon="tblDel" title="Sorok, oszlopok vagy a táblázat törlése"><span class="lbl">Törlés ▾</span></button>
+    <button class="tb" data-tbl="mergeOrSplit" data-icon="merge" title="Cellák egyesítése / felosztása"></button>
+    <span class="ctxsep"></span>
+    <button class="tb" data-valign="top" data-icon="vtop" title="Cellatartalom felülre"></button>
+    <button class="tb" data-valign="middle" data-icon="vmid" title="Cellatartalom középre"></button>
+    <button class="tb" data-valign="bottom" data-icon="vbot" title="Cellatartalom alulra"></button>
+    <span class="ctxsep"></span>
+    <button class="tb" data-pop="popCell" data-icon="fill" title="Cella kitöltőszíne"></button>
+    <button class="tb" data-pop="popBorders" data-icon="borders" title="Cellaszegélyek: elrejtés, vastagság, szín"></button>
+    <span class="ctxsep"></span>
+    <label class="tsz" data-icon="tWidth" title="Táblázat szélessége (a szövegszélesség %-ában)"><input type="number" id="tpWidth" min="10" max="100" step="5">%</label>
+    <label class="tsz" data-icon="rowH" title="A kijelölt sorok magassága (üres = automatikus)"><input type="number" id="tpRowH" min="3" step="1" placeholder="auto">mm</label>
+    <label class="tsz" data-icon="colW" title="A kijelölt oszlopok szélessége (üres = automatikus)"><input type="number" id="tpColW" min="5" step="1" placeholder="auto">mm</label>
+    <span class="ctxsep"></span>
+    <button class="tb" data-talign="left" data-icon="tAlignL" title="Táblázat balra"></button>
+    <button class="tb" data-talign="center" data-icon="tAlignC" title="Táblázat középen"></button>
+    <button class="tb" data-talign="right" data-icon="tAlignR" title="Táblázat jobbra"></button>
+  </div>
+</header>
+
+<div class="main" id="main">
+  <nav id="slides" aria-label="Diák"></nav>
+  <div class="lsplit" id="lsplit" title="Húzd a panel szélességének állításához" role="separator" aria-orientation="vertical"></div>
+  <main id="work" class="ws"><div id="stageWrap"><div id="stage" class="slide"></div></div></main>
+  <aside id="props" aria-label="Tulajdonságok"></aside>
+</div>
+
+<!-- popovers: text and table tools as in Matekos Doksi -->
+<div class="pop" id="popColor" hidden><div class="ptitle">Betűszín</div><div class="swg" id="swText"></div></div>
+<div class="pop" id="popHi" hidden><div class="ptitle">Kijelölt szöveg kiemelése</div><div class="swg" id="swHi"></div></div>
+<div class="pop" id="popBorders" hidden>
+  <div class="ptitle">Cellaszegélyek</div>
+  <div class="seg2"><button class="pitem on" data-scope="cells">Kijelölt cellák</button><button class="pitem" data-scope="table">Teljes táblázat</button></div>
+  <div class="ptitle" style="margin-top:8px">Vastagság</div>
+  <div class="bwg">
+    <button class="pitem" data-bw="0">Nincs (rejtett)</button><button class="pitem" data-bw="0.5">0.5 pt</button><button class="pitem" data-bw="0.75">0.75 pt</button>
+    <button class="pitem" data-bw="1">1 pt</button><button class="pitem" data-bw="1.5">1.5 pt</button><button class="pitem" data-bw="2.25">2.25 pt</button>
+  </div>
+  <div class="ptitle" style="margin-top:8px">Szín</div>
+  <div class="swg" id="swBorder"></div>
+</div>
+<div class="pop" id="popCell" hidden><div class="ptitle">Cellakitöltés</div><div class="swg" id="swCell"></div></div>
+<div class="pop" id="popBullet" hidden>
+  <div class="ptitle">Felsorolásjel</div>
+  <div class="bulg" id="bulGrid"></div>
+  <div class="prow"><input id="bulCustom" maxlength="3" placeholder="✱" aria-label="Saját szimbólum"><button class="btn" id="bulCustomBtn">Szimbólum használata</button></div>
+  <div class="prow"><button class="btn" id="bulPicBtn">Kép mint felsorolásjel…</button><label class="mini-l">Méret <input type="number" id="bulPicSize" min="0.4" max="3" step="0.1" value="0.9"> em</label></div>
+  <div class="psep"></div>
+  <button class="pitem" data-bul="">Hagyományos pötty</button>
+  <button class="pitem" data-bul="none">Lista megszüntetése</button>
+</div>
+<div class="pop" id="popNum" hidden>
+  <div class="ptitle">Számozás</div>
+  <button class="pitem" data-num="decimal">1. 2. 3.</button>
+  <button class="pitem" data-num="decimal-paren">1) 2) 3)</button>
+  <button class="pitem" data-num="lower-alpha">a) b) c)</button>
+  <button class="pitem" data-num="upper-alpha">A. B. C.</button>
+  <button class="pitem" data-num="lower-roman">i. ii. iii.</button>
+  <button class="pitem" data-num="upper-roman">I. II. III.</button>
+</div>
+<div class="pop" id="popLine" hidden>
+  <div class="ptitle">Sorköz</div>
+  <div id="lineList"></div>
+  <div class="psep"></div>
+  <button class="pitem" id="openPara">Behúzások és bekezdésköz…</button>
+</div>
+<div class="pop" id="popPara" hidden>
+  <div class="ptitle">Kijelölt bekezdések</div>
+  <div class="pf">
+    <label>Bal behúzás (cm)<input type="number" step="0.25" data-pf="indentLeft"></label>
+    <label>Jobb behúzás (cm)<input type="number" step="0.25" data-pf="indentRight"></label>
+    <label>Első sor (cm)<input type="number" step="0.25" data-pf="firstLine"></label>
+    <label>Sorköz<input type="number" step="0.05" min="0.8" data-pf="lineHeight"></label>
+    <label>Térköz előtte (pt)<input type="number" step="1" min="0" data-pf="spaceBefore"></label>
+    <label>Térköz utána (pt)<input type="number" step="1" min="0" data-pf="spaceAfter"></label>
+  </div>
+  <label class="chk" style="margin-top:8px"><input type="checkbox" data-pf="keepNext"> Együtt a következő bekezdéssel</label>
+  <div class="phint">Negatív első sor érték függő behúzást ad.</div>
+</div>
+<div class="pop" id="popTblIns" hidden>
+  <button class="pitem" data-tbl="addRowBefore">Sor fölé</button>
+  <button class="pitem" data-tbl="addRowAfter">Sor alá</button>
+  <button class="pitem" data-tbl="addColumnBefore">Oszlop balra</button>
+  <button class="pitem" data-tbl="addColumnAfter">Oszlop jobbra</button>
+</div>
+<div class="pop" id="popTblDel" hidden>
+  <button class="pitem" data-tbl="deleteRow">Sor törlése</button>
+  <button class="pitem" data-tbl="deleteColumn">Oszlop törlése</button>
+  <div class="psep"></div>
+  <button class="pitem" data-tbl="deleteTable">Táblázat törlése</button>
+</div>
+<div class="pop" id="popTable" hidden><div class="tgrid" id="tgrid"></div><div class="tlabel" id="tlabel">Válassz méretet</div></div>
+<!-- popovers: Prezi -->
+<div class="pop" id="popFill" hidden><div class="ptitle">Kitöltés</div><div class="swg" id="swFill"></div></div>
+<div class="pop" id="popStroke" hidden>
+  <div class="ptitle">Körvonal színe</div><div class="swg" id="swStroke"></div>
+  <div class="ptitle" style="margin-top:8px">Vastagság</div><div class="bwg" id="bwStroke"></div>
+</div>
+<div class="pop" id="popPh" hidden>
+  <div class="ptitle">Helykitöltő hozzáadása</div>
+  <button class="pitem" data-ph="title">Cím</button><button class="pitem" data-ph="subtitle">Alcím</button><button class="pitem" data-ph="body">Szöveg</button>
+</div>
+<div class="pop" id="popLayers" hidden>
+  <div class="ptitle">Objektumok sorrendje – legfelül az előtérben lévő. Húzással átrendezhető.</div>
+  <div class="layers" id="layerList"></div>
+</div>
+<div class="pop" id="popAnim" hidden>
+  <div class="agal" id="animGal"></div>
+  <label class="chk" style="margin:8px 4px 2px"><input type="checkbox" id="animByPara"> Szövegnél bekezdésenként</label>
+</div>
+<div class="pop" id="popNewSlide" hidden>
+  <div class="ptitle">Új dia ezzel az elrendezéssel</div>
+  <div class="lgal" id="lgalNew"></div>
+  <div class="psep"></div>
+  <div class="ptitle">Az aktuális dia elrendezése</div>
+  <div id="layoutList"></div>
+  <div class="psep"></div>
+  <button class="pitem" id="resetPh">Helykitöltők visszaállítása az elrendezés szerint</button>
+</div>
+<div class="pop" id="popExport" hidden>
+  <div class="ptitle">Exportálás</div>
+  <button class="pitem" id="expPptx">PowerPoint-bemutató (.pptx) – működő animációkkal</button>
+  <button class="pitem" id="expPdf">PDF – diánként egy oldal (a dia végső állapota)</button>
+  <button class="pitem" id="expPdfSteps">PDF – lépésenként egy oldal (minden kattintás új oldal)</button>
+  <div class="phint" style="margin:4px 8px">A szövegek és képletek pontosan úgy jelennek meg, ahogy itt látszanak, betűtípus telepítése nélkül.</div>
+</div>
+
+<div class="mprev" id="mprev" hidden></div>
+<div class="busy" id="busy" hidden><div id="busyMsg">Folyamatban…</div></div>
+<div class="mathdlg" id="mathDlg" hidden role="dialog" aria-label="Képletszerkesztő"></div>
+<div id="show"><div class="info"></div></div>
+<div id="toast" role="status"></div>
+<input type="file" id="fImage" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" hidden>
+<input type="file" id="pickIn" accept="image/*" hidden>
+<input type="file" id="openIn" accept=".mprezi" hidden>
+<script type="module" src="/src/prezi/main.js"></script>
+</body>
+</html>

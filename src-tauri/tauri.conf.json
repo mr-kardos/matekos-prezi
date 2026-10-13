@@ -1,0 +1,72 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Matekos Prezi",
+  "version": "0.1.0",
+  "identifier": "hu.matekosprezi.editor",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Matekos Prezi",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 600,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": [
+          "mprezi"
+        ],
+        "name": "Matekos Prezi bemutató",
+        "description": "Matekos Prezi bemutató",
+        "role": "Editor",
+        "mimeType": "application/x-matekos-prezi"
+      }
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "Hungarian",
+          "English"
+        ],
+        "displayLanguageSelector": true,
+        "startMenuFolder": "Matekos Prezi",
+        "customLanguageFiles": {
+          "Hungarian": "installer/hungarian.nsh"
+        }
+      }
+    },
+    "shortDescription": "Bemutatókészítő élő TeX-képletekkel, PowerPoint- és PDF-exporttal",
+    "publisher": "Matekos Prezi"
+  }
+}
