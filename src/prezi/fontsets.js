@@ -17,14 +17,41 @@ export const FONT_SETS = {
   dejavu:  {label: 'DejaVu Serif',          text: 'dejavu',  math: 'dejavu',  note: 'széles, erős, kis méretben is jó'},
 };
 export const DEFAULT_FONT = 'bonum';
+/** Other text fonts (no math version): all four styles, Hungarian letters checked; subset to Latin/Greek/symbols. */
+export const OTHER_FONTS = {
+  liberationsans: 'Liberation Sans (Arial-szerű)', carlito: 'Carlito (Calibri-szerű)', caladea: 'Caladea (Cambria-szerű)',
+  liberationmono: 'Liberation Mono (Courier-szerű)', roboto: 'Roboto', opensans: 'Open Sans', lato: 'Lato', montserrat: 'Montserrat',
+  inter: 'Inter', notosans: 'Noto Sans', notoserif: 'Noto Serif', libertine: 'Linux Libertine', ubuntu: 'Ubuntu',
+  atkinson: 'Atkinson Hyperlegible', comicneue: 'Comic Neue', jetbrains: 'JetBrains Mono'
+};
+/** All text families: key -> label. Math-capable ones first (key = the text family of a font set). */
+export function allFamilies() {
+  const math = [], seen = new Set();
+  for (const f of Object.values(FONT_SETS)) if (!seen.has(f.text)) { seen.add(f.text); math.push([f.text, f.label]); }
+  return {math, other: Object.entries(OTHER_FONTS)};
+}
+export const familyLabel = fam => { for (const f of Object.values(FONT_SETS)) if (f.text === fam) return f.label; return OTHER_FONTS[fam] ?? fam; };
+export const familyCSS = fam => `'MP ${fam}'`;
+/** Family key from a computed CSS font-family ("MP lato", serif …). */
+export const familyFromCSS = css => (String(css).match(/MP ([a-z0-9]+)/) || [])[1] || null;
+/** Register every family with the browser; the files are fetched only when a family is actually used. */
+export function registerAllFamilies() {
+  const {math, other} = allFamilies();
+  for (const [fam] of [...math, ...other]) {
+    if (loaded.has(fam)) continue;
+    const list = STYLES.map(([st, weight, style]) => { const url = fileOf(fam, st); if (!url) return null;
+      try { const ff = new FontFace('MP ' + fam, `url(${url})`, {weight, style}); document.fonts.add(ff); return ff; } catch (e) { return null; } });
+    loaded.set(fam, Promise.resolve(list));
+  }
+}
 export const fontSet = key => FONT_SETS[key] ?? FONT_SETS[DEFAULT_FONT];
 export const familyName = key => 'MP ' + fontSet(key).text;
 const STYLES = [['r', '400', 'normal'], ['b', '700', 'normal'], ['i', '400', 'italic'], ['bi', '700', 'italic']];
 
-const loaded = new Map();
+const loaded = new Map();   // family -> promise
 /** Register a text font (4 styles) with the browser. */
 export function loadTextFamily(fam) {
-  if (loaded.has(fam)) return loaded.get(fam);
+  if (loaded.has(fam)) return loaded.get(fam).then(list => Promise.all((list || []).map(ff => ff && ff.load ? ff.load().catch(() => null) : ff)));
   const p = Promise.all(STYLES.map(([st, weight, style]) => {
     const url = fileOf(fam, st); if (!url) return null;
     try { const ff = new FontFace('MP ' + fam, `url(${url})`, {weight, style}); document.fonts.add(ff); return ff.load().catch(() => null); }
@@ -38,9 +65,10 @@ export function applyTextFont(key) {
   document.documentElement.style.setProperty('--slide-font', `'MP ${fam}', Georgia, serif`);
   return loadTextFamily(fam);
 }
-/** The raw font files (for turning text into outlines in PowerPoint / PDF export). */
-export async function fontFiles(key) {
-  const fam = fontSet(key).text, out = {};
+/** The raw font files of a text family (for turning text into outlines in PowerPoint / PDF export). */
+export async function familyFiles(fam) {
+  const out = {};
   for (const [st] of STYLES) out[st] = await (await fetch(fileOf(fam, st))).arrayBuffer();
   return out;
 }
+export const fontFiles = key => familyFiles(fontSet(key).text);

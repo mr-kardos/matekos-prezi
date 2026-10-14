@@ -239,12 +239,13 @@ body.tplmode .slideonly{ display:none !important; }
 .panelopen svg{ width:18px; height:18px; }
 /* table toolbar floats over the workspace only (never over the side panels) */
 .ctxbar{ left:calc(var(--lw, 176px) + 6px); right:calc(var(--rw, 300px) + 6px); border-left:1px solid var(--line); border-right:1px solid var(--line); border-radius:0 0 8px 8px; }
-body.noprops-on .ctxbar{ right:0; }
+body.noprops-on .ctxbar{ right:58px; }
 
 .rsplit{ border-right:0; border-left:1px solid var(--line); }
 /* slide font = the presentation's font set; the logo stays Bonum */
 :root{ --doc-font:'MP bonum', Georgia, serif; }
-.slide, .mprev, .md-prev, .txt, .txt > .ProseMirror{ font-family:var(--slide-font, var(--doc-font)); }
+.slide, .mprev, .md-prev, .txt{ font-family:var(--slide-font, var(--doc-font)); }
+.txt > .ProseMirror{ font-family:inherit; }
 .fontsel{ max-width:190px; }
 /* dark scroll bars on the side panels, with room between them and the thumbnails */
 .plist, #props, #work{ scrollbar-color:#59626e #2a3038; scrollbar-width:thin; }
@@ -258,7 +259,7 @@ body.noprops-on .ctxbar{ right:0; }
 @media (max-width:1400px){ .brand .bname{ display:none; } }
 
 /* ---------- 0.4: interface accent = Matekos red ---------- */
-:root{ --accent:#da291c; --accent-soft:#fbe3e1; --on-accent:#ffffff; --sel:#da291c; --selbg:rgba(218,41,28,.22); }
+:root{ --accent:#da291c; --accent-soft:#fbe3e1; --on-accent:#ffffff; --sel:#da291c; --selbg:rgba(47,111,219,.28); }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){ --accent:#ff7a6e; --accent-soft:#4a2421; --on-accent:#1a0d0c; --sel:#ff7a6e; }
 }
@@ -312,7 +313,7 @@ body.noprops-on .ctxbar{ right:0; }
 .dot.none{ background:transparent !important; border:1.5px solid var(--ink-2) !important; box-shadow:none !important; position:relative; }
 .dot.none::after{ content:''; position:absolute; left:50%; top:-3px; bottom:-3px; width:1.5px; background:var(--ink-2); transform:translateX(-50%) rotate(45deg); }
 /* letter spacing slider */
-.spslide{ display:grid; grid-template-columns:180px 64px auto; align-items:center; gap:8px; margin:4px 4px 6px; font-size:12.5px; color:var(--ink-2); }
+.spslide{ display:grid; grid-template-columns:240px 64px auto; align-items:center; gap:8px; margin:4px 4px 6px; font-size:12.5px; color:var(--ink-2); }
 .spslide input[type=range]{ accent-color:var(--accent); }
 .spslide input[type=number]{ height:28px; border:1px solid var(--line); border-radius:6px; background:var(--chrome-2); color:var(--ink); padding:0 6px; }
 /* text styles (template) */
@@ -339,3 +340,37 @@ body.noprops-on .ctxbar{ right:0; }
 .slide-actions{ flex-wrap:nowrap; }
 .plist{ container-type:inline-size; }
 @container (max-width: 200px){ .slide-actions #sNew span{ display:none; } }
+
+/* ---------- 0.7 ---------- */
+/* selected text and selected formulas: blue, like the browser's text selection */
+.txt .math.ProseMirror-selectednode, .txt .math.in-sel{ background:rgba(47,111,219,.28); }
+/* B I U S x² x₂ Aa: same font, same baseline */
+.ribbon .tb b, .ribbon .tb i, .ribbon .tb u, .ribbon .tb s, .ribbon .tb .aa, .stctl .tb b, .stctl .tb i, .stctl .tb u{
+  font:700 15px/1 var(--ui); display:inline-block; min-width:12px; text-align:center; }
+.ribbon .tb i, .stctl .tb i{ font-style:italic; font-family:var(--ui); }
+.ribbon .tb u, .stctl .tb u{ text-underline-offset:2px; }
+.ribbon .tb .aa{ font-weight:600; letter-spacing:.02em; }
+/* chosen options: red, clearly visible */
+.pitem.on{ background:var(--accent-soft); color:var(--accent); font-weight:600; box-shadow:inset 3px 0 0 var(--accent); }
+/* font button + list */
+.fontbtn{ width:170px; justify-content:space-between; border:1px solid var(--line); background:var(--chrome-2); height:30px; font-weight:500; font-size:13px; }
+.fontbtn #fontLabel{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fontbtn::after{ content:''; border:4px solid transparent; border-top-color:var(--ink-2); margin-top:4px; flex:none; }
+#popFont{ width:300px; max-height:min(560px, calc(100vh - 140px)); overflow-y:auto; }
+#popFont .fitem{ font-size:16px; font-weight:400; }
+#popFont .ptitle{ margin-top:8px; }
+#popFont .ptitle .phint{ display:block; margin:2px 0 0; font-size:11px; }
+/* alignment + grouping in the first panel section */
+.alignbar{ display:flex; align-items:center; flex-wrap:wrap; gap:2px; margin:0 0 12px; }
+.alignbar .albl{ width:100%; font-size:12px; color:var(--ink-2); margin-bottom:2px; }
+.alignbar .tb{ min-width:30px; height:30px; padding:0; }
+.alignbar .tb svg{ width:18px; height:18px; }
+.grpbar{ display:flex; gap:6px; margin:0 0 10px; }
+.grpbar .btn{ display:inline-flex; align-items:center; gap:6px; }
+.grpbar .btn svg{ width:16px; height:16px; }
+/* template text styles */
+.stctl .stfont{ height:30px; border:1px solid var(--line); border-radius:6px; background:var(--chrome); color:var(--ink); font-size:12.5px; max-width:100%; flex:1 1 140px; }
+/* home screen icons in the same line style as the app */
+.hico svg{ width:38px; height:38px; }
+/* links in text */
+.txt a{ color:#1d5fb4; text-decoration:underline; }

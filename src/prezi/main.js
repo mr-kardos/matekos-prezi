@@ -4,7 +4,7 @@ import JSZip from 'jszip';
 import { NodeSelection } from '@tiptap/pm/state';
 import { CellSelection, TableMap } from '@tiptap/pm/tables';
 import { startMathJax, renderInto, mathReady, activeMathFont } from '../math.js';
-import { FONT_SETS, DEFAULT_FONT, applyTextFont, loadTextFamily } from './fontsets.js';
+import { FONT_SETS, DEFAULT_FONT, applyTextFont, loadTextFamily, allFamilies, familyLabel, familyCSS, familyFromCSS, registerAllFamilies, fontSet } from './fontsets.js';
 import { openMathEditor, isMathEditorOpen } from '../mathEditor.js';
 import { tableContext } from '../editor/extensions.js';
 import { svg as svgIcon } from '../icons.js';
@@ -47,16 +47,19 @@ const newSlide = t => makeSlide(doc, t);
 const syncPlaceholders = s => syncPh(doc, s);
 
 /** Text styles of the template: headlines (title placeholders) and normal text (body/subtitle placeholders, new text boxes). */
-const defaultStyles = () => ({title: {size: 44, color: '#2f5d8a', bold: true, italic: false}, body: {size: 29.33, color: '#1a1a1a', bold: false, italic: false}});
-const roleOf = o => o.placeholder ? (o.placeholder.startsWith('title') ? 'title' : 'body') : (o.styleRef || null);
+const defaultStyles = () => ({title: {size: 44, color: '#2f5d8a', bold: true, italic: false, underline: false, font: null},
+  subtitle: {size: 29.33, color: '#4a5866', bold: false, italic: false, underline: false, font: null},
+  body: {size: 29.33, color: '#1a1a1a', bold: false, italic: false, underline: false, font: null}});
+const stylesOf = () => { const d = defaultStyles(); doc.styles = {...d, ...(doc.styles || {})}; for (const k in d) doc.styles[k] = {...d[k], ...doc.styles[k]}; return doc.styles; };
+const roleOf = o => o.placeholder ? (o.placeholder.startsWith('title') ? 'title' : o.placeholder.startsWith('subtitle') ? 'subtitle' : 'body') : (o.styleRef || null);
 function applyStyle(kind, changes) {
-  doc.styles ??= defaultStyles();
-  const old = doc.styles[kind], nw = {...old, ...changes}, k = nw.size / old.size;
+  const old = stylesOf()[kind], nw = {...old, ...changes}, k = nw.size / old.size;
   doc.styles[kind] = nw;
   const upd = (o, layoutLevel) => {
     if (roleOf(o) !== kind || (!layoutLevel && (o.phStyled || o.ownStyle))) return;
     if ('size' in changes) o.size = o.placeholder ? Math.round(o.size * k * 100) / 100 : nw.size;
-    for (const key of ['color', 'bold', 'italic']) if (key in changes) o[key] = nw[key];
+    for (const key of ['color', 'bold', 'italic', 'underline']) if (key in changes) o[key] = nw[key] || undefined;
+    if ('font' in changes) o.font = nw.font || undefined;
   };
   for (const g of [doc.master, ...Object.values(doc.templates)]) flatObjects(g.objects).forEach(o => upd(o, true));
   for (const sl of doc.slides) flatObjects(sl.objects).forEach(o => { if (!o.placeholder) upd(o, false); });
@@ -165,7 +168,7 @@ function shapeSVG(o) {
   return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${body}</svg>`;
 }
 function txtStyle(t, o) {
-  Object.assign(t.style, {letterSpacing: o.letterSpacing ? o.letterSpacing + 'pt' : '', fontSize: o.size + 'px', color: o.color, textAlign: o.align, fontWeight: o.bold ? 700 : 400, fontStyle: o.italic ? 'italic' : 'normal',
+  Object.assign(t.style, {fontFamily: o.font ? `${familyCSS(o.font)}, var(--slide-font)` : '', textTransform: o.upper ? 'uppercase' : '',letterSpacing: o.letterSpacing ? o.letterSpacing + 'pt' : '', fontSize: o.size + 'px', color: o.color, textAlign: o.align, fontWeight: o.bold ? 700 : 400, fontStyle: o.italic ? 'italic' : 'normal',
     textDecorationLine: [o.underline && 'underline', o.strike && 'line-through'].filter(Boolean).join(' ') || 'none'});
 }
 let measureT = 0;
@@ -358,7 +361,12 @@ function thumbFrame(label, cls) {
   t.innerHTML = `<div class="no">${label}</div><div class="frame"><div class="slide"></div></div>`;
   return t;
 }
-function renderThumbs() { mode === 'slides' ? renderSlideList() : renderTemplateList(); }
+function renderThumbs() {
+  const st = slidesNav.querySelector('.plist')?.scrollTop ?? 0, same = renderThumbs.mode === mode;
+  mode === 'slides' ? renderSlideList() : renderTemplateList();
+  const pl = slidesNav.querySelector('.plist'); if (pl && same) pl.scrollTop = st;
+  renderThumbs.mode = mode;
+}
 function renderSlideList() {
   slidesNav.innerHTML = '<div class="plist" id="plist"></div>';
   const list = $('#plist');
@@ -386,7 +394,7 @@ function renderSlideList() {
     s.anims.forEach(a => { a.id = uid(); a.target = ids[a.target]; });
     doc.slides.splice(cur + 1, 0, s); cur++; setSel([]); commit(); };
   $('#sDel').onclick = () => deleteSlide();
-  list.querySelector('.slide-actions')?.scrollIntoView({block: 'nearest'});
+  requestAnimationFrame(() => list.querySelector('.slide-actions')?.scrollIntoView({block: 'nearest'}));
 }
 function layoutThumb(k, L, cls = 'lthumb') {
   const b = document.createElement('button'); b.className = cls; b.title = L.name; b.dataset.k = k;
@@ -508,9 +516,12 @@ stage.addEventListener('pointerdown', e => {
       enterEdit(id, e); return;
     }
   }
+  const wasSelected = selIds.length === 1 && sel === id;
   lastDown = {id, t: now};
   if (!selIds.includes(id)) select(id);
   startMove(p, e);
+  // a text box that is already selected: a click (without dragging) puts the cursor in it
+  if (wasSelected && isText(o) && !o.locked && !o.field && !(mode === 'template' && o.placeholder) && action) action.editAt = {clientX: e.clientX, clientY: e.clientY, id};
 });
 function startMove(p, e) {
   const objs = selIds.map(objById).filter(o => o && !o.locked);
@@ -549,6 +560,7 @@ stage.addEventListener('pointerup', () => {
   stage.querySelectorAll('.guide, .marquee').forEach(g => g.remove());
   const a = action; action = null;
   if (a.type === 'marquee') { renderProps(); updateRibbon(); return; }
+  if (a.editAt && !a.moved) { lastDown = null; enterEdit(a.editAt.id, a.editAt); return; }
   if (a.moved) { for (const s of a.starts ?? [{o: selObj()}]) if (s.o?.placeholder && mode === 'slides') s.o.phMoved = true; commit(); }
 });
 function startHandle(h, p, e) {
@@ -842,9 +854,9 @@ function addObject(o) {
 }
 // default shapes are regular: square, circle, equilateral triangle
 const SHAPES = {
-  rect: {name: 'Téglalap', w: 200, h: 200, fill: '#d6eaf8', stroke: '#2f5d8a', strokeWidth: 3, radius: 0},
-  ellipse: {name: 'Ellipszis', w: 200, h: 200, fill: '#d6eaf8', stroke: '#2f5d8a', strokeWidth: 3},
-  triangle: {name: 'Háromszög', w: 220, h: Math.round(220 * Math.sqrt(3) / 2), fill: '#d6eaf8', stroke: '#2f5d8a', strokeWidth: 3},
+  rect: {name: 'Téglalap', w: 100, h: 100, fill: '#d6eaf8', stroke: '#2f5d8a', strokeWidth: 3, radius: 0},
+  ellipse: {name: 'Ellipszis', w: 100, h: 100, fill: '#d6eaf8', stroke: '#2f5d8a', strokeWidth: 3},
+  triangle: {name: 'Háromszög', w: 110, h: Math.round(110 * Math.sqrt(3) / 2), fill: '#d6eaf8', stroke: '#2f5d8a', strokeWidth: 3},
   arrow: {name: 'Nyíl', w: 80, h: 27, fill: '#2f5d8a', stroke: null, strokeWidth: 0},
   line: {name: 'Vonal', w: 300, h: 20, fill: null, stroke: '#2f5d8a', strokeWidth: 4}
 };
@@ -855,8 +867,9 @@ function addShape(shape) {
 }
 function addText() {
   if (editing) exitEdit();
-  const st = (doc.styles ??= defaultStyles()).body;
+  const st = stylesOf().body;
   const o = addObject({type: 'text', name: nextName('Szöveg'), w: 620, size: st.size, color: st.color, bold: st.bold || undefined, italic: st.italic || undefined,
+    underline: st.underline || undefined, font: st.font || undefined,
     align: 'left', styleRef: 'body', doc: emptyDoc()});
   renderAll(); enterEdit(o.id);
 }
@@ -972,16 +985,28 @@ const section = (key, title, body) => `<section class="psec${secState[key] ? ' c
 const TYPE_LABEL = {text: 'Szöveg', table: 'Táblázat', image: 'Kép', group: 'Csoport'};
 const typeIcon = o => o.type === 'shape' ? o.shape : o.type === 'group' ? 'group' : o.type === 'table' ? 'table' : o.type === 'image' ? 'image' : 'textbox';
 
+function alignBar(n) {
+  const b = (k, ic, t, dis) => `<button class="tb" data-align="${k}" title="${t}" ${dis ? 'disabled' : ''}>${svgIcon(ic)}</button>`;
+  return `<div class="alignbar"><span class="albl">${n > 1 ? 'Igazítás egymáshoz' : 'Igazítás a diához'}</span>
+    ${b('l', 'alObjL', 'Balra')}${b('c', 'alObjC', 'Vízszintesen középre')}${b('r', 'alObjR', 'Jobbra')}${b('t', 'alObjT', 'Fel')}${b('m', 'alObjM', 'Függőlegesen középre')}${b('b', 'alObjB', 'Le')}
+    ${b('dh', 'distH', 'Egyenletes elosztás vízszintesen (legalább 3 objektum)', n < 3)}${b('dv', 'distV', 'Egyenletes elosztás függőlegesen (legalább 3 objektum)', n < 3)}</div>`;
+}
+function groupBar() {
+  const multiTop = tgt().objects.filter(o => selIds.includes(o.id)).length > 1, one = selObj();
+  if (!multiTop && one?.type !== 'group') return '';
+  return `<div class="grpbar">${multiTop ? `<button class="btn" data-arr="group" title="A kijelöltek csoportosítása (Ctrl/⌘+G)">${svgIcon('group')}Csoportosítás</button>` : ''}
+    ${one?.type === 'group' ? `<button class="btn" data-arr="ungroup" title="A csoport szétbontása (Ctrl/⌘+Shift+G)">${svgIcon('ungroup')}Szétbontás</button>` : ''}</div>`;
+}
 function positionBody() {
   const objs = selIds.map(objById).filter(Boolean);
-  if (objs.length > 1) return `<div class="phint" style="margin:0">${objs.length} objektum kijelölve. Húzd bármelyiket a közös mozgatáshoz, vagy csoportosítsd őket a Rétegek résznél (Ctrl/⌘+G).</div>`;
+  if (objs.length > 1) return `${groupBar()}${alignBar(objs.length)}<div class="phint" style="margin:8px 0 0">${objs.length} objektum kijelölve – húzd bármelyiket a közös mozgatáshoz.</div>`;
   const o = objs[0];
   if (!o) return '<div class="phint" style="margin:0">Jelölj ki egy objektumot a dián vagy a Rétegek listában. Több objektum: Shift+kattintás, vagy húzz keretet az üres területen.</div>';
   const round = Math.round, rot = o.rot > 180 ? o.rot - 360 : (o.rot || 0), lk = o.locked ? 'disabled' : '';
   const colors = o.type === 'shape' ? `<div class="colbtns">
       <button class="btn colbtn" data-pop="popFill" ${o.shape === 'line' || o.locked ? 'disabled' : ''} title="Kitöltés színe"><i class="dot fill${o.fill ? '' : ' none'}" style="--c:${o.fill || 'transparent'}"></i>Kitöltés</button>
       <button class="btn colbtn" data-pop="popStroke" ${lk} title="Körvonal színe és vastagsága"><i class="dot ring${o.stroke ? '' : ' none'}" style="--c:${o.stroke || 'transparent'}"></i>${o.shape === 'line' ? 'Vonal' : 'Körvonal'}</button></div>` : '';
-  return `${colors}${o.locked ? `<div class="phint lockhint">${svgIcon('lock')} Zárolva – a Rétegek résznél oldható fel.</div>` : ''}
+  return `${colors}${groupBar()}${o.locked ? '' : alignBar(1)}${o.locked ? `<div class="phint lockhint">${svgIcon('lock')} Zárolva – a Rétegek résznél oldható fel.</div>` : ''}
     ${slider('pX', 'Vízszintes', round(o.x), -round(o.w) + 10, W - 10, 1, lk)}
     ${slider('pY', 'Függőleges', round(o.y), -round(o.h) + 10, H - 10, 1, lk)}
     ${slider('pW', 'Szélesség', round(o.w), 16, W, 1, lk)}
@@ -1001,14 +1026,7 @@ function layersBody() {
     <span class="grip">${svgIcon('grip')}</span>${svgIcon(typeIcon(o))}<span class="lname">${esc(o.name ?? TYPE_LABEL[o.type] ?? '')}${o.type === 'group' ? ` <small>(${o.children.length})</small>` : ''}</span>
     <button class="lk eye${o.hidden ? ' on' : ''}" data-hide="${o.id}" title="${o.hidden ? 'Megjelenítés' : 'Elrejtés (a dián, a lejátszásban és az exportban sem látszik)'}">${svgIcon(o.hidden ? 'eyeOff' : 'eye')}</button>
     <button class="lk${o.locked ? ' on' : ''}" data-lock="${o.id}" title="${o.locked ? 'Feloldás' : 'Zárolás: nem mozdítható, nem jelölhető ki a dián'}">${svgIcon(o.locked ? 'lock' : 'unlock')}</button></div>`).join('');
-  return `<div class="arrgrid">
-      <button class="tb" data-arr="toFront" ${dis} title="A legfelső rétegre">${svgIcon('arrFront')}<span>Legfelülre</span></button>
-      <button class="tb" data-arr="forward" ${dis} title="Egy réteggel feljebb">${svgIcon('arrForward')}<span>Feljebb</span></button>
-      <button class="tb" data-arr="backward" ${dis} title="Egy réteggel lejjebb">${svgIcon('arrBackward')}<span>Lejjebb</span></button>
-      <button class="tb" data-arr="toBack" ${dis} title="A legalsó rétegre">${svgIcon('arrBack')}<span>Legalulra</span></button>
-      <button class="tb" data-arr="group" ${multiTop ? '' : 'disabled'} title="A kijelöltek csoportosítása (Ctrl/⌘+G)">${svgIcon('group')}<span>Csoportosítás</span></button>
-      <button class="tb" data-arr="ungroup" ${one?.type === 'group' ? '' : 'disabled'} title="A csoport szétbontása (Ctrl/⌘+Shift+G)">${svgIcon('ungroup')}<span>Szétbontás</span></button></div>
-    <div class="layers" id="layerList">${rows || '<div class="phint" style="margin:4px 0">Ezen a dián még nincs objektum.</div>'}</div>
+  return `<div class="layers" id="layerList">${rows || '<div class="phint" style="margin:4px 0">Ezen a dián még nincs objektum.</div>'}</div>
     <div class="phint">Legfelül az előtérben lévő. Húzással átrendezhető; Shift+kattintás: több kijelölése.</div>`;
 }
 function renderProps() {
@@ -1025,11 +1043,16 @@ function renderProps() {
       <div class="fld">Háttérszín<button class="btn colbtn" id="pBgColor"><i class="dot fill" style="--c:${L.bgColor || '#ffffff'}"></i>${L.bgColor || '#ffffff'}</button></div>
       <div class="fld">Háttérkép<div class="imgpick">${L.background ? `<img src="${media[L.background]}" alt="">` : ''}<button class="btn" id="pBgPick">Kép…</button>${L.background ? '<button class="btn" id="pBgClear">Eltávolítás</button>' : ''}</div></div></div>`;
     h += `<div class="phint">${isM ? 'Ami a mesterre kerül (logó, lábléc, díszítés), minden elrendezésen megjelenik.' : 'Helykitöltőt a menüszalag „Helykitöltő” gombjával adhatsz hozzá.'}</div></section>`;
-    const st = doc.styles ?? defaultStyles(), row = (k, label, hint) => `<div class="strow"><div class="sthead"><b>${label}</b><span class="phint">${hint}</span></div>
+    const st = stylesOf(), fams = allFamilies();
+    const famSel = (k, v) => `<select class="stfont" data-st="${k}" title="Betűtípus"><option value="">Alapbetűtípus</option>${[...fams.math, ...fams.other].map(([f, l]) => `<option value="${f}" ${f === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+    const row = (k, label, hint) => `<div class="strow"><div class="sthead"><b>${label}</b><span class="phint">${hint}</span></div>
       <div class="stctl"><input type="number" class="stsize" data-st="${k}" min="8" max="120" step="0.5" value="${Math.round(st[k].size * 0.75 * 2) / 2}" title="Betűméret (pt)"><span class="unit">pt</span>
         <button class="btn colbtn stcolor" data-st="${k}" title="Betűszín"><i class="dot fill" style="--c:${st[k].color}"></i>Szín</button>
-        <button class="tb${st[k].bold ? ' on' : ''}" data-stb="${k}" title="Félkövér"><b>B</b></button><button class="tb${st[k].italic ? ' on' : ''}" data-sti="${k}" title="Dőlt"><i class="ital">I</i></button></div></div>`;
-    h += section('styles', 'Szövegstílusok', row('title', 'Címek', 'a cím-helykitöltők') + row('body', 'Szöveg', 'szöveg- és alcím-helykitöltők, új szövegdobozok')
+        <button class="tb${st[k].bold ? ' on' : ''}" data-stt="bold" data-st="${k}" title="Félkövér"><b>B</b></button><button class="tb${st[k].italic ? ' on' : ''}" data-stt="italic" data-st="${k}" title="Dőlt"><i>I</i></button><button class="tb${st[k].underline ? ' on' : ''}" data-stt="underline" data-st="${k}" title="Aláhúzott"><u>U</u></button>
+        ${famSel(k, st[k].font)}</div></div>`;
+    h += `<section><div class="fgrid">${fld('Alapbetűtípus (szöveg és képletek)', `<select id="pBaseFont">${Object.entries(FONT_SETS).map(([k2, f]) => `<option value="${k2}" ${k2 === (doc.font || DEFAULT_FONT) ? 'selected' : ''}>${f.label}</option>`).join('')}</select>`, true)}</div>
+      <div class="phint">Az új szövegdobozok és a képletek ezt használják. Csak képletbarát betűtípus lehet.</div></section>`;
+    h += section('styles', 'Szövegstílusok', row('title', 'Címek', 'cím-helykitöltők') + row('subtitle', 'Alcímek', 'alcím-helykitöltők') + row('body', 'Szöveg', 'szöveg-helykitöltők, új szövegdobozok')
       + '<div class="phint">A méretváltozás arányosan hat (a címdia nagyobb címe nagyobb marad). A diákon egyenként átformázott dobozok megtartják a saját formájukat.</div>');
   }
   h += section('pos', 'Megjelenés és elhelyezés', positionBody());
@@ -1057,9 +1080,10 @@ function bindProps(o) {
   on('pOwnBg', 'change', e => { const L = tgt(); L.ownBg = e.target.checked; if (L.ownBg && !L.background) { L.background = doc.master.background; L.bgColor = doc.master.bgColor; } commit(); });
   on('pBgColor', 'click', e => pickAnyColor(e.currentTarget, 'Háttérszín', tgt().bgColor || '#ffffff', c => { tgt().bgColor = c === 'none' ? '#ffffff' : c; commit(); }));
   props.querySelectorAll('.stsize').forEach(inp => inp.onchange = () => { const v = parseFloat(String(inp.value).replace(',', '.')); if (v > 0) applyStyle(inp.dataset.st, {size: Math.round(v / 0.75 * 100) / 100}); });
-  props.querySelectorAll('.stcolor').forEach(b => b.onclick = () => pickAnyColor(b, b.dataset.st === 'title' ? 'Címek színe' : 'Szöveg színe', (doc.styles ?? defaultStyles())[b.dataset.st].color, c => { if (c !== 'none') applyStyle(b.dataset.st, {color: c}); }));
-  props.querySelectorAll('[data-stb]').forEach(b => b.onclick = () => applyStyle(b.dataset.stb, {bold: !(doc.styles ?? defaultStyles())[b.dataset.stb].bold}));
-  props.querySelectorAll('[data-sti]').forEach(b => b.onclick = () => applyStyle(b.dataset.sti, {italic: !(doc.styles ?? defaultStyles())[b.dataset.sti].italic}));
+  props.querySelectorAll('.stcolor').forEach(b => b.onclick = () => pickAnyColor(b, b.dataset.st === 'title' ? 'Címek színe' : 'Szöveg színe', stylesOf()[b.dataset.st].color, c => { if (c !== 'none') applyStyle(b.dataset.st, {color: c}); }));
+  props.querySelectorAll('[data-stt]').forEach(b => b.onclick = () => applyStyle(b.dataset.st, {[b.dataset.stt]: !stylesOf()[b.dataset.st][b.dataset.stt]}));
+  props.querySelectorAll('.stfont').forEach(sel_ => sel_.onchange = () => applyStyle(sel_.dataset.st, {font: sel_.value || null}));
+  on('pBaseFont', 'change', e => switchFont(e.target.value));
   on('pBgPick', 'click', () => pickImage(key => { tgt().background = key; commit(); }));
   on('pBgClear', 'click', () => { tgt().background = null; commit(); });
   on('pPrompt', 'change', e => { o.prompt = e.target.value; commit(); });
@@ -1079,11 +1103,31 @@ function bindProps(o) {
     }
   }
   // layers
-  props.querySelectorAll('[data-arr]').forEach(b => b.onclick = () => ({toFront: () => reorder((i, n) => n), forward: () => reorder((i, n) => Math.min(n, i + 1)),
-    backward: () => reorder(i => Math.max(0, i - 1)), toBack: () => reorder(() => 0), group: groupSelected, ungroup: ungroupSelected})[b.dataset.arr]());
+  props.querySelectorAll('[data-arr]').forEach(b => b.onclick = () => ({group: groupSelected, ungroup: ungroupSelected})[b.dataset.arr]());
+  props.querySelectorAll('[data-align]').forEach(b => b.onclick = () => alignObjects(b.dataset.align));
   props.querySelectorAll('.colbtn[data-pop]').forEach(b => b.onclick = () => showPop(b.dataset.pop, b));
   bindLayers();
   if (mode === 'slides') { bindAnims(); bindTrans(); }
+}
+/** Align the selected objects to each other (one object: to the slide), or distribute them evenly. */
+function alignObjects(how) {
+  const objs = selIds.map(objById).filter(o => o && !o.locked); if (!objs.length) return;
+  if (editing) syncEditor();
+  const bs = objs.map(bounds);
+  let X0 = Math.min(...bs.map(b => b.x)), Y0 = Math.min(...bs.map(b => b.y)), X1 = Math.max(...bs.map(b => b.x + b.w)), Y1 = Math.max(...bs.map(b => b.y + b.h));
+  if (objs.length === 1) { X0 = 0; Y0 = 0; X1 = W; Y1 = H; }
+  if (how === 'dh' || how === 'dv') {
+    const hz = how === 'dh', idx = objs.map((o, i) => i).sort((a, b) => hz ? bs[a].x - bs[b].x : bs[a].y - bs[b].y);
+    const total = idx.reduce((t, i) => t + (hz ? bs[i].w : bs[i].h), 0), gap = ((hz ? X1 - X0 : Y1 - Y0) - total) / (objs.length - 1);
+    let pos = hz ? X0 : Y0;
+    for (const i of idx) { const d = Math.round(pos - (hz ? bs[i].x : bs[i].y)); moveObject(objs[i], hz ? d : 0, hz ? 0 : d); pos += (hz ? bs[i].w : bs[i].h) + gap; }
+  } else objs.forEach((o, i) => {
+    const b = bs[i], dx = how === 'l' ? X0 - b.x : how === 'c' ? (X0 + X1) / 2 - (b.x + b.w / 2) : how === 'r' ? X1 - (b.x + b.w) : 0;
+    const dy = how === 't' ? Y0 - b.y : how === 'm' ? (Y0 + Y1) / 2 - (b.y + b.h / 2) : how === 'b' ? Y1 - (b.y + b.h) : 0;
+    moveObject(o, Math.round(dx), Math.round(dy));
+  });
+  for (const o of objs) if (o.placeholder && mode === 'slides') o.phMoved = true;
+  commit();
 }
 function reorder(fn) { const o = selObj(); if (!o || !tgt().objects.includes(o)) return; if (editing) syncEditor(); const a = tgt().objects, i = a.indexOf(o); a.splice(i, 1); a.splice(fn(i, a.length), 0, o); commit(); }
 let dragId = null;
@@ -1222,17 +1266,40 @@ function setAlign(a) {
   const strip = n => { if (n.attrs?.textAlign) n.attrs.textAlign = null; (n.content || []).forEach(strip); }; strip(o.doc);
   commit();
 }
+/** List button: text that is already this kind of list loses the list formatting; otherwise it becomes a list. */
+function unwrapLists(json, type) {
+  const flat = nodes => nodes.flatMap(n => n.type === type ? (n.content || []).flatMap(li => flat(li.content || [])) : [n]);
+  return {...json, content: flat(json.content || [])};
+}
+function listCmd(type) {
+  const o = selObj(); if (!isTextLike(o) || o.locked || o.field) return;
+  const toggle = type === 'bulletList' ? 'toggleBulletList' : 'toggleOrderedList';
+  if (inEdit()) {
+    const {from, to} = ed.state.selection; let has = false;
+    ed.state.doc.nodesBetween(from, to, n => { if (n.type.name === type) has = true; });
+    if (!has) ed.chain().focus()[toggle]().run();
+    else for (let i = 0; i < 12 && ed.isActive('listItem'); i++) if (!ed.chain().focus().liftListItem('listItem').run()) break;
+    updateRibbon(); return;
+  }
+  if (JSON.stringify(o.doc).includes(`"type":"${type}"`)) { o.doc = unwrapLists(o.doc, type); commit(); }
+  else withEditor(c => c[toggle]().run());
+}
 const COMMANDS = {
   undo, redo,
   bold: () => boxOrMark('bold', 'bold'), italic: () => boxOrMark('italic', 'italic'),
   underline: () => boxOrMark('underline', 'underline'), strike: () => boxOrMark('strike', 'strike'),
   superscript: () => withEditor(c => c.toggleSuperscript().run()), subscript: () => withEditor(c => c.toggleSubscript().run()),
   alignLeft: () => setAlign('left'), alignCenter: () => setAlign('center'), alignRight: () => setAlign('right'), alignJustify: () => setAlign('justify'),
-  bulletList: () => withEditor(c => c.toggleBulletList().run()), orderedList: () => withEditor(c => c.toggleOrderedList().run()),
+  bulletList: () => listCmd('bulletList'), orderedList: () => listCmd('orderedList'),
   indent: () => withEditor(c => ed.isActive('listItem') ? c.sinkListItem('listItem').run() : c.shiftIndent(1).run()),
   outdent: () => withEditor(c => ed.isActive('listItem') ? c.liftListItem('listItem').run() : c.shiftIndent(-1).run()),
   text: addText, math: () => openMath(null, null), image: () => pickImage(null),
   rect: () => addShape('rect'), ellipse: () => addShape('ellipse'), triangle: () => addShape('triangle'), arrow: () => addShape('arrow'), line: () => addShape('line'),
+  upper: () => {
+    const o = selObj(); if (!isTextLike(o)) return;
+    if (inEdit() && !ed.state.selection.empty) { (ed.getAttributes('textStyle').textTransform === 'uppercase' ? ed.chain().focus().unsetUppercase() : ed.chain().focus().setUppercase()).run(); updateRibbon(); return; }
+    o.upper = !o.upper || undefined; styled(o); commit();
+  },
   delete: () => { if (editing) { const id = editing; exitEdit(); if (!objById(id)) return; } deleteSelected(); }
 };
 const ribbon = $('#ribbon');
@@ -1242,7 +1309,23 @@ ribbon.addEventListener('click', e => {
   if (b.dataset.pop) return showPop(b.dataset.pop, b);
   COMMANDS[b.dataset.cmd]?.();
 });
-$('#styleSel').addEventListener('change', e => { const v = e.target.value; withEditor(c => (v === 'p' ? c.setParagraph() : c.setHeading({level: +v[1]})).run()); });
+{ const fams = allFamilies(), item = ([f, l]) => `<button class="pitem fitem" data-fam="${f}" style="font-family:${familyCSS(f)}">${l}</button>`;
+  $('#fontMath').innerHTML = fams.math.map(item).join(''); $('#fontOther').innerHTML = fams.other.map(item).join(''); }
+/** Font in effect at the cursor / for the box (family key, '' = base font of the template). */
+function currentFamily() {
+  const o = selObj(); if (!isTextLike(o)) return null;
+  if (inEdit()) { const ff = ed.getAttributes('textStyle').fontFamily; if (ff) return familyFromCSS(ff); }
+  return o.font || '';
+}
+$('#popFont').onopen = () => { const f = currentFamily(); for (const b of $$('#popFont [data-fam]')) b.classList.toggle('on', b.dataset.fam === f); };
+$('#popFont').addEventListener('click', e => {
+  const b = e.target.closest('[data-fam]'); if (!b) return; closePops();
+  const o = selObj(), fam = b.dataset.fam; if (!isTextLike(o)) return;
+  if (inEdit() && !ed.state.selection.empty) { (fam ? ed.chain().focus().setFontFamily('MP ' + fam) : ed.chain().focus().unsetFontFamily()).run(); updateRibbon(); return; }
+  const strip = n => { (n.marks || []).forEach(m => { if (m.type === 'textStyle' && m.attrs) m.attrs.fontFamily = null; }); (n.content || []).forEach(strip); };
+  if (inEdit()) ed.commands.setContent((j => (strip(j), j))(ed.getJSON()), {emitUpdate: false}); else strip(o.doc);
+  o.font = fam || undefined; styled(o); commit();
+});
 /** Remove explicit font sizes from the text (they would override the box size – e.g. on pasted text and formulas). */
 function stripFontSizes(json) {
   const walk = n => { if (n.marks) { n.marks.forEach(m => { if (m.type === 'textStyle' && m.attrs) m.attrs.fontSize = null; });
@@ -1281,9 +1364,10 @@ function updateRibbon() {
     if (edit) { try { const d = ed.view.domAtPos(ed.state.selection.from), el = d.node.nodeType === 1 ? d.node : d.node.parentElement; if (el && ed.view.dom.contains(el)) { const cs = getComputedStyle(el); size = parseFloat(cs.fontSize) * PT; color = cs.color; } } catch (e) { /* ignore */ } }
     if (document.activeElement !== $('#sizeIn')) $('#sizeIn').value = Math.round(size * 2) / 2;
     $('#colorBar').style.background = color;
-    $('#styleSel').value = edit ? (ed.isActive('heading', {level: 1}) ? 'h1' : ed.isActive('heading', {level: 2}) ? 'h2' : ed.isActive('heading', {level: 3}) ? 'h3' : 'p') : 'p';
+    const fam = currentFamily(); $('#fontLabel').textContent = fam ? familyLabel(fam).replace(/ \(.*\)$/, '') : 'Alap: ' + fontSet(doc.font).label;
+    ribbon.querySelector('[data-cmd=upper]').classList.toggle('on', edit ? ed.getAttributes('textStyle').textTransform === 'uppercase' || !!o.upper : !!o.upper);
   }
-  $('#styleSel').disabled = !isText(o);
+  if (!isTextLike(o)) $('#fontLabel').textContent = 'Betűtípus';
   $('#bTpl').classList.toggle('primary', mode === 'template');
   $('#bTpl').textContent = mode === 'template' ? 'Sablon bezárása' : 'Sablon';
   if (!edit || !ed?.isActive('table')) $('#tableBar').hidden = true;
@@ -1632,7 +1716,7 @@ function loadDocument(d, m, name, path, handle) {
 }
 async function openResult(r) {
   if (!r) return;
-  showHome(false);
+  sessionOpen = true; showHome(false);
   try { const {doc: d, media: m} = await unpackMprezi(r.data); loadDocument(d, m, r.name, r.path, r.handle); saveSoon(); toast('Megnyitva: ' + r.name); setStatus('Megnyitva: ' + r.name); }
   catch (e) { toast('A fájl nem nyitható meg: ' + (e?.message || e)); }
 }
@@ -1661,25 +1745,25 @@ $('#bSave').onclick = () => doSave(false);
 $('#bSaveAs').onclick = () => doSave(true);
 $('#bOpen').onclick = doOpen;
 $('#bPlay').onclick = () => startShow(cur);
-$('#fontSel').onchange = e => switchFont(e.target.value);
 $('#zoomSel').onchange = e => { zoom = e.target.value === 'auto' ? 'auto' : +e.target.value; fitStage(); };
 $('#docTitle').onchange = e => { doc.title = e.target.value.trim() || 'Névtelen bemutató'; dirty = true; setStatus(); saveSoon(); };
 async function newPresentation() {
   if (!await confirmBox(dirty ? 'Új bemutatót kezdesz. A mostani nem mentett módosításai elvesznek. Folytatod?' : 'Új, üres bemutatót kezdesz. Folytatod?', 'Új bemutató')) return false;
   if (editing) stopEditor();
-  blankDoc(); doc.slides.push(newSlide('cimdia')); loadDocument(doc, media, null, null); saveSoon(); showHome(false); return true;
+  blankDoc(); doc.slides.push(newSlide('cimdia')); loadDocument(doc, media, null, null); saveSoon(); sessionOpen = true; showHome(false); return true;
 }
 $('#bNew').onclick = newPresentation;
 /* home screen (as in Matekos Doksi) */
 function showHome(show) {
   $('#home').hidden = !show;
-  if (show) { $('#homeResume').hidden = false; $('#homeResume').textContent = doc?.slides?.length ? 'A legutóbbi bemutató folytatása' : 'Mintabemutató megtekintése'; }
+  if (show) { const f = currentFileName(); $('#homeResume').hidden = !(sessionOpen || f); $('#homeResume').textContent = f ? `Folytatás: ${f}` : 'Vissza a megnyitott bemutatóhoz'; }
   else fitStage();
 }
 $('#homeNew').onclick = newPresentation;
 $('#homeOpen').onclick = doOpen;
-$('#homeResume').onclick = () => showHome(false);
-$('#brand').onclick = () => { if (editing) exitEdit(); clearTimeout(autoT); autosave(autoValue()); showHome(true); };
+$('#homeResume').onclick = () => { sessionOpen = true; showHome(false); };
+let sessionOpen = false;            // a presentation was opened / created / continued in this session
+$('#brand').onclick = () => { sessionOpen = true; if (editing) exitEdit(); clearTimeout(autoT); autosave(autoValue()); showHome(true); };
 function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('on'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('on'), 2800); }
 
 /* ================================================================== keyboard */
@@ -1739,16 +1823,16 @@ addEventListener('beforeunload', e => { if (dirty && !isTauri()) e.preventDefaul
   startMathJax(FONT_SETS[fontKey].math);
   loadTextFamily('bonum');                         // the logo
   const fontLoad = applyTextFont(fontKey);
-  $('#fontSel').innerHTML = Object.entries(FONT_SETS).map(([k, f]) => `<option value="${k}" title="${f.note}">${f.label}</option>`).join('');
+  registerAllFamilies();
   if (saved?.doc) { try { doc = migrate(saved.doc); media = saved.media || {}; doc.title = saved.title || doc.title; } catch (e) { demoDoc(); } }
   else demoDoc();
-  doc.font = fontKey; $('#fontSel').value = fontKey;
+  doc.font = fontKey;
   resetHistory();
   if (saved?.path) setCurrentPath(saved.path);
   if (saved?.handle) setCurrentHandle(saved.handle);
   if (saved?.dirty) { dirty = true; setStatus(); }
   fitStage(); renderAll();
-  if (!sessionStorage.getItem('mp.skipHome')) showHome(true);
+  if (sessionStorage.getItem('mp.skipHome')) sessionOpen = true; else showHome(true);
   sessionStorage.removeItem('mp.skipHome');
   fontLoad.then(() => { measureTexts(); drawSelection(); drawBadges(); renderThumbs(); });
   mathReady.then(() => setTimeout(() => { measureTexts(); drawSelection(); drawBadges(); }, 100));

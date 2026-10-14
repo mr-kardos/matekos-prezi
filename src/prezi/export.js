@@ -10,7 +10,7 @@ import JSZip from 'jszip';
 import { parse as parseFont } from 'opentype.js';
 import { jsPDF } from 'jspdf';
 import 'svg2pdf.js';
-import { fontFiles } from './fontsets.js';
+import { familyFiles, fontSet, familyFromCSS } from './fontsets.js';
 import { Anim } from './anim.js';
 import { pieceEls, mathPending } from './textview.js';
 import { PPTX_SKELETON } from './pptx-skeleton.js';
@@ -21,14 +21,20 @@ const xesc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace
 const n2 = v => Math.round(v * 100) / 100;
 
 /* ---------- fonts (the very files the app displays with) ---------- */
-let FONTS = null, FONTS_KEY = null;
-/** Parse the text font of the presentation's font set (the very files the slides are displayed with). */
-async function prepareFonts(key) {
-  if (FONTS && FONTS_KEY === key) return;
-  const f = await fontFiles(key);
-  FONTS = {r: parseFont(f.r), b: parseFont(f.b), i: parseFont(f.i), bi: parseFont(f.bi)}; FONTS_KEY = key;
+const FAMS = new Map();       // text family -> {r, b, i, bi} parsed fonts
+let BASE = null;
+async function family(fam) {
+  if (!FAMS.has(fam)) { const f = await familyFiles(fam); FAMS.set(fam, {r: parseFont(f.r), b: parseFont(f.b), i: parseFont(f.i), bi: parseFont(f.bi)}); }
+  return FAMS.get(fam);
 }
-const fonts = () => FONTS;
+/** Parse every text family the presentation uses (base font, box fonts, fonts of selected text). */
+async function prepareFonts(doc) {
+  BASE = fontSet(doc.font || 'bonum').text;
+  const used = new Set([BASE]);
+  JSON.stringify(doc).replace(/MP ([a-z0-9]+)/g, (_, f) => { used.add(f); return _; }).replace(/"font":"([a-z0-9]+)"/g, (_, f) => { used.add(f); return _; });
+  for (const f of used) { try { await family(f); } catch (e) { /* missing family: base font is used */ } }
+}
+const fontsFor = cs => FAMS.get(familyFromCSS(cs.fontFamily)) || FAMS.get(BASE);
 const fontKey = cs => (parseInt(cs.fontWeight) >= 600 ? 'b' : '') + (/italic|oblique/.test(cs.fontStyle) ? 'i' : '') || 'r';
 const ascCache = new Map();
 /** Distance from a text range's top edge to its baseline, as laid out by this browser (cached per font). */
@@ -61,7 +67,7 @@ function decorations(node, stop) {
 
 /** SVG body for everything inside `roots` (elements), relative to (ox, oy). */
 function textBody(roots, stop, ox, oy) {
-  const F = fonts(); let back = '', body = '', lines = '';
+  let back = '', body = '', lines = '';
   const R = rr => ({x: rr.left - ox, y: rr.top - oy, w: rr.width, h: rr.height});
   for (const root of roots) {
     // backgrounds (highlight, shaded paragraphs, table cells) and borders (tables)
@@ -84,7 +90,7 @@ function textBody(roots, stop, ox, oy) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {acceptNode: nd => nd.parentElement.closest('.math') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT});
     const range = document.createRange();
     for (let nd = walker.nextNode(); nd; nd = walker.nextNode()) {
-      const cs = getComputedStyle(nd.parentElement), size = parseFloat(cs.fontSize), font = F[fontKey(cs)];
+      const cs = getComputedStyle(nd.parentElement), size = parseFloat(cs.fontSize), font = fontsFor(cs)[fontKey(cs)], upper = cs.textTransform === 'uppercase';
       const asc = ascentOffset(cs), dec = decorations(nd, stop), upm = font.unitsPerEm;
       let off = 0, d = '', bars = '';
       for (const ch of nd.data) {
@@ -92,7 +98,10 @@ function textBody(roots, stop, ox, oy) {
         if (ch === '\u200b' || ch === '\n' || ch === '\ufeff') continue;
         const rect = range.getClientRects()[0]; if (!rect || (!rect.width && ch.trim())) continue;
         const x = rect.left - ox, base = rect.top + asc - oy;
-        if (ch.trim()) d += cmdsToD(font.charToGlyph(ch).getPath(x, base, size).commands);
+        if (ch.trim()) {
+          const g = upper ? ch.toUpperCase() : ch;
+          d += cmdsToD((g.length > 1 ? font.getPath(g, x, base, size) : font.charToGlyph(g).getPath(x, base, size)).commands);
+        }
         const th = Math.max(0.6, 0.06 * size);
         if (dec.u) bars += `<rect x="${n2(x)}" y="${n2(base - font.tables.post.underlinePosition / upm * size - th / 2)}" width="${n2(rect.width)}" height="${n2(th)}"/>`;
         if (dec.s) bars += `<rect x="${n2(x)}" y="${n2(base - (font.tables.os2.yStrikeoutPosition || 0.29 * upm) / upm * size - th / 2)}" width="${n2(rect.width)}" height="${n2(th)}"/>`;
@@ -144,7 +153,7 @@ function slidePieces(s, el, model) {
 
 /** Render every slide off-screen and collect its pieces. */
 async function collect(doc, renderSlide, layoutOf, onProgress, only = null) {
-  await prepareFonts(doc.font || 'bonum');
+  await prepareFonts(doc);
   const host = document.createElement('div');
   Object.assign(host.style, {position: 'fixed', left: '-20000px', top: '0', width: W + 'px', height: H + 'px', overflow: 'hidden'});
   document.body.appendChild(host);

@@ -71,6 +71,14 @@ export const ICONS = {
   arrForward: '<rect x="3" y="9" width="10" height="10" rx="1.5"/><rect x="8" y="4" width="10" height="10" rx="1.5" fill="currentColor" fill-opacity=".35"/><path d="M21 21v-5M19 18l2-2 2 2"/>',
   arrBackward: '<rect x="8" y="4" width="10" height="10" rx="1.5"/><rect x="3" y="9" width="10" height="10" rx="1.5" fill="currentColor" fill-opacity=".35"/><path d="M21 16v5M19 19l2 2 2-2"/>',
   arrBack: '<rect x="7" y="7" width="10" height="10" rx="1.5" stroke-dasharray="2.5 2"/><rect x="3" y="11" width="10" height="10" rx="1.5" fill="currentColor" fill-opacity=".35"/><path d="M20 12v9M17 18l3 3 3-3"/>',
+  alObjL: '<path d="M4 3v18"/><rect x="7" y="6" width="12" height="4" rx="1"/><rect x="7" y="14" width="7" height="4" rx="1"/>',
+  alObjC: '<path d="M12 3v18"/><rect x="5" y="6" width="14" height="4" rx="1"/><rect x="8" y="14" width="8" height="4" rx="1"/>',
+  alObjR: '<path d="M20 3v18"/><rect x="5" y="6" width="12" height="4" rx="1"/><rect x="10" y="14" width="7" height="4" rx="1"/>',
+  alObjT: '<path d="M3 4h18"/><rect x="6" y="7" width="4" height="12" rx="1"/><rect x="14" y="7" width="4" height="7" rx="1"/>',
+  alObjM: '<path d="M3 12h18"/><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="8" width="4" height="8" rx="1"/>',
+  alObjB: '<path d="M3 20h18"/><rect x="6" y="5" width="4" height="12" rx="1"/><rect x="14" y="10" width="4" height="7" rx="1"/>',
+  distH: '<path d="M3 3v18M21 3v18"/><rect x="9.5" y="7" width="5" height="10" rx="1"/>',
+  distV: '<path d="M3 3h18M3 21h18"/><rect x="7" y="9.5" width="10" height="5" rx="1"/>',
   eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>'
 };

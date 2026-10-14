@@ -4,7 +4,7 @@
 import { Editor, Extension, generateHTML } from '@tiptap/core';
 import Document from '@tiptap/extension-document';
 import StarterKit from '@tiptap/starter-kit';
-import { TextStyle, Color, FontSize } from '@tiptap/extension-text-style';
+import { TextStyle, Color, FontSize, FontFamily } from '@tiptap/extension-text-style';
 import TextAlign from '@tiptap/extension-text-align';
 import Highlight from '@tiptap/extension-highlight';
 import Subscript from '@tiptap/extension-subscript';
@@ -16,6 +16,56 @@ import { emptyDoc } from './model.js';
 
 const hooks = {onEdit: null, onRendered: null, onPreview: null};
 
+/** Upper case display (the typed letters stay as they were): <span style="text-transform:uppercase">. */
+const TextCase = Extension.create({
+  name: 'textCase',
+  addGlobalAttributes() {
+    return [{types: ['textStyle'], attributes: {textTransform: {
+      default: null,
+      parseHTML: el => el.style.textTransform === 'uppercase' ? 'uppercase' : null,
+      renderHTML: a => a.textTransform ? {style: `text-transform:${a.textTransform}`} : {}
+    }}}];
+  },
+  addCommands() {
+    return {
+      setUppercase: () => ({chain}) => chain().setMark('textStyle', {textTransform: 'uppercase'}).run(),
+      unsetUppercase: () => ({chain}) => chain().setMark('textStyle', {textTransform: null}).removeEmptyTextStyle().run()
+    };
+  }
+});
+/** Text pasted from other programs: plain text, keeping only bold, italic, underline and links. */
+const escH = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+export function cleanPastedHTML(html) {
+  if (/data-pm-slice/.test(html)) return html.replace(/(font-size|line-height)\s*:[^;"']*;?/gi, '');   // copied inside the app: keep it
+  const d = new DOMParser().parseFromString(html, 'text/html'), out = [];
+  let cur = '';
+  const flush = () => { if (cur.trim()) out.push('<p>' + cur.trim() + '</p>'); cur = ''; };
+  const BLOCK = /^(P|DIV|H[1-6]|LI|TR|BLOCKQUOTE|PRE|UL|OL|TABLE|SECTION|ARTICLE|HEADER|FOOTER|DT|DD)$/;
+  (function walk(n, st) {
+    for (const c of n.childNodes) {
+      if (c.nodeType === 3) {
+        let t = escH(c.data.replace(/[\s\u00a0]+/g, ' ')); if (!t) continue;
+        if (st.u) t = `<u>${t}</u>`; if (st.i) t = `<em>${t}</em>`; if (st.b) t = `<strong>${t}</strong>`;
+        if (st.a) t = `<a href="${st.a.replace(/"/g, '&quot;')}">${t}</a>`;
+        cur += t; continue;
+      }
+      if (c.nodeType !== 1 || /^(SCRIPT|STYLE|HEAD|TITLE|META|LINK|NOSCRIPT)$/.test(c.tagName)) continue;
+      if (c.tagName === 'BR') { flush(); continue; }
+      const s2 = {...st}, cs = c.style, fw = cs && cs.fontWeight;
+      if (/^(B|STRONG)$/.test(c.tagName)) s2.b = !(fw === 'normal' || (fw && +fw < 600));
+      if (fw === 'bold' || +fw >= 600) s2.b = true; else if (fw === 'normal' || (fw && +fw < 600)) s2.b = false;
+      if (/^(I|EM)$/.test(c.tagName) || (cs && cs.fontStyle === 'italic')) s2.i = true;
+      if (c.tagName === 'U' || (cs && /underline/.test(cs.textDecoration || cs.textDecorationLine || ''))) s2.u = true;
+      if (c.tagName === 'A' && c.getAttribute('href')) s2.a = c.getAttribute('href');
+      const block = BLOCK.test(c.tagName);
+      if (block) flush();
+      walk(c, s2);
+      if (block) flush();
+    }
+  })(d.body, {});
+  flush();
+  return out.join('') || '<p></p>';
+}
 /** Letter spacing as a text style (like the font size): <span style="letter-spacing:…">. */
 const LetterSpacing = Extension.create({
   name: 'letterSpacing',
@@ -41,12 +91,12 @@ function extensions(kind = 'text') {
   return [
     StarterKit.configure({
       heading: table ? false : {levels: [1, 2, 3]}, code: false, codeBlock: false, blockquote: false, horizontalRule: false,
-      link: false, bulletList: false, orderedList: false, listItem: false, dropcursor: {color: '#2f6fdb', width: 2},
+      link: {openOnClick: false, autolink: true, linkOnPaste: true, HTMLAttributes: {rel: 'noopener', target: '_blank'}}, bulletList: false, orderedList: false, listItem: false, dropcursor: {color: '#2f6fdb', width: 2},
       ...(table ? {document: false} : {})
     }),
     ...(table ? [Document.extend({content: 'table'}), KvTable, KvTableRow, KvTableHeader, KvTableCell] : []),
     ListItem, KvBulletList, KvOrderedList, ListMarkers,
-    TextStyle, Color, FontSize, LetterSpacing,
+    TextStyle, Color, FontSize, FontFamily, LetterSpacing, TextCase,
     Highlight.configure({multicolor: true}),
     TextAlign.configure({types: table ? ['paragraph'] : ['heading', 'paragraph']}),
     Subscript, Superscript,
@@ -134,7 +184,7 @@ export function mountEditor(host, json, {onUpdate, onSelection, onFocus, onBlur}
     editorProps: {
       attributes: {spellcheck: 'true', lang: 'hu'},
       // pasted text and formulas take the size and font of the text box
-      transformPastedHTML: html => html.replace(/(font-size|font-family|line-height)\s*:[^;"']*;?/gi, ''),
+      transformPastedHTML: cleanPastedHTML,
       handleDOMEvents: {
         dragstart: (view, e) => { if (e.target?.closest?.('td,th')) { e.preventDefault(); return true; } return false; }
       }
