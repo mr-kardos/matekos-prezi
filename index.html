@@ -19,7 +19,6 @@
     <button class="btn" id="bExport" title="Exportálás PowerPoint-bemutatóba vagy PDF-be">Exportálás</button>
     <button class="btn" id="bTpl" title="Sablonszerkesztő: mester és elrendezések (mint a PowerPoint diaminta-nézete)">Sablon</button>
     <button class="btn" id="bPlay" title="Lejátszás az aktuális diától (F5)">Lejátszás</button>
-    <select id="fontSel" class="sel fontsel" title="A bemutató betűtípusa (szöveg és képletek)" aria-label="Betűtípus"></select>
     <select id="zoomSel" class="sel" title="Nagyítás" aria-label="Nagyítás">
       <option value="auto">Illesztés</option><option value="50">50%</option><option value="75">75%</option><option value="100">100%</option><option value="125">125%</option><option value="150">150%</option>
     </select>
@@ -30,9 +29,7 @@
       <button class="tb" data-cmd="redo" data-icon="redo" title="Mégis (Ctrl/⌘+Shift+Z)"></button>
     </div>
     <div class="grp">
-      <select id="styleSel" class="sel style" title="Bekezdésstílus" aria-label="Bekezdésstílus" data-k="text">
-        <option value="p">Normál</option><option value="h1">Címsor 1</option><option value="h2">Címsor 2</option><option value="h3">Címsor 3</option>
-      </select>
+      <button class="tb fontbtn" data-pop="popFont" data-k="text" title="Betűtípus – szerkesztés közben a kijelölt szövegre, egyébként az egész dobozra"><span id="fontLabel">Betűtípus</span></button>
       <span class="sizebox"><input id="sizeIn" class="sel size" inputmode="decimal" title="Betűméret (pt)" aria-label="Betűméret" value="24"><button class="tb mini sizedd" data-pop="popSize" data-k="text" data-icon="chev" title="Betűméretek"></button></span>
     </div>
     <div class="grp">
@@ -43,6 +40,7 @@
       <button class="tb" data-cmd="superscript" data-k="text" title="Felső index">x²</button>
       <button class="tb" data-cmd="subscript" data-k="text" title="Alsó index">x₂</button>
       <button class="tb cbtn" data-pop="popColor" data-k="text" data-icon="colorA" title="Betűszín"><i class="cbar" id="colorBar"></i></button>
+      <button class="tb" data-cmd="upper" data-k="text" title="Csupa nagybetű / ahogy begépelted (a betűk nem változnak, csak a megjelenésük)"><span class="aa">Aa</span></button>
       <button class="tb cbtn" data-pop="popHi" data-k="text" data-icon="marker" title="Kijelölt szöveg kiemelése"><i class="cbar" style="background:#fff176"></i></button>
     </div>
     <div class="grp">
@@ -181,6 +179,11 @@
   <div class="ptitle">Körvonal színe</div><div class="swg" id="swStroke"></div>
   <div class="ptitle" style="margin-top:8px">Vastagság</div><div class="bwg" id="bwStroke"></div>
 </div>
+<div class="pop" id="popFont" hidden>
+  <button class="pitem fbase" data-fam="">Alapbetűtípus (a sablonból)</button>
+  <div class="ptitle">Képletbarát betűtípusok</div><div id="fontMath"></div>
+  <div class="ptitle">Egyéb betűtípusok <span class="phint">(a képletek az alapbetűtípus matematikai betűit használják)</span></div><div id="fontOther"></div>
+</div>
 <div class="pop" id="popSize" hidden><div class="ptitle">Betűméret (pt)</div><div class="sizegrid" id="sizeGrid"></div></div>
 <div class="pop" id="popSpacing" hidden>
   <div class="ptitle">Betűköz</div>
@@ -219,8 +222,8 @@
     <h1>Matekos Prezi</h1>
     <p class="home-sub">Bemutatók élő TeX-képletekkel, működő PowerPoint-animációkkal</p>
     <div class="home-btns">
-      <button class="hbtn primary" id="homeNew"><span class="hico">＋</span>Új bemutató</button>
-      <button class="hbtn" id="homeOpen"><span class="hico">📂</span>Meglévő megnyitása</button>
+      <button class="hbtn primary" id="homeNew"><span class="hico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span>Új bemutató</button>
+      <button class="hbtn" id="homeOpen"><span class="hico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 10h18"/></svg></span>Meglévő megnyitása</button>
     </div>
     <button class="hlink" id="homeResume" hidden></button>
   </div>

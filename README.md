@@ -1,4 +1,4 @@
-# Matekos Prezi 0.6
+# Matekos Prezi 0.7
 
 Presentation editor with live inline TeX, the twin of **Matekos Doksi**. Built with **TipTap**
 (text editor), **MathJax 4** (formulas), **MathLive** (visual formula editor) and **Tauri 2**
@@ -89,5 +89,11 @@ packages (copied into `public/mathjax/fonts` at build time).
 | stix2 | STIX Two Text | SIL Open Font License |
 | fira | Fira Sans | SIL Open Font License |
 | dejavu | DejaVu Serif | Bitstream Vera / DejaVu licence (free) |
+
+Other text fonts (no math version – formulas next to them use the base font's math): Liberation Sans/Mono
+(OFL), Carlito (OFL), Caladea (Apache 2.0), Roboto (Apache 2.0), Open Sans (OFL), Lato (OFL), Montserrat (OFL),
+Inter (OFL), Noto Sans/Serif (OFL), Linux Libertine (OFL/GPL), Ubuntu (Ubuntu Font Licence), Atkinson
+Hyperlegible (OFL), Comic Neue (OFL), JetBrains Mono (OFL). All four styles, Hungarian letters checked; the files
+are subset to Latin, Greek and common symbols.
 
 Licence texts: `fonts-official/`.
