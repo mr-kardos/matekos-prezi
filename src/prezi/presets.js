@@ -1,6 +1,6 @@
 // Built-in templates. "Üres" is the default of every new presentation (white slides, no decoration).
-// Elearning, Maraton and Elmélet are PROVISIONAL designs that show how presets work; they will be replaced by the
-// final .mprezi templates. A file dropped into src/presets/<key>.mprezi overrides the built-in definition below
+// Elearning comes from src/presets/elearning.mprezi (the final design). Maraton and Elmélet are not finished yet:
+// they are shown locked. A file dropped into src/presets/<key>.mprezi overrides the built-in definition below
 // (its master, slide types, text styles and font set are used).
 import { uid, ph, textDoc, T, TITLE_PROMPT } from './model.js';
 
@@ -31,7 +31,7 @@ export const PRESETS = {
     }
   },
   elearning: {
-    label: 'Elearning', note: 'Ideiglenes minta – a végleges sablon később kerül ide.', swatch: ['#ffffff', '#1f8a9e'],
+    label: 'Elearning', note: 'Studium Generale Matematika e-learning sablon: nyitó dia, tartalmi dia, záró dia.', swatch: ['#fbf6ef', '#da291c'],
     build: () => {
       const c = {title: '#16677a', subtitle: '#4a5866', body: '#1a1a1a', coverTitle: '#ffffff'};
       const t = layouts({...c, subtitle: '#e6f4f7'}, {titleX: 90, titleW: 1130});
@@ -42,7 +42,7 @@ export const PRESETS = {
     }
   },
   maraton: {
-    label: 'Maraton', note: 'Ideiglenes minta – a végleges sablon később kerül ide.', swatch: ['#f3f3f3', '#da291c'],
+    label: 'Maraton', note: 'Hamarosan elérhető.', locked: true, swatch: ['#f3f3f3', '#da291c'],
     build: () => {
       const c = {title: '#ffffff', subtitle: '#3b3b3b', body: '#1a1a1a', coverTitle: '#da291c'};
       const t = layouts(c, {titleY: 22, bodyY: 150});
@@ -53,7 +53,7 @@ export const PRESETS = {
     }
   },
   elmelet: {
-    label: 'Elmélet', note: 'Ideiglenes minta – a végleges sablon később kerül ide.', swatch: ['#fbfaf6', '#22325c'],
+    label: 'Elmélet', note: 'Hamarosan elérhető.', locked: true, swatch: ['#fbfaf6', '#22325c'],
     build: () => {
       const c = {title: '#22325c', subtitle: '#5a6378', body: '#1a1a1a'};
       return {font: 'modern', master: {background: null, bgColor: '#fbfaf6', objects: [rect(60, 112, 1160, 2, '#22325c'), rect(60, 660, 1160, 1, '#b8bccb'), field('slideNumber', 1100, 668, 120, '#5a6378')]},

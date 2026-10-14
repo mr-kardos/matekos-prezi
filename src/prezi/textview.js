@@ -2,6 +2,7 @@
 // pasted TeX, formula editor), tables and lists. A box that is not being edited is drawn from the same
 // document with the same HTML, CSS and MathJax rendering, so it looks exactly like the live editor.
 import { Editor, Extension, generateHTML } from '@tiptap/core';
+import { Plugin } from '@tiptap/pm/state';
 import Document from '@tiptap/extension-document';
 import StarterKit from '@tiptap/starter-kit';
 import { TextStyle, Color, FontSize, FontFamily } from '@tiptap/extension-text-style';
@@ -66,6 +67,29 @@ export function cleanPastedHTML(html) {
   flush();
   return out.join('') || '<p></p>';
 }
+/** Slides never use display (centred, own-line) formulas – pasted $$…$$ / \\[…\\] stay in the line. */
+const InlineMathOnly = Extension.create({
+  name: 'inlineMathOnly',
+  addProseMirrorPlugins() {
+    return [new Plugin({appendTransaction: (trs, _old, state) => {
+      if (!trs.some(t => t.docChanged)) return null;
+      let tr = null;
+      state.doc.descendants((n, pos) => { if (n.type.name === 'math' && n.attrs.display) (tr ??= state.tr).setNodeMarkup(pos, undefined, {...n.attrs, display: false}, n.marks); });
+      return tr;
+    }})];
+  }
+});
+/** Hanging indent inside lists: the whole paragraph moves right, the list symbol stays (more space after it). */
+const ListHang = Extension.create({
+  name: 'listHang',
+  addGlobalAttributes() {
+    return [{types: ['paragraph'], attributes: {hang: {
+      default: null,
+      parseHTML: el => { const v = parseFloat(el.getAttribute('data-hang')); return isFinite(v) ? v : null; },
+      renderHTML: a => a.hang ? {'data-hang': a.hang, style: `--hang:${a.hang}cm;padding-left:${a.hang}cm`} : {}
+    }}}];
+  }
+});
 /** Letter spacing as a text style (like the font size): <span style="letter-spacing:…">. */
 const LetterSpacing = Extension.create({
   name: 'letterSpacing',
@@ -96,7 +120,7 @@ function extensions(kind = 'text') {
     }),
     ...(table ? [Document.extend({content: 'table'}), KvTable, KvTableRow, KvTableHeader, KvTableCell] : []),
     ListItem, KvBulletList, KvOrderedList, ListMarkers,
-    TextStyle, Color, FontSize, FontFamily, LetterSpacing, TextCase,
+    TextStyle, Color, FontSize, FontFamily, LetterSpacing, TextCase, InlineMathOnly, ListHang,
     Highlight.configure({multicolor: true}),
     TextAlign.configure({types: table ? ['paragraph'] : ['heading', 'paragraph']}),
     Subscript, Superscript,
@@ -157,7 +181,8 @@ export function renderStatic(host, json, onRendered, kind = 'text') {
   }
   for (const sp of pm.querySelectorAll('span.math')) {
     sp.contentEditable = 'false';
-    renderInto(sp, sp.getAttribute('data-tex') || '', sp.getAttribute('data-display') === '1', onRendered, !!sp.closest('strong,b'));
+    sp.classList.remove('disp');
+    renderInto(sp, sp.getAttribute('data-tex') || '', false, onRendered, !!sp.closest('strong,b'));
   }
   host.innerHTML = ''; host.appendChild(pm);
   return pm;

@@ -18,13 +18,13 @@ async function download(filename, blob) {
   let dl = null;
   try { if (window.claude && window.claude.use) dl = await window.claude.use('downloads'); } catch (e) { dl = null; }
   if (dl) {
-    try { await dl.save({filename, data: blob}); return 'Elmentve: ' + filename; }
+    try { await dl.save({filename, data: blob}); return 'Mentve'; }
     catch (e) { return e && e.code === 'declined' ? 'Mentés megszakítva' : 'A fájl mentése nem sikerült' + (e && e.code ? ' (' + e.code + ')' : ''); }
   }
   const url = URL.createObjectURL(blob), a = document.createElement('a');
   a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
-  return 'Elmentve: ' + filename;
+  return 'Mentve';
 }
 
 /** Save the editable presentation (.mprezi = zip). */
@@ -39,7 +39,7 @@ export async function savePresentation(blob, title, saveAs) {
     }
     await writeFile(path, new Uint8Array(await blob.arrayBuffer()));
     currentPath = path;
-    return 'Elmentve: ' + baseName(path);
+    return 'Mentve';
   }
   if (window.showSaveFilePicker) {                       // Chrome / Edge: real files, saved in place
     try {
@@ -47,7 +47,7 @@ export async function savePresentation(blob, title, saveAs) {
       if (h && (await h.queryPermission?.({mode: 'readwrite'})) !== 'granted' && (await h.requestPermission?.({mode: 'readwrite'})) !== 'granted') h = null;
       if (!h) h = await window.showSaveFilePicker({suggestedName: safeName(title) + '.mprezi', types: MPREZI_TYPE});
       const w = await h.createWritable(); await w.write(blob); await w.close();
-      currentHandle = h; return 'Elmentve: ' + h.name;
+      currentHandle = h; return 'Mentve';
     } catch (e) { if (e && e.name === 'AbortError') return 'Mentés megszakítva'; }
   }
   return download(safeName(title) + '.mprezi', blob);
@@ -61,7 +61,7 @@ export async function saveExport(blob, title, ext, label) {
     const path = await save({defaultPath: safeName(title) + '.' + ext, filters: [{name: label, extensions: [ext]}]});
     if (!path) return 'Mentés megszakítva';
     await writeFile(path, new Uint8Array(await blob.arrayBuffer()));
-    return 'Elmentve: ' + baseName(path);
+    return 'Mentve';
   }
   return download(safeName(title) + '.' + ext, blob);
 }

@@ -4,13 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Matekos Prezi</title>
+<link rel="icon" type="image/png" href="/app-icon.png">
 </head>
 <body>
 <header class="app" id="app">
   <div class="bar1">
     <div class="b1left">
-      <button class="btn menubtn" data-pop="popFile" id="bFile" title="Új bemutató, megnyitás, exportálás">Fájl</button>
-      <span class="split"><button class="btn primary" id="bSave" title="Mentés a bemutató fájljába (Ctrl/⌘+S) – csak az első mentéskor kérdez rá a helyre">Mentés</button><button class="btn primary splitdd" data-pop="popSave" title="További mentési lehetőségek" aria-label="További mentési lehetőségek"></button></span>
+      <button class="btn menubtn wbtn" data-pop="popFile" id="bFile" title="Új bemutató, megnyitás, kezdőképernyő"><span>Fájl</span><svg class="ddi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+      <button class="btn menubtn" data-pop="popExport" id="bExport" title="Exportálás PowerPoint-bemutatóba vagy PDF-be"><span>Exportálás</span><svg class="ddi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+      <span class="split wbtn"><button class="btn primary" id="bSave" title="Mentés a bemutató fájljába (Ctrl/⌘+S) – csak az első mentéskor kérdez rá a helyre">Mentés</button><button class="btn primary splitdd" data-pop="popSave" title="Mentés másként" aria-label="Mentés másként"><svg class="ddi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></span>
+      <span class="b1sep"></span>
+      <button class="tb" data-cmd="undo" data-icon="undo" title="Visszavonás (Ctrl/⌘+Z)"></button>
+      <button class="tb" data-cmd="redo" data-icon="redo" title="Mégis (Ctrl/⌘+Shift+Z)"></button>
     </div>
     <div class="b1mid">
       <input id="docTitle" class="title" value="Névtelen bemutató" aria-label="Bemutató címe">
@@ -19,15 +24,12 @@
     <div class="b1right">
       <button class="btn tplbtn" id="bTpl" title="Sablonszerkesztő: kész sablonok, mester és diatípusok"><span class="tpll">Sablon:</span> <b id="tplName">Üres</b></button>
       <button class="btn" id="bPlay" title="Lejátszás az aktuális diától (F5)">Lejátszás</button>
-      <select id="zoomSel" class="sel" title="Nagyítás" aria-label="Nagyítás">
-        <option value="auto">Illesztés</option><option value="50">50%</option><option value="75">75%</option><option value="100">100%</option><option value="125">125%</option><option value="150">150%</option>
-      </select>
+<button class="btn menubtn zoombtn" data-pop="popZoom" id="bZoom" title="Nagyítás – Illesztés: a dia kitölti a munkaterületet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/></svg><span id="zoomLabel"></span><svg class="ddi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
     </div>
   </div>
   <div class="ribbon" id="ribbon">
     <div class="grp">
-      <button class="tb" data-cmd="undo" data-icon="undo" title="Visszavonás (Ctrl/⌘+Z)"></button>
-      <button class="tb" data-cmd="redo" data-icon="redo" title="Mégis (Ctrl/⌘+Shift+Z)"></button>
+      <button class="tb" data-cmd="painter" data-icon="painter" title="Formátummásoló: a kijelölt objektum formázását (szöveg, kitöltés, körvonal, animációk) átviszi a következőre, amelyre kattintasz. Esc: mégse"></button>
     </div>
     <div class="grp">
       <button class="tb fontbtn" data-pop="popFont" data-k="text" title="Betűtípus – szerkesztés közben a kijelölt szövegre, egyébként az egész dobozra"><span id="fontLabel">Betűtípus</span></button>
@@ -94,9 +96,9 @@
     <label class="tsz" data-icon="rowH" title="A kijelölt sorok magassága (üres = automatikus)"><input type="number" id="tpRowH" min="3" step="1" placeholder="auto">mm</label>
     <label class="tsz" data-icon="colW" title="A kijelölt oszlopok szélessége (üres = automatikus)"><input type="number" id="tpColW" min="5" step="1" placeholder="auto">mm</label>
     <span class="ctxsep"></span>
-    <button class="tb" data-talign="left" data-icon="tAlignL" title="Táblázat balra"></button>
-    <button class="tb" data-talign="center" data-icon="tAlignC" title="Táblázat középen"></button>
-    <button class="tb" data-talign="right" data-icon="tAlignR" title="Táblázat jobbra"></button>
+    
+    
+    
   </div>
 </header>
 
@@ -145,6 +147,7 @@
 <div class="pop" id="popLine" hidden>
   <div class="ptitle">Sorköz</div>
   <div id="lineList"></div>
+  <div class="prow lhrow"><label>Egyéni <input type="text" inputmode="decimal" id="lhIn" placeholder="pl. 1,3"></label><button class="btn" id="lhOk">OK</button></div>
   <div class="psep"></div>
   
 </div>
@@ -153,13 +156,14 @@
   <div class="pf">
     <label>Bal behúzás (cm)<input type="number" step="0.25" data-pf="indentLeft"></label>
     <label>Jobb behúzás (cm)<input type="number" step="0.25" data-pf="indentRight"></label>
-    <label>Első sor (cm)<input type="number" step="0.25" data-pf="firstLine"></label>
+    <label>Első sor<select id="pfFirstKind"><option value="none">Nincs</option><option value="first">Első sor beljebb</option><option value="hang">Függő</option></select></label>
+    <label>Mértéke (cm)<input type="number" step="0.25" min="0" id="pfFirstVal"></label>
     <label>Sorköz<input type="number" step="0.05" min="0.8" data-pf="lineHeight"></label>
     <label>Térköz előtte (pt)<input type="number" step="1" min="0" data-pf="spaceBefore"></label>
     <label>Térköz utána (pt)<input type="number" step="1" min="0" data-pf="spaceAfter"></label>
   </div>
   <label class="chk" style="margin-top:8px"><input type="checkbox" data-pf="keepNext"> Együtt a következő bekezdéssel</label>
-  <div class="phint">Negatív első sor érték függő behúzást ad.</div>
+  <div class="phint">Függő behúzás listában: a felsorolásjel helyben marad, utána nagyobb lesz a hely.</div>
 </div>
 <div class="pop" id="popTblIns" hidden>
   <button class="pitem" data-tbl="addRowBefore">Sor fölé</button>
@@ -169,6 +173,7 @@
 </div>
 <div class="pop" id="popTblDel" hidden>
   <button class="pitem" data-tbl="deleteRow">Sor törlése</button>
+  <button class="pitem danger" data-tbl="deleteTable">Az egész táblázat törlése</button>
   <button class="pitem" data-tbl="deleteColumn">Oszlop törlése</button>
   <div class="psep"></div>
   
@@ -181,15 +186,15 @@
   <div class="ptitle" style="margin-top:8px">Vastagság</div><div class="bwg" id="bwStroke"></div>
 </div>
 <div class="pop" id="popFont" hidden>
-  <button class="pitem fbase" data-fam="">Alapbetűtípus (a sablonból)</button>
+  <button class="pitem fbase" data-fam="">Alap betűtípus (a sablonból)</button>
   <div class="ptitle">Képletbarát betűtípusok</div><div id="fontMath"></div>
+  <div class="psep"></div>
   <div class="ptitle">Egyéb betűtípusok <span class="phint">(a képletek az alapbetűtípus matematikai betűit használják)</span></div><div id="fontOther"></div>
 </div>
 <div class="pop" id="popSize" hidden><div class="ptitle">Betűméret (pt)</div><div class="sizegrid" id="sizeGrid"></div></div>
 <div class="pop" id="popSpacing" hidden>
   <div class="ptitle">Betűköz</div>
-  <div class="spslide"><input type="range" id="spacingR" min="-3" max="10" step="0.1" value="0"><input type="number" id="spacingIn" min="-3" max="10" step="0.1" value="0"><span>pt</span></div>
-  <div class="prow"><button class="btn" id="spacingReset">Normál (0 pt)</button></div>
+  <div class="sprow"><input type="range" id="spacingR" min="-3" max="10" step="0.1" value="0"><input type="number" id="spacingIn" min="-3" max="10" step="0.1" value="0"><span>pt</span><button class="btn" id="spacingReset" title="Normál betűköz">0</button></div>
   <div class="phint">Szerkesztés közben a kijelölt szövegre, egyébként az egész dobozra.</div>
 </div>
 <div class="pop" id="popPh" hidden>
@@ -210,12 +215,18 @@
 <div class="pop" id="popFile" hidden>
   <button class="pitem" id="fNew">Új bemutató</button>
   <button class="pitem" id="fOpen">Megnyitás…</button>
-  <div class="psep"></div><div class="ptitle">Exportálás</div>
+  <div class="psep"></div>
+  <button class="pitem" id="fHome">Kezdőképernyő</button>
+</div>
+<div class="pop" id="popExport" hidden>
   <button class="pitem" id="expPptx2">PowerPoint-bemutató (.pptx) – animációkkal</button>
   <button class="pitem" id="expPdf2">PDF – diánként egy oldal</button>
   <button class="pitem" id="expPdfSteps2">PDF – lépésenként egy oldal</button>
-  <div class="psep"></div>
-  <button class="pitem" id="fHome">Kezdőképernyő</button>
+  <div class="phint" style="margin:4px 8px">A szövegek és képletek pontosan úgy jelennek meg, ahogy itt látszanak, betűtípus telepítése nélkül.</div>
+</div>
+<div class="pop" id="popZoom" hidden>
+  <button class="pitem" data-zoom="auto">Illesztés (kitölti a munkaterületet)</button>
+  <button class="pitem" data-zoom="50">50%</button><button class="pitem" data-zoom="75">75%</button><button class="pitem" data-zoom="100">100%</button><button class="pitem" data-zoom="125">125%</button><button class="pitem" data-zoom="150">150%</button>
 </div>
 <div class="pop" id="popSave" hidden>
   <button class="pitem" id="fSaveAs">Mentés másként… <span class="phint">(Ctrl/⌘+Shift+S)</span></button>
@@ -236,7 +247,7 @@
 <div class="mprev" id="mprev" hidden></div>
 <div class="home" id="home" hidden>
   <div class="home-card">
-    <div class="home-logo">P</div>
+    <img class="home-logo-img" src="/app-icon.png" alt="" width="84" height="84">
     <h1>Matekos Prezi</h1>
     <p class="home-sub">Bemutatók élő TeX-képletekkel, működő PowerPoint-animációkkal</p>
     <div class="home-btns">

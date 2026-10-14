@@ -99,7 +99,7 @@ const CATS = [
     ['→', '\\to'], ['←', '\\leftarrow'], ['↔', '\\leftrightarrow'], ['⇒', '\\Rightarrow'], ['⇐', '\\Leftarrow'], ['⇔', '\\Leftrightarrow'], ['↦', '\\mapsto'], ['↑', '\\uparrow'], ['↓', '\\downarrow'], ['⟶', '\\longrightarrow'], ['⟹', '\\Longrightarrow']
   ]],
   ['Egyéb', [
-    ['szöveg', '\\text{#?}', 'Szöveg a képletben'], ['kis köz', '\\,', 'Kis szóköz'], ['köz', '\\quad', 'Szóköz'], ['∝', '\\propto', 'Arányos'], ['≐', '\\doteq'], ['≙', '\\triangleq', 'Definíció szerint'], ['∗', '\\ast'], ['†', '\\dagger'], ['ℓ', '\\ell'], ['ℏ', '\\hbar'], ['∅', '\\varnothing']
+    ['kis köz', '\\,', 'Kis szóköz'], ['köz', '\\quad', 'Szóköz'], ['∝', '\\propto', 'Arányos'], ['≐', '\\doteq'], ['≙', '\\triangleq', 'Definíció szerint'], ['∗', '\\ast'], ['†', '\\dagger'], ['ℓ', '\\ell'], ['ℏ', '\\hbar'], ['∅', '\\varnothing']
   ]]
 ];
 /* ---- the dialog ---- */
@@ -130,7 +130,6 @@ function build() {
   dlg = document.getElementById('mathDlg');
   dlg.innerHTML = `
     <div class="md-head" id="mdHead"><b>Képletszerkesztő</b><span class="phint">Kattints a képletbe, és építsd fel a gombokkal vagy gépeléssel · Enter: kész · Esc: bezár</span><button class="md-x" id="mdX" aria-label="Bezárás">×</button></div>
-    <div class="mk-row mk-freq" id="mkFreq">${FREQUENT.map((it, i) => btn(it, i, 'f')).join('')}</div>
     <div class="mk-tabs" id="mkTabs">${CATS.map((c, i) => `<button data-c="${i}" class="${i === 0 ? 'on' : ''}">${c[0]}</button>`).join('')}</div>
     <div class="mk-row mk-pal" id="mkPal"></div>
     <math-field id="mdField" math-virtual-keyboard-policy="manual"></math-field>
@@ -162,7 +161,7 @@ function build() {
     const list = b.dataset.g === 'f' ? FREQUENT : CATS[curCat][1];
     insert(list[+b.dataset.i][1]);
   };
-  for (const id of ['#mkFreq', '#mkPal']) { const el = dlg.querySelector(id); el.addEventListener('mousedown', e => e.preventDefault()); el.addEventListener('click', pick); }
+  for (const id of ['#mkPal']) { const el = dlg.querySelector(id); el.addEventListener('mousedown', e => e.preventDefault()); el.addEventListener('click', pick); }
   cats.addEventListener('mousedown', e => e.preventDefault());
   cats.addEventListener('click', e => { const b = e.target.closest('[data-c]'); if (b) showCat(+b.dataset.c); });
   dlg.querySelector('#mdX').addEventListener('click', close);
@@ -185,12 +184,47 @@ function build() {
     dlg.style.transform = 'none';
   });
   head.addEventListener('pointerup', () => { dragging = null; });
+  // resize by the four corners
+  for (const c of ['nw', 'ne', 'sw', 'se']) {
+    const h = document.createElement('div'); h.className = 'md-rs md-' + c; dlg.appendChild(h);
+    h.addEventListener('pointerdown', e => {
+      e.preventDefault(); e.stopPropagation(); h.setPointerCapture(e.pointerId);
+      const r = dlg.getBoundingClientRect(), x0 = e.clientX, y0 = e.clientY;
+      Object.assign(dlg.style, {left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px', transform: 'none', maxHeight: 'none'});
+      const mv = ev => {
+        const dx = ev.clientX - x0, dy = ev.clientY - y0;
+        let L = r.left, T = r.top, Wd = r.width, Ht = r.height;
+        if (c.includes('e')) Wd = r.width + dx; if (c.includes('s')) Ht = r.height + dy;
+        if (c.includes('w')) { Wd = r.width - dx; L = r.left + dx; } if (c.includes('n')) { Ht = r.height - dy; T = r.top + dy; }
+        Wd = Math.max(420, Math.min(innerWidth - 8, Wd)); Ht = Math.max(320, Math.min(innerHeight - 8, Ht));
+        if (c.includes('w')) L = r.left + r.width - Wd; if (c.includes('n')) T = r.top + r.height - Ht;
+        Object.assign(dlg.style, {left: Math.max(0, L) + 'px', top: Math.max(0, T) + 'px', width: Wd + 'px', height: Ht + 'px'});
+      };
+      const up = () => { h.removeEventListener('pointermove', mv); h.removeEventListener('pointerup', up); };
+      h.addEventListener('pointermove', mv); h.addEventListener('pointerup', up);
+    });
+  }
   showCat(0);
+}
+/** TeX shown on a palette button: the template with sample letters and empty boxes. */
+function labelTex(tpl) {
+  if (/^\\(,|quad|;|:|!)$/.test(tpl.trim())) return null;          // spacing: keep the word label
+  return tpl.replace(/#@/g, 'x').replace(/#0/g, 'a').replace(/#\?/g, '\\square');
 }
 function showCat(i) {
   curCat = i;
   for (const b of cats.children) b.classList.toggle('on', +b.dataset.c === i);
   palette.innerHTML = CATS[i][1].map((it, k) => btn(it, k, 'c')).join('');
+  CATS[i][1].forEach((it, k) => {
+    const t = labelTex(it[1]); if (!t) return;
+    const b = palette.querySelector(`.mk[data-i="${k}"]`), keep = b.innerHTML;
+    const span = document.createElement('span'); span.className = 'mkm';
+    renderInto(span, t, true, () => {
+      const err = span.querySelector('[data-mjx-error], .merr');
+      if (err || !span.querySelector('svg')) { b.innerHTML = keep; return; }
+      b.innerHTML = ''; b.appendChild(span); b.classList.add('typeset');
+    });
+  });
 }
 function hide() { dlg.hidden = true; onApply = onDelete = null; }
 function close() { const a = onApply; hide(); a && a(null); }

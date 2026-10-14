@@ -108,6 +108,12 @@ function textBody(roots, stop, ox, oy) {
       }
       if (d || bars) body += `<g fill="${cs.color}">${d ? `<path d="${d}"/>` : ''}${bars}</g>`;
     }
+    // pictures inside the text (e.g. picture list bullets)
+    for (const im of root.querySelectorAll('img')) {
+      if (im.closest('.math') || !im.src) continue;
+      const r = im.getBoundingClientRect(); if (!r.width) continue;
+      body += `<image href="${im.src}" xlink:href="${im.src}" x="${n2(r.left - ox)}" y="${n2(r.top - oy)}" width="${n2(r.width)}" height="${n2(r.height)}" preserveAspectRatio="none"/>`;
+    }
     // formulas
     for (const sp of root.querySelectorAll('.math')) {
       const svg = sp.querySelector('svg'); if (!svg) continue;

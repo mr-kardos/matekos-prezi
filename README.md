@@ -1,4 +1,4 @@
-# Matekos Prezi 0.8
+# Matekos Prezi 0.9.1
 
 Presentation editor with live inline TeX, the twin of **Matekos Doksi**. Built with **TipTap**
 (text editor), **MathJax 4** (formulas), **MathLive** (visual formula editor) and **Tauri 2**
@@ -57,8 +57,9 @@ Browser test version: `npm run build:web` → one self-contained `dist-web/index
   and normal text (size, colour, bold, italic) that update the placeholders and new text boxes.
 * Home screen (new / open / continue), in-app confirmation before deleting a non-empty slide or starting a
   new presentation, ↑/↓ to move between slides.
-* Built-in templates (Üres = default of every new file, Elearning, Maraton, Elmélet – the last three are provisional
-  until the final .mprezi files are placed in `src/presets/`); applying one keeps the slides' content.
+* Built-in templates: Üres (default of every new file), Elearning (`src/presets/elearning.mprezi`: opening,
+  content and closing slide types); Maraton and Elmélet are shown locked until they are finished.
+  Applying a template keeps the slides' content.
 * Slideshow preview inside the app.
 
 ## Export
