@@ -79,6 +79,7 @@ export const ICONS = {
   alObjB: '<path d="M3 20h18"/><rect x="6" y="5" width="4" height="12" rx="1"/><rect x="14" y="10" width="4" height="7" rx="1"/>',
   distH: '<path d="M3 3v18M21 3v18"/><rect x="9.5" y="7" width="5" height="10" rx="1"/>',
   distV: '<path d="M3 3h18M3 21h18"/><rect x="7" y="9.5" width="10" height="5" rx="1"/>',
+  trans: '<rect x="2.5" y="5" width="12" height="9" rx="1.5"/><rect x="9.5" y="10" width="12" height="9" rx="1.5" fill="currentColor" fill-opacity=".3"/><path d="M17 3.5h3v3"/>',
   eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>'
 };

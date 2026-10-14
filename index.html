@@ -8,20 +8,21 @@
 <body>
 <header class="app" id="app">
   <div class="bar1">
-    <div class="brand" id="brand" title="Matekos Prezi"><span class="logo">P</span><span class="bname">Matekos Prezi</span></div>
-    <input id="docTitle" class="title" value="Névtelen bemutató" aria-label="Bemutató címe">
-    <span id="status" class="status"></span>
-    <div class="spacer"></div>
-    <button class="btn" id="bNew">Új</button>
-    <button class="btn" id="bOpen" title="Matekos Prezi bemutató megnyitása (Ctrl/⌘+O)">Megnyitás</button>
-    <button class="btn primary" id="bSave" title="Mentés a bemutató fájljába (Ctrl/⌘+S) – az első mentéskor rákérdez a helyre">Mentés</button>
-    <button class="btn" id="bSaveAs" title="Mentés másként: új fájlba (Ctrl/⌘+Shift+S) – a korábbi fájl változatlan marad">Mentés másként</button>
-    <button class="btn" id="bExport" title="Exportálás PowerPoint-bemutatóba vagy PDF-be">Exportálás</button>
-    <button class="btn" id="bTpl" title="Sablonszerkesztő: mester és elrendezések (mint a PowerPoint diaminta-nézete)">Sablon</button>
-    <button class="btn" id="bPlay" title="Lejátszás az aktuális diától (F5)">Lejátszás</button>
-    <select id="zoomSel" class="sel" title="Nagyítás" aria-label="Nagyítás">
-      <option value="auto">Illesztés</option><option value="50">50%</option><option value="75">75%</option><option value="100">100%</option><option value="125">125%</option><option value="150">150%</option>
-    </select>
+    <div class="b1left">
+      <button class="btn menubtn" data-pop="popFile" id="bFile" title="Új bemutató, megnyitás, exportálás">Fájl</button>
+      <span class="split"><button class="btn primary" id="bSave" title="Mentés a bemutató fájljába (Ctrl/⌘+S) – csak az első mentéskor kérdez rá a helyre">Mentés</button><button class="btn primary splitdd" data-pop="popSave" title="További mentési lehetőségek" aria-label="További mentési lehetőségek"></button></span>
+    </div>
+    <div class="b1mid">
+      <input id="docTitle" class="title" value="Névtelen bemutató" aria-label="Bemutató címe">
+      <span id="status" class="status" aria-live="polite"></span>
+    </div>
+    <div class="b1right">
+      <button class="btn tplbtn" id="bTpl" title="Sablonszerkesztő: kész sablonok, mester és diatípusok"><span class="tpll">Sablon:</span> <b id="tplName">Üres</b></button>
+      <button class="btn" id="bPlay" title="Lejátszás az aktuális diától (F5)">Lejátszás</button>
+      <select id="zoomSel" class="sel" title="Nagyítás" aria-label="Nagyítás">
+        <option value="auto">Illesztés</option><option value="50">50%</option><option value="75">75%</option><option value="100">100%</option><option value="125">125%</option><option value="150">150%</option>
+      </select>
+    </div>
   </div>
   <div class="ribbon" id="ribbon">
     <div class="grp">
@@ -40,8 +41,8 @@
       <button class="tb" data-cmd="superscript" data-k="text" title="Felső index">x²</button>
       <button class="tb" data-cmd="subscript" data-k="text" title="Alsó index">x₂</button>
       <button class="tb cbtn" data-pop="popColor" data-k="text" data-icon="colorA" title="Betűszín"><i class="cbar" id="colorBar"></i></button>
-      <button class="tb" data-cmd="upper" data-k="text" title="Csupa nagybetű / ahogy begépelted (a betűk nem változnak, csak a megjelenésük)"><span class="aa">Aa</span></button>
       <button class="tb cbtn" data-pop="popHi" data-k="text" data-icon="marker" title="Kijelölt szöveg kiemelése"><i class="cbar" style="background:#fff176"></i></button>
+      <button class="tb" data-cmd="upper" data-k="text" title="Csupa nagybetű / ahogy begépelted (a betűk nem változnak, csak a megjelenésük)"><span class="aa">Aa</span></button>
     </div>
     <div class="grp">
       <button class="tb" data-cmd="alignLeft" data-k="text" data-icon="alignL" title="Balra igazítás"></button>
@@ -206,12 +207,29 @@
   <div class="lgal" id="lgalNew"></div>
 
 </div>
-<div class="pop" id="popExport" hidden>
-  <div class="ptitle">Exportálás</div>
-  <button class="pitem" id="expPptx">PowerPoint-bemutató (.pptx) – működő animációkkal</button>
-  <button class="pitem" id="expPdf">PDF – diánként egy oldal (a dia végső állapota)</button>
-  <button class="pitem" id="expPdfSteps">PDF – lépésenként egy oldal (minden kattintás új oldal)</button>
-  <div class="phint" style="margin:4px 8px">A szövegek és képletek pontosan úgy jelennek meg, ahogy itt látszanak, betűtípus telepítése nélkül.</div>
+<div class="pop" id="popFile" hidden>
+  <button class="pitem" id="fNew">Új bemutató</button>
+  <button class="pitem" id="fOpen">Megnyitás…</button>
+  <div class="psep"></div><div class="ptitle">Exportálás</div>
+  <button class="pitem" id="expPptx2">PowerPoint-bemutató (.pptx) – animációkkal</button>
+  <button class="pitem" id="expPdf2">PDF – diánként egy oldal</button>
+  <button class="pitem" id="expPdfSteps2">PDF – lépésenként egy oldal</button>
+  <div class="psep"></div>
+  <button class="pitem" id="fHome">Kezdőképernyő</button>
+</div>
+<div class="pop" id="popSave" hidden>
+  <button class="pitem" id="fSaveAs">Mentés másként… <span class="phint">(Ctrl/⌘+Shift+S)</span></button>
+  <div class="phint" style="margin:4px 8px">Új fájlba ment; a korábban mentett fájl változatlan marad.</div>
+</div>
+<div class="pop" id="popTrans" hidden>
+  <div class="ptitle">Diaváltás erre a diára</div>
+  <div id="transList"></div>
+  <div id="transDirs"></div>
+  <div class="prow"><label>Időtartam (mp) <input type="text" inputmode="decimal" id="transDur"></label></div>
+  <div class="psep"></div>
+  <button class="pitem" id="transAll">Ugyanez minden diára</button>
+  <button class="pitem" id="transPlay">Előnézet</button>
+</div>
 </div>
 
 <div class="pop" id="popAnyColor" hidden><div class="ptitle" id="anyColorTitle">Szín</div><div id="swAny"></div></div>
