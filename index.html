@@ -14,7 +14,8 @@
     <div class="spacer"></div>
     <button class="btn" id="bNew">Új</button>
     <button class="btn" id="bOpen" title="Matekos Prezi bemutató megnyitása (Ctrl/⌘+O)">Megnyitás</button>
-    <button class="btn primary" id="bSave" title="Mentés (Ctrl/⌘+S)">Mentés</button>
+    <button class="btn primary" id="bSave" title="Mentés a bemutató fájljába (Ctrl/⌘+S) – az első mentéskor rákérdez a helyre">Mentés</button>
+    <button class="btn" id="bSaveAs" title="Mentés másként: új fájlba (Ctrl/⌘+Shift+S) – a korábbi fájl változatlan marad">Mentés másként</button>
     <button class="btn" id="bExport" title="Exportálás PowerPoint-bemutatóba vagy PDF-be">Exportálás</button>
     <button class="btn" id="bTpl" title="Sablonszerkesztő: mester és elrendezések (mint a PowerPoint diaminta-nézete)">Sablon</button>
     <button class="btn" id="bPlay" title="Lejátszás az aktuális diától (F5)">Lejátszás</button>
@@ -183,8 +184,8 @@
 <div class="pop" id="popSize" hidden><div class="ptitle">Betűméret (pt)</div><div class="sizegrid" id="sizeGrid"></div></div>
 <div class="pop" id="popSpacing" hidden>
   <div class="ptitle">Betűköz</div>
-  <div id="spacingList"></div>
-  <div class="prow"><label>Egyéni (pt) <input type="number" id="spacingIn" step="0.1" min="-5" max="30"></label><button class="btn" id="spacingOk">OK</button></div>
+  <div class="spslide"><input type="range" id="spacingR" min="-3" max="10" step="0.1" value="0"><input type="number" id="spacingIn" min="-3" max="10" step="0.1" value="0"><span>pt</span></div>
+  <div class="prow"><button class="btn" id="spacingReset">Normál (0 pt)</button></div>
   <div class="phint">Szerkesztés közben a kijelölt szövegre, egyébként az egész dobozra.</div>
 </div>
 <div class="pop" id="popPh" hidden>
@@ -210,7 +211,23 @@
   <div class="phint" style="margin:4px 8px">A szövegek és képletek pontosan úgy jelennek meg, ahogy itt látszanak, betűtípus telepítése nélkül.</div>
 </div>
 
+<div class="pop" id="popAnyColor" hidden><div class="ptitle" id="anyColorTitle">Szín</div><div id="swAny"></div></div>
 <div class="mprev" id="mprev" hidden></div>
+<div class="home" id="home" hidden>
+  <div class="home-card">
+    <div class="home-logo">P</div>
+    <h1>Matekos Prezi</h1>
+    <p class="home-sub">Bemutatók élő TeX-képletekkel, működő PowerPoint-animációkkal</p>
+    <div class="home-btns">
+      <button class="hbtn primary" id="homeNew"><span class="hico">＋</span>Új bemutató</button>
+      <button class="hbtn" id="homeOpen"><span class="hico">📂</span>Meglévő megnyitása</button>
+    </div>
+    <button class="hlink" id="homeResume" hidden></button>
+  </div>
+</div>
+<div class="cfm" id="cfm" hidden role="alertdialog" aria-modal="true" aria-labelledby="cfmMsg">
+  <div class="cfm-card"><p id="cfmMsg"></p><div class="cfm-btns"><button class="btn" id="cfmNo">Mégse</button><button class="btn danger" id="cfmYes">Igen</button></div></div>
+</div>
 <div class="busy" id="busy" hidden><div id="busyMsg">Folyamatban…</div></div>
 <div class="mathdlg" id="mathDlg" hidden role="dialog" aria-label="Képletszerkesztő"></div>
 <div id="show"><div class="info"></div></div>

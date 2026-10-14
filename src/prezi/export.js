@@ -176,6 +176,26 @@ function picXML(p, spid, rImg, rSvg) {
     + `<p:blipFill><a:blip r:embed="${rImg}">${p.opacity != null ? `<a:alphaModFix amt="${Math.round(p.opacity * 100000)}"/>` : ''}${ext}</a:blip><a:stretch><a:fillRect/></a:stretch></p:blipFill>`
     + `<p:spPr><a:xfrm${rot}><a:off x="${e(p.x)}" y="${e(p.y)}"/><a:ext cx="${e(p.w)}" cy="${e(p.h)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
 }
+/** Off-slide position for fly in / fly out (PowerPoint formula strings). */
+function flyEnds(dir) {
+  return {x: dir.includes('l') ? '0-#ppt_w/2' : dir.includes('r') ? '1+#ppt_w/2' : '#ppt_x',
+          y: dir.includes('t') ? '0-#ppt_h/2' : dir.includes('b') ? '1+#ppt_h/2' : '#ppt_y'};
+}
+/* ---------- slide transitions (PowerPoint's own; exact duration via the PowerPoint 2010 extension) ---------- */
+const TR_DIR = {r: 'l', l: 'r', b: 'u', t: 'd'};    // "from the right" = moves to the left
+function transitionXML(t) {
+  if (!t || !t.type || t.type === 'none') return '';
+  const dur = Math.max(100, Math.min(10000, Math.round(t.dur ?? 700))), spd = dur <= 500 ? 'fast' : dur <= 750 ? 'med' : 'slow';
+  const d = TR_DIR[t.dir] ?? 'l';
+  const el = {
+    fade: '<p:fade/>', fadeBlack: '<p:fade thruBlk="1"/>', zoom: '<p:zoom/>',
+    push: `<p:push dir="${d}"/>`, wipe: `<p:wipe dir="${d}"/>`, cover: `<p:cover dir="${d}"/>`, pull: `<p:pull dir="${d}"/>`,
+    split: `<p:split orient="${(t.dir || 'vo')[0] === 'h' ? 'horz' : 'vert'}" dir="${(t.dir || 'vo')[1] === 'i' ? 'in' : 'out'}"/>`
+  }[t.type];
+  if (!el) return '';
+  return `<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" Requires="p14">`
+    + `<p:transition spd="${spd}" p14:dur="${dur}">${el}</p:transition></mc:Choice><mc:Fallback><p:transition spd="${spd}">${el}</p:transition></mc:Fallback></mc:AlternateContent>`;
+}
 function timingXML(list, spidOf) {
   if (!list.length) return '';
   let id = 2;
@@ -190,14 +210,16 @@ function timingXML(list, spidOf) {
       case 'appear': return setVis(k, 'visible', 0);
       case 'fade': return setVis(k, 'visible', 0) + filt(k, 'in', 'fade', d);
       case 'wipe': return setVis(k, 'visible', 0) + filt(k, 'in', 'wipe(left)', d);
-      case 'fly': return setVis(k, 'visible', 0) + prop(k, 'ppt_x', '#ppt_x', '#ppt_x', d) + prop(k, 'ppt_y', '1+#ppt_h/2', '#ppt_y', d);
+      case 'fly': { const v = flyEnds(Anim.dirOf(a)); return setVis(k, 'visible', 0) + prop(k, 'ppt_x', v.x, '#ppt_x', d) + prop(k, 'ppt_y', v.y, '#ppt_y', d); }
+      case 'float': { const up = Anim.dirOf(a) !== 'd'; return setVis(k, 'visible', 0) + filt(k, 'in', 'fade', d) + prop(k, 'ppt_x', '#ppt_x', '#ppt_x', d) + prop(k, 'ppt_y', up ? '#ppt_y+.1' : '#ppt_y-.1', '#ppt_y', d); }
+      case 'floatOut': { const up = Anim.dirOf(a) !== 'd'; return filt(k, 'out', 'fade', d) + prop(k, 'ppt_x', '#ppt_x', '#ppt_x', d) + prop(k, 'ppt_y', '#ppt_y', up ? '#ppt_y-.1' : '#ppt_y+.1', d) + setVis(k, 'hidden', d - 1); }
       case 'pulse': return filt(k, 'out', 'fade', d, ' tmFilter="0, 0; .2, .5; .8, .5; 1, 0"') + scale(k, 105000, Math.max(1, Math.round(d / 2)), ' autoRev="1"');
       case 'grow': return scale(k, 150000, d);
       case 'spin': return `<p:animRot by="21600000"><p:cBhvr><p:cTn id="${++id}" dur="${d}" fill="hold"/>${tgt(k)}<p:attrNameLst><p:attrName>r</p:attrName></p:attrNameLst></p:cBhvr></p:animRot>`;
       case 'disappear': return setVis(k, 'hidden', 0);
       case 'fadeOut': return filt(k, 'out', 'fade', d) + setVis(k, 'hidden', d - 1);
       case 'wipeOut': return filt(k, 'out', 'wipe(left)', d) + setVis(k, 'hidden', d - 1);
-      case 'flyOut': return prop(k, 'ppt_x', '#ppt_x', '#ppt_x', d) + prop(k, 'ppt_y', '#ppt_y', '1+#ppt_h/2', d) + setVis(k, 'hidden', d - 1);
+      case 'flyOut': { const v = flyEnds(Anim.dirOf(a)); return prop(k, 'ppt_x', '#ppt_x', v.x, d) + prop(k, 'ppt_y', '#ppt_y', v.y, d) + setVis(k, 'hidden', d - 1); }
     }
   };
   const nodeType = {click: 'clickEffect', with: 'withEffect', after: 'afterEffect'};
@@ -207,9 +229,9 @@ function timingXML(list, spidOf) {
     for (const chain of g.chains) {
       let effs = '', end = 0;
       for (const a of chain) {
-        const E = Anim.EFFECTS[a.effect], d = Math.max(1, Anim.durOf(a)), delay = Anim.delayOf(a);
+        const E = Anim.EFFECTS[a.effect], P = Anim.preset(a), d = Math.max(1, Anim.durOf(a)), delay = Anim.delayOf(a);
         end = Math.max(end, delay + Anim.durOf(a));
-        effs += `<p:par><p:cTn id="${++id}" presetID="${E.id}" presetClass="${E.cls}" presetSubtype="${E.sub}" fill="hold" nodeType="${nodeType[a.trigger]}"><p:stCondLst><p:cond delay="${delay}"/></p:stCondLst><p:childTnLst>${behaviours(a, d)}</p:childTnLst></p:cTn></p:par>`;
+        effs += `<p:par><p:cTn id="${++id}" presetID="${P.id}" presetClass="${E.cls}" presetSubtype="${P.sub}" fill="hold" nodeType="${nodeType[a.trigger]}"><p:stCondLst><p:cond delay="${delay}"/></p:stCondLst><p:childTnLst>${behaviours(a, d)}</p:childTnLst></p:cTn></p:par>`;
       }
       chains += `<p:par><p:cTn id="${++id}" fill="hold"><p:stCondLst><p:cond delay="${t}"/></p:stCondLst><p:childTnLst>${effs}</p:childTnLst></p:cTn></p:par>`;
       t += end;
@@ -265,7 +287,7 @@ export async function buildPptx(doc, renderSlide, layoutOf, onProgress) {
     const list = Anim.expand(s).filter(a => spidOf[a.key]);
     const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">`
       + `<p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val="${bg.replace('#', '').toUpperCase()}"/></a:solidFill><a:effectLst/></p:bgPr></p:bg><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>${tree}</p:spTree></p:cSld>`
-      + `<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>${timingXML(list, spidOf)}</p:sld>`;
+      + `<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>${transitionXML(s.transition)}${timingXML(list, spidOf)}</p:sld>`;
     zip.file(`ppt/slides/slide${si + 1}.xml`, xml);
     zip.file(`ppt/slides/_rels/slide${si + 1}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`);
     sldIds += `<p:sldId id="${256 + si}" r:id="rIdS${si + 1}"/>`;

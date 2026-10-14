@@ -8,7 +8,7 @@ import { FONT_SETS, DEFAULT_FONT, applyTextFont, loadTextFamily } from './fontse
 import { openMathEditor, isMathEditorOpen } from '../mathEditor.js';
 import { tableContext } from '../editor/extensions.js';
 import { svg as svgIcon } from '../icons.js';
-import { isTauri, savePresentation, saveExport, openPresentation, openPathFile, watchOpenedFiles, setCurrentPath, getCurrentPath, autosave, loadAutosave } from '../files.js';
+import { isTauri, savePresentation, saveExport, openPresentation, openPathFile, watchOpenedFiles, setCurrentPath, getCurrentPath, getCurrentHandle, setCurrentHandle, currentFileName, autosave, loadAutosave } from '../files.js';
 import { Anim } from './anim.js';
 import { W, H, uid, clone, emptyDoc, textDoc, tableDoc, T, M, isEmptyText, blockCount, makeBackground, phName, ph, TITLE_PROMPT,
   defaultMaster, defaultTemplates, newSlide as makeSlide, syncPlaceholders as syncPh, migrate,
@@ -46,9 +46,25 @@ const layoutOf = s => doc.templates[s.template] ?? Object.values(doc.templates)[
 const newSlide = t => makeSlide(doc, t);
 const syncPlaceholders = s => syncPh(doc, s);
 
+/** Text styles of the template: headlines (title placeholders) and normal text (body/subtitle placeholders, new text boxes). */
+const defaultStyles = () => ({title: {size: 44, color: '#2f5d8a', bold: true, italic: false}, body: {size: 29.33, color: '#1a1a1a', bold: false, italic: false}});
+const roleOf = o => o.placeholder ? (o.placeholder.startsWith('title') ? 'title' : 'body') : (o.styleRef || null);
+function applyStyle(kind, changes) {
+  doc.styles ??= defaultStyles();
+  const old = doc.styles[kind], nw = {...old, ...changes}, k = nw.size / old.size;
+  doc.styles[kind] = nw;
+  const upd = (o, layoutLevel) => {
+    if (roleOf(o) !== kind || (!layoutLevel && (o.phStyled || o.ownStyle))) return;
+    if ('size' in changes) o.size = o.placeholder ? Math.round(o.size * k * 100) / 100 : nw.size;
+    for (const key of ['color', 'bold', 'italic']) if (key in changes) o[key] = nw[key];
+  };
+  for (const g of [doc.master, ...Object.values(doc.templates)]) flatObjects(g.objects).forEach(o => upd(o, true));
+  for (const sl of doc.slides) flatObjects(sl.objects).forEach(o => { if (!o.placeholder) upd(o, false); });
+  commit();
+}
 function blankDoc() {
   media = {bg1: makeBackground()};
-  doc = {format: 'mprezi', version: 4, size: {w: W, h: H}, font: activeMathFont() || DEFAULT_FONT, master: defaultMaster('bg1'), templates: defaultTemplates(), slides: []};
+  doc = {format: 'mprezi', version: 4, size: {w: W, h: H}, font: activeMathFont() || DEFAULT_FONT, styles: defaultStyles(), master: defaultMaster('bg1'), templates: defaultTemplates(), slides: []};
 }
 function demoDoc() {
   blankDoc();
@@ -83,16 +99,29 @@ function demoDoc() {
 
 function setSel(ids) { selIds = [...new Set(ids.filter(Boolean))]; sel = selIds.length === 1 ? selIds[0] : null; }
 
+/** In-app confirmation dialog (works the same in the browser and in the desktop app). */
+function confirmBox(msg, yes = 'Igen') {
+  return new Promise(res => {
+    const box = $('#cfm'); $('#cfmMsg').textContent = msg; $('#cfmYes').textContent = yes; box.hidden = false; $('#cfmYes').focus();
+    const done = v => { box.hidden = true; removeEventListener('keydown', key, true); $('#cfmYes').onclick = $('#cfmNo').onclick = null; res(v); };
+    const key = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(false); } else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); done(true); } };
+    addEventListener('keydown', key, true);
+    $('#cfmYes').onclick = () => done(true); $('#cfmNo').onclick = () => done(false);
+  });
+}
+const slideIsBlank = s => s.objects.every(o => o.placeholder && isEmptyText(o));
+
 /* ================================================================== history */
 function snapshot() { return JSON.stringify({doc, cur, mode, tcur}); }
-function setStatus(t) { $('#status').textContent = t ?? (dirty ? 'Nem mentett módosítások' : ''); }
+function setStatus(t) { const f = currentFileName(); $('#status').textContent = t ?? ((f ? f + ' – ' : '') + (dirty ? 'nem mentett módosítások' : f ? 'mentve' : '')); $('#status').title = f ? 'A bemutató fájlja: ' + f : ''; }
 function resetHistory() { history = [snapshot()]; hIdx = 0; dirty = false; $('#docTitle').value = doc.title || 'Névtelen bemutató'; setStatus(''); }
 let autoT = 0;
-const autoValue = () => ({doc: JSON.parse(snapshot()).doc, media, title: doc.title, path: getCurrentPath(), dirty});
+const autoValue = () => ({doc: JSON.parse(snapshot()).doc, media, title: doc.title, path: getCurrentPath(), handle: getCurrentHandle(), dirty});
 function saveSoon() { clearTimeout(autoT); autoT = setTimeout(() => autosave(autoValue()), 1200); }
 /** The math font is chosen when MathJax starts – a different font set restarts the editor with the same presentation. */
 async function restartWithFont(key) {
   busy('Betűtípus váltása…');
+  try { sessionStorage.setItem('mp.skipHome', '1'); } catch (e) { /* ignore */ }
   clearTimeout(autoT); await autosave(autoValue());
   location.reload();
 }
@@ -322,6 +351,8 @@ $('#rsplit').addEventListener('pointerdown', e => {
     lsSet(LS.right, String(setRightWidth(w0 - (ev.clientX - x0)))); fitStage(); };
   sp.addEventListener('pointermove', mv); sp.addEventListener('pointerup', up);
 });
+// buttons under the slides must not take the focus (an input losing it would re-render the list and swallow the click)
+slidesNav.addEventListener('mousedown', e => { if (e.target.closest('.slide-actions button')) e.preventDefault(); });
 function thumbFrame(label, cls) {
   const t = document.createElement('div'); t.className = 'thumb ' + (cls || '');
   t.innerHTML = `<div class="no">${label}</div><div class="frame"><div class="slide"></div></div>`;
@@ -334,7 +365,8 @@ function renderSlideList() {
   doc.slides.forEach((s, i) => {
     const t = thumbFrame(i + 1, i === cur ? 'cur' : ''); t.draggable = true;
     renderSlide(s, t.querySelector('.slide'), 'thumb');
-    t.onclick = () => gotoSlide(i);
+    if (s.transition) t.querySelector('.no').insertAdjacentHTML('beforeend', `<span class="trmark" title="Diaváltás: ${esc(TRANSITIONS[s.transition.type]?.label ?? '')}">⇢</span>`);
+    t.onclick = () => { gotoSlide(i); slideFocus = true; };
     t.ondragstart = e => e.dataTransfer.setData('text/slide', i);
     t.ondragover = e => { e.preventDefault(); t.classList.add('dragover'); };
     t.ondragleave = () => t.classList.remove('dragover');
@@ -353,8 +385,7 @@ function renderSlideList() {
     s.id = uid(); s.objects.forEach(o => { ids[o.id] = uid(); o.id = ids[o.id]; });
     s.anims.forEach(a => { a.id = uid(); a.target = ids[a.target]; });
     doc.slides.splice(cur + 1, 0, s); cur++; setSel([]); commit(); };
-  $('#sDel').onclick = () => { if (doc.slides.length < 2) return;
-    if (!confirm(`Biztosan törlöd a(z) ${cur + 1}. diát?`)) return; if (editing) exitEdit(); doc.slides.splice(cur, 1); cur = Math.min(cur, doc.slides.length - 1); setSel([]); commit(); };
+  $('#sDel').onclick = () => deleteSlide();
   list.querySelector('.slide-actions')?.scrollIntoView({block: 'nearest'});
 }
 function layoutThumb(k, L, cls = 'lthumb') {
@@ -401,12 +432,18 @@ function renderTemplateList() {
     objects: [ph('title', 60, 40, 1160, 33, '#2f5d8a', true, 'left', TITLE_PROMPT)]}; tcur = k; setSel([]); commit(); };
   $('#lDup') && ($('#lDup').onclick = () => { if (editing) exitEdit(); const k = 'l' + uid(), c = clone(doc.templates[tcur]); c.name += ' (másolat)'; c.objects.forEach(o => o.id = uid());
     doc.templates[k] = c; tcur = k; setSel([]); commit(); });
-  $('#lDel') && ($('#lDel').onclick = () => {
+  $('#lDel') && ($('#lDel').onclick = async () => {
     const used = doc.slides.filter(s => s.template === tcur).length;
-    if (used && !confirm(`${used} dia használja ezt az elrendezést. Ezek az első elrendezésre váltanak. Törlöd?`)) return;
+    if (!await confirmBox(used ? `${used} dia használja ezt az elrendezést. Ezek az első elrendezésre váltanak. Törlöd?` : 'Biztosan törlöd ezt az elrendezést?', 'Elrendezés törlése')) return;
     if (editing) exitEdit();
     delete doc.templates[tcur]; const first = Object.keys(doc.templates)[0];
     doc.slides.forEach(s => { if (!doc.templates[s.template]) s.template = first; }); tcur = first; setSel([]); commit(); });
+}
+async function deleteSlide() {
+  if (doc.slides.length < 2) return;
+  if (editing) exitEdit();
+  if (!slideIsBlank(tgt()) && !await confirmBox(`Biztosan törlöd a(z) ${cur + 1}. diát a tartalmával együtt?`, 'Dia törlése')) return;
+  doc.slides.splice(cur, 1); cur = Math.min(cur, doc.slides.length - 1); setSel([]); commit();
 }
 function moveLayout(from, to) {
   const e = Object.entries(doc.templates), i = e.findIndex(x => x[0] === from), j = e.findIndex(x => x[0] === to);
@@ -432,12 +469,13 @@ function closeTemplateBuilder() {
 /* ================================================================== pointer interaction on the slide */
 const toStage = e => { const r = stage.getBoundingClientRect(); return {x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale}; };
 const toStageRect = rr => { const s = stage.getBoundingClientRect(); return {x: (rr.left - s.left) / scale, y: (rr.top - s.top) / scale, w: rr.width / scale, h: rr.height / scale}; };
-let action = null, lastDown = null;
+let action = null, lastDown = null, slideFocus = false;
 /** The top-level object element under an event target (members of a group resolve to the group). */
 const topObjEl = t => { let el = t.closest('.obj:not(.tpl)'); while (el && el.parentElement?.closest('.obj:not(.tpl)')) el = el.parentElement.closest('.obj:not(.tpl)'); return el; };
 
 stage.addEventListener('pointerdown', e => {
   if (e.button !== 0) return;
+  slideFocus = false;
   if (e.target.closest('#tblHandles')) return;
   const p = toStage(e), h = e.target.closest('.h');
   if (h) { startHandle(h.dataset.h, p, e); return; }
@@ -817,7 +855,9 @@ function addShape(shape) {
 }
 function addText() {
   if (editing) exitEdit();
-  const o = addObject({type: 'text', name: nextName('Szöveg'), w: 620, size: 32, color: '#1a1a1a', align: 'left', doc: emptyDoc()});
+  const st = (doc.styles ??= defaultStyles()).body;
+  const o = addObject({type: 'text', name: nextName('Szöveg'), w: 620, size: st.size, color: st.color, bold: st.bold || undefined, italic: st.italic || undefined,
+    align: 'left', styleRef: 'body', doc: emptyDoc()});
   renderAll(); enterEdit(o.id);
 }
 function addTable(rows, cols) {
@@ -877,6 +917,38 @@ function toggleLock(id) {
   if (editing === id) exitEdit();
   o.locked = !o.locked || undefined; commit();
 }
+/* slide transitions */
+const TRANSITIONS = {
+  none: {label: 'Nincs'}, fade: {label: 'Áttűnés'}, fadeBlack: {label: 'Áttűnés feketén át'},
+  push: {label: 'Eltolás', dirs: 'side'}, cover: {label: 'Takarás', dirs: 'side'}, pull: {label: 'Felfedés', dirs: 'side'},
+  wipe: {label: 'Törlés', dirs: 'side'}, split: {label: 'Szétválás', dirs: 'split'}, zoom: {label: 'Nagyítás'}
+};
+const TR_DIRS = {side: {r: 'jobbról', l: 'balról', b: 'alulról', t: 'felülről'}, split: {vo: 'függőlegesen kifelé', vi: 'függőlegesen befelé', ho: 'vízszintesen kifelé', hi: 'vízszintesen befelé'}};
+function transBody() {
+  const t = tgt().transition || {type: 'none'}, T_ = TRANSITIONS[t.type] || TRANSITIONS.none;
+  const dirs = T_.dirs ? TR_DIRS[T_.dirs] : null, dir = dirs ? (dirs[t.dir] ? t.dir : Object.keys(dirs)[0]) : null;
+  return `<div class="trgrid">
+      <label class="fld">Hatás<select id="trType">${Object.entries(TRANSITIONS).map(([k, v]) => `<option value="${k}" ${k === t.type ? 'selected' : ''}>${v.label}</option>`).join('')}</select></label>
+      ${dirs ? `<label class="fld">Irány<select id="trDir">${Object.entries(dirs).map(([k, l]) => `<option value="${k}" ${k === dir ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
+      ${t.type !== 'none' ? `<label class="fld">Időtartam (mp)<input type="text" inputmode="decimal" id="trDur" value="${secs(t.dur ?? 700)}"></label>` : ''}
+    </div>
+    <div class="btnrow"><button class="btn" id="trAll">Minden diára</button>${t.type !== 'none' ? '<button class="btn" id="trPlay">Előnézet</button>' : ''}</div>
+    <div class="phint">Akkor játszódik le, amikor erre a diára érkezik a bemutató – a PowerPointban is.</div>`;
+}
+function bindTrans() {
+  const s_ = tgt(), get = () => s_.transition || (s_.transition = {type: 'none'});
+  $('#trType')?.addEventListener('change', e => { const t = get(); t.type = e.target.value; if (t.type === 'none') delete s_.transition; else { t.dur ??= 700; delete t.dir; } commit(); });
+  $('#trDir')?.addEventListener('change', e => { get().dir = e.target.value; commit(); });
+  $('#trDur')?.addEventListener('change', e => { const v = parseFloat(String(e.target.value).replace(',', '.')); if (v > 0) { get().dur = Math.round(Math.min(10, v) * 1000); commit(); } });
+  $('#trAll')?.addEventListener('click', async () => {
+    if (!await confirmBox('Ez a diaváltás kerüljön minden diára?', 'Minden diára')) return;
+    for (const sl of doc.slides) { if (s_.transition) sl.transition = clone(s_.transition); else delete sl.transition; } commit();
+  });
+  $('#trPlay')?.addEventListener('click', () => {
+    if (cur === 0 && doc.slides.length < 2) return;
+    startShow(Math.max(0, cur - 1)); if (cur > 0) setTimeout(() => sh && loadShowSlide(cur, 0, true, true), 350);
+  });
+}
 function deleteSelected() {
   const ids = selIds.filter(id => !objById(id)?.locked); if (!ids.length) return;
   for (const id of ids) {
@@ -907,8 +979,8 @@ function positionBody() {
   if (!o) return '<div class="phint" style="margin:0">Jelölj ki egy objektumot a dián vagy a Rétegek listában. Több objektum: Shift+kattintás, vagy húzz keretet az üres területen.</div>';
   const round = Math.round, rot = o.rot > 180 ? o.rot - 360 : (o.rot || 0), lk = o.locked ? 'disabled' : '';
   const colors = o.type === 'shape' ? `<div class="colbtns">
-      <button class="btn colbtn" data-pop="popFill" ${o.shape === 'line' || o.locked ? 'disabled' : ''} title="Kitöltés színe"><i class="dot fill" style="--c:${o.fill || 'transparent'}"></i>Kitöltés</button>
-      <button class="btn colbtn" data-pop="popStroke" ${lk} title="Körvonal színe és vastagsága"><i class="dot ring" style="--c:${o.stroke || 'transparent'}"></i>${o.shape === 'line' ? 'Vonal' : 'Körvonal'}</button></div>` : '';
+      <button class="btn colbtn" data-pop="popFill" ${o.shape === 'line' || o.locked ? 'disabled' : ''} title="Kitöltés színe"><i class="dot fill${o.fill ? '' : ' none'}" style="--c:${o.fill || 'transparent'}"></i>Kitöltés</button>
+      <button class="btn colbtn" data-pop="popStroke" ${lk} title="Körvonal színe és vastagsága"><i class="dot ring${o.stroke ? '' : ' none'}" style="--c:${o.stroke || 'transparent'}"></i>${o.shape === 'line' ? 'Vonal' : 'Körvonal'}</button></div>` : '';
   return `${colors}${o.locked ? `<div class="phint lockhint">${svgIcon('lock')} Zárolva – a Rétegek résznél oldható fel.</div>` : ''}
     ${slider('pX', 'Vízszintes', round(o.x), -round(o.w) + 10, W - 10, 1, lk)}
     ${slider('pY', 'Függőleges', round(o.y), -round(o.h) + 10, H - 10, 1, lk)}
@@ -950,13 +1022,20 @@ function renderProps() {
       ${isM ? '' : `<label class="chk full"><input type="checkbox" id="pShowM" ${L.showMaster ? 'checked' : ''}> A mester elemeinek megjelenítése</label>`}
       ${isM ? '' : `<label class="chk full"><input type="checkbox" id="pOwnBg" ${L.ownBg ? 'checked' : ''}> Saját háttér (a mesteré helyett)</label>`}</div>`;
     if (isM || L.ownBg) h += `<div class="fgrid" style="margin-top:10px">
-      ${fld('Háttérszín', `<input type="color" id="pBgColor" value="${L.bgColor || '#ffffff'}">`)}
+      <div class="fld">Háttérszín<button class="btn colbtn" id="pBgColor"><i class="dot fill" style="--c:${L.bgColor || '#ffffff'}"></i>${L.bgColor || '#ffffff'}</button></div>
       <div class="fld">Háttérkép<div class="imgpick">${L.background ? `<img src="${media[L.background]}" alt="">` : ''}<button class="btn" id="pBgPick">Kép…</button>${L.background ? '<button class="btn" id="pBgClear">Eltávolítás</button>' : ''}</div></div></div>`;
     h += `<div class="phint">${isM ? 'Ami a mesterre kerül (logó, lábléc, díszítés), minden elrendezésen megjelenik.' : 'Helykitöltőt a menüszalag „Helykitöltő” gombjával adhatsz hozzá.'}</div></section>`;
+    const st = doc.styles ?? defaultStyles(), row = (k, label, hint) => `<div class="strow"><div class="sthead"><b>${label}</b><span class="phint">${hint}</span></div>
+      <div class="stctl"><input type="number" class="stsize" data-st="${k}" min="8" max="120" step="0.5" value="${Math.round(st[k].size * 0.75 * 2) / 2}" title="Betűméret (pt)"><span class="unit">pt</span>
+        <button class="btn colbtn stcolor" data-st="${k}" title="Betűszín"><i class="dot fill" style="--c:${st[k].color}"></i>Szín</button>
+        <button class="tb${st[k].bold ? ' on' : ''}" data-stb="${k}" title="Félkövér"><b>B</b></button><button class="tb${st[k].italic ? ' on' : ''}" data-sti="${k}" title="Dőlt"><i class="ital">I</i></button></div></div>`;
+    h += section('styles', 'Szövegstílusok', row('title', 'Címek', 'a cím-helykitöltők') + row('body', 'Szöveg', 'szöveg- és alcím-helykitöltők, új szövegdobozok')
+      + '<div class="phint">A méretváltozás arányosan hat (a címdia nagyobb címe nagyobb marad). A diákon egyenként átformázott dobozok megtartják a saját formájukat.</div>');
   }
   h += section('pos', 'Megjelenés és elhelyezés', positionBody());
   h += section('layers', 'Rétegek', layersBody());
   if (mode === 'slides') h += section('anim', 'Animációk', animBody());
+  if (mode === 'slides') h += section('trans', 'Diaváltás (áttűnés)', transBody());
   props.innerHTML = h;
   bindProps(o);
 }
@@ -976,7 +1055,11 @@ function bindProps(o) {
   on('pName', 'change', e => { tgt().name = e.target.value.trim() || 'Elrendezés'; commit(); });
   on('pShowM', 'change', e => { tgt().showMaster = e.target.checked; commit(); });
   on('pOwnBg', 'change', e => { const L = tgt(); L.ownBg = e.target.checked; if (L.ownBg && !L.background) { L.background = doc.master.background; L.bgColor = doc.master.bgColor; } commit(); });
-  on('pBgColor', 'change', e => { tgt().bgColor = e.target.value; commit(); });
+  on('pBgColor', 'click', e => pickAnyColor(e.currentTarget, 'Háttérszín', tgt().bgColor || '#ffffff', c => { tgt().bgColor = c === 'none' ? '#ffffff' : c; commit(); }));
+  props.querySelectorAll('.stsize').forEach(inp => inp.onchange = () => { const v = parseFloat(String(inp.value).replace(',', '.')); if (v > 0) applyStyle(inp.dataset.st, {size: Math.round(v / 0.75 * 100) / 100}); });
+  props.querySelectorAll('.stcolor').forEach(b => b.onclick = () => pickAnyColor(b, b.dataset.st === 'title' ? 'Címek színe' : 'Szöveg színe', (doc.styles ?? defaultStyles())[b.dataset.st].color, c => { if (c !== 'none') applyStyle(b.dataset.st, {color: c}); }));
+  props.querySelectorAll('[data-stb]').forEach(b => b.onclick = () => applyStyle(b.dataset.stb, {bold: !(doc.styles ?? defaultStyles())[b.dataset.stb].bold}));
+  props.querySelectorAll('[data-sti]').forEach(b => b.onclick = () => applyStyle(b.dataset.sti, {italic: !(doc.styles ?? defaultStyles())[b.dataset.sti].italic}));
   on('pBgPick', 'click', () => pickImage(key => { tgt().background = key; commit(); }));
   on('pBgClear', 'click', () => { tgt().background = null; commit(); });
   on('pPrompt', 'change', e => { o.prompt = e.target.value; commit(); });
@@ -998,9 +1081,9 @@ function bindProps(o) {
   // layers
   props.querySelectorAll('[data-arr]').forEach(b => b.onclick = () => ({toFront: () => reorder((i, n) => n), forward: () => reorder((i, n) => Math.min(n, i + 1)),
     backward: () => reorder(i => Math.max(0, i - 1)), toBack: () => reorder(() => 0), group: groupSelected, ungroup: ungroupSelected})[b.dataset.arr]());
-  props.querySelectorAll('.colbtn').forEach(b => b.onclick = () => showPop(b.dataset.pop, b));
+  props.querySelectorAll('.colbtn[data-pop]').forEach(b => b.onclick = () => showPop(b.dataset.pop, b));
   bindLayers();
-  if (mode === 'slides') bindAnims();
+  if (mode === 'slides') { bindAnims(); bindTrans(); }
 }
 function reorder(fn) { const o = selObj(); if (!o || !tgt().objects.includes(o)) return; if (editing) syncEditor(); const a = tgt().objects, i = a.indexOf(o); a.splice(i, 1); a.splice(fn(i, a.length), 0, o); commit(); }
 let dragId = null;
@@ -1074,6 +1157,7 @@ function animBody() {
       <span class="badge ${E.cls}">${rangeLabel(rg[a.id])}</span><span class="name" title="${esc(t.name ?? '')}">${esc(t.name ?? '')}<small>${Anim.CLASSES[E.cls]}</small></span>
       <span class="ctl"><button data-act="up" title="Előrébb a sorban" ${i ? '' : 'disabled'}>▲</button><button data-act="down" title="Hátrébb a sorban" ${i < s.anims.length - 1 ? '' : 'disabled'}>▼</button><button data-act="del" title="Animáció törlése">✕</button></span>
       <select data-k="effect" aria-label="Effektus">${effectOptions(a.effect)}</select>
+      ${E.dirs ? `<select data-k="dir" aria-label="Irány">${Object.entries(Anim.DIRS[E.dirs]).map(([k, l]) => `<option value="${k}" ${k === Anim.dirOf(a) ? 'selected' : ''}>Irány: ${l}</option>`).join('')}</select>` : ''}
       <select data-k="trigger" aria-label="Indítás">${Object.entries(Anim.TRIGGERS).map(([k, l]) => `<option value="${k}" ${k === a.trigger ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <div class="times"><label class="fld">Időtartam (mp)<input type="text" inputmode="decimal" data-k="dur" value="${secs(Anim.durOf(a))}" ${E.instant ? 'disabled title="Ez az effektus azonnali"' : ''}></label>
         <label class="fld">Késleltetés (mp)<input type="text" inputmode="decimal" data-k="delay" value="${secs(Anim.delayOf(a))}"></label></div>
@@ -1081,7 +1165,8 @@ function animBody() {
     </div>`;
   }).join('');
   const dis = o ? '' : 'disabled title="Előbb jelölj ki egy objektumot (vagy csoportot)"';
-  return `<div class="btnrow addrow"><button class="btn" data-add="entr" ${dis} style="--c:${CLS_COLOR.entr}">+ Belépő</button><button class="btn" data-add="emph" ${dis} style="--c:${CLS_COLOR.emph}">+ Kiemelés</button><button class="btn" data-add="exit" ${dis} style="--c:${CLS_COLOR.exit}">+ Kilépő</button></div>
+  return `${o ? `<div class="btnrow addrow"><button class="btn" data-add="entr" style="--c:${CLS_COLOR.entr}">+ Belépő</button><button class="btn" data-add="emph" style="--c:${CLS_COLOR.emph}">+ Kiemelés</button><button class="btn" data-add="exit" style="--c:${CLS_COLOR.exit}">+ Kilépő</button></div>`
+      : '<div class="phint" style="margin:0 0 8px">Animáció hozzáadásához jelölj ki egy objektumot (vagy csoportot).</div>'}
     ${s.anims.length ? `<h4>Idővonal</h4>${timelineHTML(list)}` : ''}
     <div class="anim-list" id="animList">${rows || '<div class="phint" style="margin-top:0">Ezen a dián nincs animáció.</div>'}</div>
     <div class="btnrow"><button class="btn" id="aPlay">Lejátszás innen</button><label class="chk"><input type="checkbox" id="aBadges" ${showBadges ? 'checked' : ''}> Sorszámok a dián</label></div>`;
@@ -1113,7 +1198,7 @@ function bindAnims() {
     if (k === 'byParagraph') a.byParagraph = e.target.checked || undefined;
     else if (k === 'dur') a.dur = Math.min(60000, Math.max(100, Math.round(num(e.target.value) * 1000) || Anim.EFFECTS[a.effect].dur));
     else if (k === 'delay') a.delay = Math.max(0, Math.round(num(e.target.value) * 1000) || 0);
-    else if (k === 'effect') { a.effect = e.target.value; delete a.dur; }
+    else if (k === 'effect') { a.effect = e.target.value; delete a.dur; delete a.dir; }
     else a[k] = e.target.value;
     curAnim = a.id; commit();
   });
@@ -1121,7 +1206,7 @@ function bindAnims() {
 
 /* ================================================================== ribbon */
 for (const b of $$('[data-icon]')) b.insertAdjacentHTML('afterbegin', svgIcon(b.dataset.icon));
-const styled = o => { if (o.placeholder && mode === 'slides') o.phStyled = true; };
+const styled = o => { if (o.placeholder && mode === 'slides') o.phStyled = true; else if (!o.placeholder && o.styleRef) o.ownStyle = true; };
 const inEdit = () => { const o = selObj(); return isTextLike(o) && editing === o.id; };
 /** Bold, italic, …: while editing on the selection (marks), otherwise on the whole box. */
 function boxOrMark(mark, boxKey) {
@@ -1210,7 +1295,7 @@ function showPop(id, anchor) {
   const p = $('#' + id);
   if (openPop === p) return closePops();
   closePops(); if (p.onopen) p.onopen();
-  if (p.querySelector('.cpicker')) { refreshPickers(); p.querySelectorAll('.cpicker').forEach(b => b._reset?.()); }
+  if (p.querySelector('.cpicker')) { refreshPickers(); p.querySelectorAll('.cpicker').forEach(b => { b._reset?.(); b._mark?.(currentColorFor(b.id)); }); }
   p.hidden = false;
   const r = anchor.getBoundingClientRect();
   p.style.left = Math.max(8, Math.min(r.left, innerWidth - p.offsetWidth - 8)) + 'px';
@@ -1221,6 +1306,20 @@ function showPop(id, anchor) {
 function closePops() { if (openPop) { openPop.hidden = true; openPop = null; openAnchor = null; tblCtx = null; } }
 document.addEventListener('pointerdown', e => { if (openPop && !openPop.contains(e.target) && !(openAnchor && openAnchor.contains(e.target))) closePops(); }, true);
 for (const p of $$('.pop')) p.addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
+/** The colour currently in effect for a picker (marked in red in the palette). */
+function currentColorFor(id) {
+  const o = selObj();
+  const hex = c => { if (!c) return null; const m = String(c).match(/\d+(\.\d+)?/g); return c.startsWith('#') ? c : m ? '#' + m.slice(0, 3).map(v => (+v | 0).toString(16).padStart(2, '0')).join('') : c; };
+  try {
+    if (id === 'swText') { if (inEdit()) { const d = ed.view.domAtPos(ed.state.selection.from), el = d.node.nodeType === 1 ? d.node : d.node.parentElement; return hex(getComputedStyle(el).color); } return o?.color; }
+    if (id === 'swHi') return inEdit() ? ed.getAttributes('highlight').color || 'none' : null;
+    if (id === 'swFill') return o?.fill || 'none';
+    if (id === 'swStroke') return o?.stroke || 'none';
+    if (id === 'swCell') return ed ? (ed.getAttributes('tableCell').background || ed.getAttributes('tableHeader').background || 'none') : null;
+    if (id === 'swBorder') return ed ? (ed.getAttributes('tableCell').borderColor || ed.getAttributes('tableHeader').borderColor || 'none') : null;
+  } catch (e) { return null; }
+  return null;
+}
 /* colour pickers: defaults + the colours saved in this presentation + custom colour, eyedropper */
 const BASE_COLORS = ['#ffffff', '#d8d8d8', '#000000', '#da291c'];
 const pickers = [];
@@ -1235,7 +1334,8 @@ function swatches(box, colors, onPick, noneLabel) {
       <button class="btn cok" disabled>OK</button><button class="btn csave" disabled title="Hozzáadás ennek a bemutatónak a színeihez">Mentés</button></div>
     ${noneLabel ? `<button class="sw none" data-c="none">${noneLabel}</button>` : ''}`;
   const inp = box.querySelector('input[type=color]'), hex = box.querySelector('.chex'), ok = box.querySelector('.cok'), save = box.querySelector('.csave');
-  const pending = c => { inp.value = c; hex.textContent = c; hex.style.setProperty('--c', c); ok.disabled = save.disabled = false; };
+  // the last custom colour stays available, so "Mentés" also works after "OK" (when the picker is opened again)
+  const pending = c => { inp.value = c; hex.textContent = c; hex.style.setProperty('--c', c); box._chosen = true; ok.disabled = save.disabled = false; };
   box.addEventListener('click', e => {
     const del = e.target.closest('[data-del]');
     if (del) { doc.colors = (doc.colors || []).filter(c => c !== del.dataset.del); commit(); refreshPickers(); e.stopPropagation(); return; }
@@ -1246,9 +1346,14 @@ function swatches(box, colors, onPick, noneLabel) {
   ok.onclick = () => { onPick(inp.value); closePops(); };
   save.onclick = () => { const c = inp.value.toLowerCase(); doc.colors = [...new Set([...(doc.colors || []), c])]; onPick(c); closePops(); commit(); };
   box.querySelector('.eyed').onclick = () => eyedrop(c => { pending(c); });
-  box._reset = () => { ok.disabled = save.disabled = true; hex.textContent = inp.value; };
+  box._reset = () => { ok.disabled = save.disabled = !box._chosen; hex.textContent = inp.value; hex.style.setProperty('--c', inp.value); };
+  box._mark = cur_ => { const c = (cur_ || 'none').toLowerCase(); box.querySelectorAll('button[data-c]').forEach(b => b.classList.toggle('on', b.dataset.c.toLowerCase() === c)); };
   pickers.push(box);
 }
+/* a general colour popover (template background, text styles) */
+let anyColorCb = null;
+function pickAnyColor(anchor, title, current, cb) { anyColorCb = cb; $('#anyColorTitle').textContent = title; anyCur = current; showPop('popAnyColor', anchor); }
+let anyCur = null;
 function refreshPickers() {
   const lib = doc.colors || [];
   for (const box of pickers) {
@@ -1287,6 +1392,8 @@ swatches($('#swText'), TEXT_COLORS, c => {
   if (inEdit() && !ed.state.selection.empty) { ed.chain().focus().setColor(c).run(); return; }
   o.color = c; styled(o); commit();
 });
+swatches($('#swAny'), TEXT_COLORS, c => { const cb = anyColorCb; anyColorCb = null; cb?.(c); });
+$('#popAnyColor').onopen = () => $('#swAny')._mark(anyCur);
 swatches($('#swHi'), ['#fff176', '#c5f0a4', '#b3ecf5', '#f8bbd0', '#ffd59e', '#e1bee7', '#e0e0e0'], c => withEditor(ch => (c === 'none' ? ch.unsetHighlight() : ch.setHighlight({color: c})).run()), 'Nincs kiemelés');
 swatches($('#swCell'), ['#e8eef5', '#eaf4e4', '#fdf3d7', '#f9e1e1', '#ece6f5', '#eeeeee', '#d6e4f0'], c => forCells('cells', () => ({background: c === 'none' ? null : c})), 'Nincs kitöltés');
 swatches($('#swBorder'), ['#7d8590', '#111111', '#1f5f74', '#2e4a9e', '#c0392b', '#1e8449', '#b7950b'], c => forCells(borderScope === 'table' ? 'table' : 'cells', () => ({borderColor: c === 'none' ? null : c})), 'Alapértelmezett');
@@ -1301,16 +1408,23 @@ const SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 32, 36, 40, 44,
 $('#sizeGrid').innerHTML = SIZES.map(v => `<button class="pitem" data-size="${v}">${v}</button>`).join('');
 $('#popSize').onopen = () => { const cur_ = parseFloat($('#sizeIn').value); for (const b of $('#sizeGrid').children) b.classList.toggle('on', +b.dataset.size === cur_); };
 $('#sizeGrid').onclick = e => { const b = e.target.closest('[data-size]'); if (!b) return; closePops(); $('#sizeIn').value = b.dataset.size; setSize(b.dataset.size); };
-const SPACINGS = [['-1', 'Szűk (−1 pt)'], ['-0.5', 'Kissé szűk (−0,5 pt)'], ['0', 'Normál'], ['1', 'Ritkított (1 pt)'], ['2', 'Ritkított (2 pt)'], ['4', 'Nagyon ritkított (4 pt)']];
-$('#spacingList').innerHTML = SPACINGS.map(([v, l]) => `<button class="pitem" data-sp="${v}">${l}</button>`).join('');
-function setSpacing(v) {
+function setSpacing(v, final) {
   const o = selObj(); if (!isTextLike(o) || !isFinite(v)) return;
-  if (inEdit() && !ed.state.selection.empty) { (v ? ed.chain().focus().setLetterSpacing(v + 'pt') : ed.chain().focus().unsetLetterSpacing()).run(); return; }
-  o.letterSpacing = v || undefined; styled(o); commit();
+  v = Math.round(v * 10) / 10;
+  if (inEdit() && !ed.state.selection.empty) { if (final) (v ? ed.chain().focus().setLetterSpacing(v + 'pt') : ed.chain().focus().unsetLetterSpacing()).run(); return; }
+  o.letterSpacing = v || undefined;
+  if (final) { styled(o); commit(); } else updateObjLive(o);
 }
-$('#spacingList').onclick = e => { const b = e.target.closest('[data-sp]'); if (!b) return; closePops(); setSpacing(+b.dataset.sp); };
-$('#spacingOk').onclick = () => { const v = parseFloat(String($('#spacingIn').value).replace(',', '.')); closePops(); setSpacing(v); };
-$('#popSpacing').onopen = () => { const o = selObj(); $('#spacingIn').value = o?.letterSpacing ?? 0; for (const b of $('#spacingList').children) b.classList.toggle('on', +b.dataset.sp === (o?.letterSpacing || 0)); };
+const spR = $('#spacingR'), spN = $('#spacingIn');
+spR.oninput = () => { spN.value = spR.value; setSpacing(+spR.value, false); };
+spR.onchange = () => setSpacing(+spR.value, true);
+spN.onchange = () => { const v = parseFloat(String(spN.value).replace(',', '.')); if (!isFinite(v)) return; spR.value = v; setSpacing(v, true); };
+$('#spacingReset').onclick = () => { spR.value = spN.value = 0; setSpacing(0, true); };
+$('#popSpacing').onopen = () => {
+  const o = selObj(); let v = o?.letterSpacing || 0;
+  if (inEdit()) { const ls = ed.getAttributes('textStyle').letterSpacing; if (ls) v = parseFloat(ls); }
+  spR.value = spN.value = v;
+};
 // bullets, numbering, line height, paragraph spacing (Doksi)
 const BUL = ['•', '◦', '▪', '–', '➤', '➔', '✓', '★', '◆', '❖', '☐', '→'];
 $('#bulGrid').innerHTML = BUL.map(b => `<button data-bul="${b}" aria-label="${b}">${b}</button>`).join('');
@@ -1325,6 +1439,18 @@ $('#bulPicBtn').addEventListener('click', () => pickImageURL(512, url => { close
 $('#popNum').addEventListener('click', e => { const b = e.target.closest('[data-num]'); if (!b) return; closePops();
   withEditor(c => { if (!ed.isActive('orderedList')) c.toggleOrderedList(); c.updateAttributes('orderedList', {numStyle: b.dataset.num}).run(); }); });
 $('#lineList').innerHTML = [1, 1.15, 1.25, 1.5, 2].map(v => `<button class="pitem" data-lh="${v}">${String(v).replace('.', ',')}</button>`).join('');
+$('#popLine').onopen = () => {
+  const o = selObj(); let v = 1.25;
+  if (inEdit()) { const a = ed.isActive('heading') ? ed.getAttributes('heading') : ed.getAttributes('paragraph'); if (a.lineHeight) v = +a.lineHeight; }
+  else if (isText(o)) { const lh = new Set(); (function w(n) { if (n.type === 'paragraph' || n.type === 'heading') lh.add(+(n.attrs?.lineHeight || 1.25)); (n.content || []).forEach(w); })(o.doc); v = lh.size === 1 ? [...lh][0] : null; }
+  for (const b of $('#lineList').children) b.classList.toggle('on', +b.dataset.lh === v);
+};
+$('#popNum').onopen = () => { const st = inEdit() && ed.isActive('orderedList') ? (ed.getAttributes('orderedList').numStyle || 'decimal') : null;
+  for (const b of $$('#popNum [data-num]')) b.classList.toggle('on', b.dataset.num === st); };
+$('#popBullet').onopen = () => { const a = inEdit() && ed.isActive('bulletList') ? ed.getAttributes('bulletList') : null;
+  for (const b of $$('#popBullet [data-bul]')) b.classList.toggle('on', !!a && !a.bulletImage && b.dataset.bul === (a.bulletChar || '•')); };
+$('#popBorders').onopen = () => { const bw = ed ? (ed.getAttributes('tableCell').borderWidth ?? ed.getAttributes('tableHeader').borderWidth ?? '') : '';
+  for (const b of $$('#popBorders [data-bw]')) b.classList.toggle('on', String(b.dataset.bw) === String(bw ?? '')); };
 $('#lineList').addEventListener('click', e => { const b = e.target.closest('[data-lh]'); if (!b) return; closePops(); withEditor(c => c.setParaAttrs({lineHeight: +b.dataset.lh}).run()); });
 $('#popPara').onopen = () => {
   const a = ed ? (ed.isActive('heading') ? ed.getAttributes('heading') : ed.getAttributes('paragraph')) : {};
@@ -1368,10 +1494,15 @@ function keyEl(root, key) {
   const el = root.querySelector(`.obj[data-id="${id}"]`);
   return part == null ? el : el && pieceEls(el.querySelector('.txt'))[+part];
 }
-function loadShowSlide(i, step, animateAuto) {
-  show.querySelector('.slide')?.remove();
-  const el = document.createElement('div'); el.className = 'slide'; show.prepend(el);
+function loadShowSlide(i, step, animateAuto, withTransition) {
+  const old = show.querySelector('.slide');
+  show.querySelectorAll('.slide.leaving').forEach(x => x.remove());
+  const el = document.createElement('div'); el.className = 'slide';
   renderSlide(doc.slides[i], el, 'show'); showScale(el);
+  const t = withTransition && old ? doc.slides[i].transition : null;
+  let wait = 0;
+  if (t && t.type && t.type !== 'none') { old.classList.add('leaving'); show.append(el); wait = playTransition(old, el, t); }
+  else { old?.remove(); show.prepend(el); }
   const list = Anim.expand(doc.slides[i]), groups = Anim.groups(list);
   for (const k of Anim.initiallyHidden(list)) { const e = keyEl(el, k); if (e) e.style.visibility = 'hidden'; }
   const offset = groups[0]?.auto ? 1 : 0;
@@ -1379,9 +1510,33 @@ function loadShowSlide(i, step, animateAuto) {
   const instant = grp => grp.chains.flat().forEach(a => { const e = keyEl(el, a.key); if (!e) return; const c = Anim.EFFECTS[a.effect].cls;
     if (c === 'entr') e.style.visibility = 'visible'; else if (c === 'exit') e.style.visibility = 'hidden'; else if (a.effect === 'grow') e.style.transform = 'scale(1.5)'; });
   let g = 0;
-  if (offset) { if (animateAuto && step === 0) playGroup(el, groups[0]); else instant(groups[0]); g = 1; }
+  if (offset) { if (animateAuto && step === 0) setTimeout(() => sh && sh.el === el && playGroup(el, groups[0]), wait); else instant(groups[0]); g = 1; }
   for (; g < step + offset; g++) instant(groups[g]);
   info();
+}
+/** Slide transition in the preview (PowerPoint plays the same effect from the exported file). Returns its duration. */
+function playTransition(old, el, t) {
+  const dur = Math.max(100, t.dur ?? 700), k = Math.min(innerWidth / W, innerHeight / H), sw = W * k, shh = H * k;
+  const opt = {duration: dur, easing: 'ease-in-out', fill: 'both'};
+  const from = {r: [sw, 0], l: [-sw, 0], b: [0, shh], t: [0, -shh]}[t.dir] ?? [sw, 0];
+  const tr = ([x, y]) => `${x}px ${y}px`;
+  const clipFrom = {r: 'inset(0 0 0 100%)', l: 'inset(0 100% 0 0)', b: 'inset(100% 0 0 0)', t: 'inset(0 0 100% 0)'}[t.dir] ?? 'inset(0 0 0 100%)';
+  const anims = [];
+  switch (t.type) {
+    case 'fade': anims.push(el.animate([{opacity: 0}, {opacity: 1}], opt)); break;
+    case 'fadeBlack': anims.push(old.animate([{opacity: 1}, {opacity: 0}], {...opt, duration: dur / 2}), el.animate([{opacity: 0}, {opacity: 0, offset: .5}, {opacity: 1}], opt)); break;
+    case 'push': anims.push(el.animate([{translate: tr(from)}, {translate: '0px 0px'}], opt), old.animate([{translate: '0px 0px'}, {translate: tr(from.map(v => -v))}], opt)); break;
+    case 'cover': anims.push(el.animate([{translate: tr(from)}, {translate: '0px 0px'}], opt)); break;
+    case 'pull': show.append(old); anims.push(old.animate([{translate: '0px 0px'}, {translate: tr(from.map(v => -v))}], opt)); break;
+    case 'wipe': anims.push(el.animate([{clipPath: clipFrom}, {clipPath: 'inset(0 0 0 0)'}], opt)); break;
+    case 'split': { const v = (t.dir || 'vo')[0] !== 'h', out = (t.dir || 'vo')[1] !== 'i';
+      const closed = v ? 'inset(0 50% 0 50%)' : 'inset(50% 0 50% 0)';
+      if (out) anims.push(el.animate([{clipPath: closed}, {clipPath: 'inset(0 0 0 0)'}], opt));
+      else { show.append(old); anims.push(old.animate([{clipPath: 'inset(0 0 0 0)'}, {clipPath: closed}], opt)); } break; }
+    case 'zoom': anims.push(el.animate([{opacity: 0, scale: '.3'}, {opacity: 1, scale: '1'}], opt)); break;
+  }
+  Promise.all(anims.map(a => a.finished.catch(() => {}))).then(() => { old.remove(); anims.forEach(a => a.cancel()); });
+  return dur;
 }
 function info() { show.querySelector('.info').textContent = `${sh.i + 1}. dia · ${sh.step}/${sh.groups.length - sh.offset}. lépés · Esc: kilépés`; }
 async function playGroup(root, g) {
@@ -1394,26 +1549,37 @@ function playEffect(root, a, running) {
   const dur = Math.max(1, Anim.durOf(a)), delay = Anim.delayOf(a), opt = {duration: dur, delay, easing: 'ease-out', fill: 'backwards'};
   const after = (anim, fn) => { running.push(anim); return anim.finished.then(fn, () => {}); };
   const wait = () => new Promise(r => { const id = setTimeout(r, delay); running.push({finish: () => { clearTimeout(id); r(); }}); });
-  const flyDy = () => { const r = el.getBoundingClientRect(), sr = root.getBoundingClientRect(); return (sr.bottom - r.top) / (sr.height / H); };
+  const off = dir => {                        // translation (slide px) that puts the element just outside the slide
+    const r = el.getBoundingClientRect(), sr = root.getBoundingClientRect(), k = sr.height / H;
+    const x = dir.includes('l') ? -(r.right - sr.left) / k : dir.includes('r') ? (sr.right - r.left) / k : 0;
+    const y = dir.includes('t') ? -(r.bottom - sr.top) / k : dir.includes('b') ? (sr.bottom - r.top) / k : 0;
+    return `translate(${x}px, ${y}px)`;
+  };
+  const FLOAT = H * 0.1;
   switch (a.effect) {
     case 'appear': return wait().then(() => { el.style.visibility = 'visible'; });
     case 'disappear': return wait().then(() => { el.style.visibility = 'hidden'; });
     case 'fade': el.style.visibility = 'visible'; return after(el.animate([{opacity: 0}, {opacity: 1}], opt));
     case 'wipe': el.style.visibility = 'visible'; return after(el.animate([{clipPath: 'inset(-100% 100% -100% -100%)'}, {clipPath: 'inset(-100% -100% -100% -100%)'}], opt));
-    case 'fly': el.style.visibility = 'visible'; return after(el.animate([{transform: `translateY(${flyDy()}px)`}, {transform: 'none'}], opt));
+    case 'fly': el.style.visibility = 'visible'; return after(el.animate([{transform: off(Anim.dirOf(a))}, {transform: 'none'}], opt));
+    case 'float': { el.style.visibility = 'visible'; const dy = Anim.dirOf(a) === 'd' ? -FLOAT : FLOAT;
+      return after(el.animate([{opacity: 0, transform: `translateY(${dy}px)`}, {opacity: 1, transform: 'none'}], {...opt, easing: 'cubic-bezier(.2,.7,.3,1)'})); }
+    case 'floatOut': { const dy = Anim.dirOf(a) === 'd' ? FLOAT : -FLOAT;
+      const an = el.animate([{opacity: 1, transform: 'none'}, {opacity: 0, transform: `translateY(${dy}px)`}], {...opt, easing: 'ease-in', fill: 'forwards'});
+      return after(an, () => { el.style.visibility = 'hidden'; an.cancel(); }); }
     case 'pulse': return after(el.animate([{transform: 'scale(1)'}, {transform: 'scale(1.05)'}, {transform: 'scale(1)'}], {...opt, easing: 'ease-in-out', fill: 'none'}));
     case 'grow': { const an = el.animate([{transform: 'scale(1)'}, {transform: 'scale(1.5)'}], {...opt, fill: 'forwards'}); return after(an, () => { el.style.transform = 'scale(1.5)'; an.cancel(); }); }
     case 'spin': return after(el.animate([{transform: (el.style.transform || '') + ' rotate(0deg)'}, {transform: (el.style.transform || '') + ' rotate(360deg)'}], {...opt, fill: 'none'}));
     case 'fadeOut': { const an = el.animate([{opacity: 1}, {opacity: 0}], {...opt, fill: 'forwards'}); return after(an, () => { el.style.visibility = 'hidden'; an.cancel(); }); }
     case 'wipeOut': { const an = el.animate([{clipPath: 'inset(-100% -100% -100% -100%)'}, {clipPath: 'inset(-100% -100% -100% 100%)'}], {...opt, fill: 'forwards'}); return after(an, () => { el.style.visibility = 'hidden'; an.cancel(); }); }
-    case 'flyOut': { const an = el.animate([{transform: 'none'}, {transform: `translateY(${flyDy()}px)`}], {...opt, easing: 'ease-in', fill: 'forwards'}); return after(an, () => { el.style.visibility = 'hidden'; an.cancel(); }); }
+    case 'flyOut': { const an = el.animate([{transform: 'none'}, {transform: off(Anim.dirOf(a))}], {...opt, easing: 'ease-in', fill: 'forwards'}); return after(an, () => { el.style.visibility = 'hidden'; an.cancel(); }); }
   }
 }
 function showNext() {
   if (sh.busy) { sh.busy.running.forEach(a => a.finish()); return; }
   const gi = sh.step + sh.offset;
   if (gi < sh.groups.length) { sh.step++; info(); playGroup(sh.el, sh.groups[gi]); return; }
-  if (sh.i < doc.slides.length - 1) loadShowSlide(sh.i + 1, 0, true); else stopShow();
+  if (sh.i < doc.slides.length - 1) loadShowSlide(sh.i + 1, 0, true, true); else stopShow();
 }
 function showPrev() {
   if (sh.step > 0) loadShowSlide(sh.i, sh.step - 1, false);
@@ -1453,10 +1619,11 @@ async function unpackMprezi(buf) {
 }
 async function doSave(saveAs) {
   if (editing) exitEdit(); closePops();
-  try { const msg = await savePresentation(await packMprezi(), doc.title, saveAs); if (/^Elmentve/.test(msg)) dirty = false; setStatus(msg); toast(msg); }
+  try { const msg = await savePresentation(await packMprezi(), doc.title, saveAs); if (/^Elmentve/.test(msg)) { dirty = false; saveSoon(); } setStatus(msg); toast(msg); setTimeout(() => setStatus(), 2500); }
   catch (e) { setStatus('A mentés nem sikerült: ' + (e?.message || e)); }
 }
-function loadDocument(d, m, name, path) {
+function loadDocument(d, m, name, path, handle) {
+  setCurrentHandle(handle ?? null);
   doc = d; media = m; if (name) doc.title = doc.title || name.replace(/\.mprezi$/i, '');
   doc.font = FONT_SETS[doc.font] ? doc.font : DEFAULT_FONT;
   if (doc.font !== activeMathFont()) { setCurrentPath(path ?? null); resetHistory(); restartWithFont(doc.font); return; }
@@ -1465,10 +1632,15 @@ function loadDocument(d, m, name, path) {
 }
 async function openResult(r) {
   if (!r) return;
-  try { const {doc: d, media: m} = await unpackMprezi(r.data); loadDocument(d, m, r.name, r.path); saveSoon(); toast('Megnyitva: ' + r.name); setStatus('Megnyitva: ' + r.name); }
+  showHome(false);
+  try { const {doc: d, media: m} = await unpackMprezi(r.data); loadDocument(d, m, r.name, r.path, r.handle); saveSoon(); toast('Megnyitva: ' + r.name); setStatus('Megnyitva: ' + r.name); }
   catch (e) { toast('A fájl nem nyitható meg: ' + (e?.message || e)); }
 }
-async function doOpen() { if (editing) exitEdit(); if (dirty && !confirm('A nem mentett módosítások elvesznek. Megnyitsz egy másik bemutatót?')) return; openResult(await openPresentation()); }
+async function doOpen() {
+  if (editing) exitEdit();
+  if (dirty && $('#home').hidden && !await confirmBox('A nem mentett módosítások elvesznek. Megnyitsz egy másik bemutatót?', 'Megnyitás')) return;
+  const r = await openPresentation(); if (r) { showHome(false); openResult(r); }
+}
 function busy(msg) { $('#busyMsg').textContent = msg || ''; $('#busy').hidden = !msg; }
 async function doExport(kind) {
   closePops(); if (editing) exitEdit();
@@ -1486,19 +1658,28 @@ $('#expPptx').onclick = () => doExport('pptx');
 $('#expPdf').onclick = () => doExport('pdf');
 $('#expPdfSteps').onclick = () => doExport('pdfSteps');
 $('#bSave').onclick = () => doSave(false);
+$('#bSaveAs').onclick = () => doSave(true);
 $('#bOpen').onclick = doOpen;
 $('#bPlay').onclick = () => startShow(cur);
 $('#fontSel').onchange = e => switchFont(e.target.value);
 $('#zoomSel').onchange = e => { zoom = e.target.value === 'auto' ? 'auto' : +e.target.value; fitStage(); };
 $('#docTitle').onchange = e => { doc.title = e.target.value.trim() || 'Névtelen bemutató'; dirty = true; setStatus(); saveSoon(); };
-let arm = 0;
-$('#bNew').onclick = e => {
-  const b = e.currentTarget;
-  if (dirty && !arm) { b.textContent = 'Biztosan új? (a mostani elvész)'; arm = setTimeout(() => { arm = 0; b.textContent = 'Új'; }, 2600); return; }
-  clearTimeout(arm); arm = 0; b.textContent = 'Új';
+async function newPresentation() {
+  if (!await confirmBox(dirty ? 'Új bemutatót kezdesz. A mostani nem mentett módosításai elvesznek. Folytatod?' : 'Új, üres bemutatót kezdesz. Folytatod?', 'Új bemutató')) return false;
   if (editing) stopEditor();
-  blankDoc(); doc.slides.push(newSlide('cimdia')); loadDocument(doc, media, null, null); saveSoon();
-};
+  blankDoc(); doc.slides.push(newSlide('cimdia')); loadDocument(doc, media, null, null); saveSoon(); showHome(false); return true;
+}
+$('#bNew').onclick = newPresentation;
+/* home screen (as in Matekos Doksi) */
+function showHome(show) {
+  $('#home').hidden = !show;
+  if (show) { $('#homeResume').hidden = false; $('#homeResume').textContent = doc?.slides?.length ? 'A legutóbbi bemutató folytatása' : 'Mintabemutató megtekintése'; }
+  else fitStage();
+}
+$('#homeNew').onclick = newPresentation;
+$('#homeOpen').onclick = doOpen;
+$('#homeResume').onclick = () => showHome(false);
+$('#brand').onclick = () => { if (editing) exitEdit(); clearTimeout(autoT); autosave(autoValue()); showHome(true); };
 function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('on'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('on'), 2800); }
 
 /* ================================================================== keyboard */
@@ -1511,7 +1692,8 @@ addEventListener('keydown', e => {
     else if (k === 'escape') stopShow();
     return;
   }
-  if (isMathEditorOpen()) return;
+  if (isMathEditorOpen() || !$('#cfm').hidden) return;
+  if (!$('#home').hidden) return;
   if (mod && k === 's') { e.preventDefault(); doSave(e.shiftKey); return; }
   if (mod && k === 'o') { e.preventDefault(); doOpen(); return; }
   if (k === 'f5') { e.preventDefault(); startShow(cur); return; }
@@ -1533,6 +1715,11 @@ addEventListener('keydown', e => {
   if ((k === 'delete' || k === 'backspace') && selIds.length) { e.preventDefault(); deleteSelected(); return; }
   if (k === 'escape') { select(null); return; }
   if (k === 'enter' && isTextLike(o) && !o.locked && !(mode === 'template' && o.placeholder)) { e.preventDefault(); enterEdit(o.id); return; }
+  if ((k === 'arrowup' || k === 'arrowdown') && mode === 'slides' && (!selIds.length || slideFocus)) {
+    e.preventDefault(); const to = cur + (k === 'arrowup' ? -1 : 1);
+    if (to >= 0 && to < doc.slides.length) { gotoSlide(to); slideFocus = true; }
+    return;
+  }
   if (selIds.length && k.startsWith('arrow')) {
     e.preventDefault(); const d = e.shiftKey ? 10 : 1;
     const dx = k === 'arrowleft' ? -d : k === 'arrowright' ? d : 0, dy = k === 'arrowup' ? -d : k === 'arrowdown' ? d : 0;
@@ -1558,8 +1745,11 @@ addEventListener('beforeunload', e => { if (dirty && !isTauri()) e.preventDefaul
   doc.font = fontKey; $('#fontSel').value = fontKey;
   resetHistory();
   if (saved?.path) setCurrentPath(saved.path);
+  if (saved?.handle) setCurrentHandle(saved.handle);
   if (saved?.dirty) { dirty = true; setStatus(); }
   fitStage(); renderAll();
+  if (!sessionStorage.getItem('mp.skipHome')) showHome(true);
+  sessionStorage.removeItem('mp.skipHome');
   fontLoad.then(() => { measureTexts(); drawSelection(); drawBadges(); renderThumbs(); });
   mathReady.then(() => setTimeout(() => { measureTexts(); drawSelection(); drawBadges(); }, 100));
   if (isTauri()) {

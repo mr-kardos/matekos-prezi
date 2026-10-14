@@ -3,9 +3,15 @@ export const isTauri = () => typeof window !== 'undefined' && !!window.__TAURI_I
 export const safeName = t => (t || 'bemutato').replace(/[\\/:*?"<>|]+/g, '').trim().slice(0, 120) || 'bemutato';
 const baseName = p => String(p).split(/[\\/]/).pop();
 
-let currentPath = null;
+let currentPath = null;      // desktop app: path of the presentation file
+let currentHandle = null;    // browser (Chrome/Edge): file handle, so "Mentés" can write the same file again
 export const getCurrentPath = () => currentPath;
 export const setCurrentPath = p => { currentPath = p; };
+export const getCurrentHandle = () => currentHandle;
+export const setCurrentHandle = h => { currentHandle = h || null; };
+/** Name of the file the presentation is saved to (or null). */
+export const currentFileName = () => currentPath ? baseName(currentPath) : currentHandle ? currentHandle.name : null;
+const MPREZI_TYPE = [{description: 'Matekos Prezi bemutató', accept: {'application/zip': ['.mprezi']}}];
 
 /** Browser download (or the claude.ai downloads capability when running as a published page). */
 async function download(filename, blob) {
@@ -35,6 +41,15 @@ export async function savePresentation(blob, title, saveAs) {
     currentPath = path;
     return 'Elmentve: ' + baseName(path);
   }
+  if (window.showSaveFilePicker) {                       // Chrome / Edge: real files, saved in place
+    try {
+      let h = !saveAs && currentHandle;
+      if (h && (await h.queryPermission?.({mode: 'readwrite'})) !== 'granted' && (await h.requestPermission?.({mode: 'readwrite'})) !== 'granted') h = null;
+      if (!h) h = await window.showSaveFilePicker({suggestedName: safeName(title) + '.mprezi', types: MPREZI_TYPE});
+      const w = await h.createWritable(); await w.write(blob); await w.close();
+      currentHandle = h; return 'Elmentve: ' + h.name;
+    } catch (e) { if (e && e.name === 'AbortError') return 'Mentés megszakítva'; }
+  }
   return download(safeName(title) + '.mprezi', blob);
 }
 
@@ -58,6 +73,13 @@ export async function openPresentation() {
     const path = await open({multiple: false, filters: [{name: 'Matekos Prezi bemutató', extensions: ['mprezi']}]});
     if (!path) return null;
     return openPathFile(path);
+  }
+  if (window.showOpenFilePicker) {
+    try {
+      const [h] = await window.showOpenFilePicker({types: MPREZI_TYPE, multiple: false});
+      const f = await h.getFile(); currentHandle = h;
+      return {data: await f.arrayBuffer(), path: null, name: f.name, handle: h};
+    } catch (e) { if (e && e.name === 'AbortError') return null; }
   }
   return new Promise(resolve => {
     const inp = document.getElementById('openIn');

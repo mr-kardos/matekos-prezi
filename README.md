@@ -1,4 +1,4 @@
-# Matekos Prezi 0.4
+# Matekos Prezi 0.6
 
 Presentation editor with live inline TeX, the twin of **Matekos Doksi**. Built with **TipTap**
 (text editor), **MathJax 4** (formulas), **MathLive** (visual formula editor) and **Tauri 2**
@@ -42,12 +42,21 @@ Browser test version: `npm run build:web` → one self-contained `dist-web/index
   placeholders. New slides are created from layouts.
 * Animations: entrance, emphasis and exit effects; on click / with previous / after previous;
   duration and delay; whole text or paragraph by paragraph (both can be combined on one object).
+  Beúszás / Kiúszás (Fly In/Out) in 8 directions, Belebegés / Kilebegés (Float In/Out) up or down –
+  exported as PowerPoint's own presets (2 with subtypes, 42 / 47).
+* Slide transitions (Áttűnés, Áttűnés feketén át, Eltolás, Takarás, Felfedés, Törlés, Szétválás, Nagyítás)
+  with direction and exact duration – exported as PowerPoint transitions (`p14:dur`), previewed in the app.
+* Saving: "Mentés" writes the presentation's own file (asks only the first time), "Mentés másként" writes a new
+  file and leaves the previous one unchanged.
   Coloured sequence numbers on the slide (can be hidden) and a timeline in the right panel.
 * Layers: show/hide (eye) and lock each object, drag to reorder, group / ungroup.
 * Colours: every colour picker has white, #D8D8D8, black and #DA291C, the colours saved in the presentation
   (`doc.colors`, stored in the .mprezi file), a custom colour with OK / Mentés (save to this presentation)
   and an eyedropper (the browser's own where available, otherwise picking from a picture of the slide).
-* Template builder: automatic slide number and date fields (master or layouts).
+* Template builder: automatic slide number and date fields (master or layouts); text styles for headlines
+  and normal text (size, colour, bold, italic) that update the placeholders and new text boxes.
+* Home screen (new / open / continue), in-app confirmation before deleting a non-empty slide or starting a
+  new presentation, ↑/↓ to move between slides.
 * Slideshow preview inside the app.
 
 ## Export

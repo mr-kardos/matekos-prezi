@@ -6,15 +6,32 @@ export const Anim = (() => {
   const EFFECTS = {
     appear:    {cls: 'entr', label: 'Megjelenés',            id: 1,  sub: 0, dur: 0,    instant: true},
     fade:      {cls: 'entr', label: 'Elhalványulás',         id: 10, sub: 0, dur: 500},
-    fly:       {cls: 'entr', label: 'Berepülés alulról',     id: 2,  sub: 4, dur: 500},
+    fly:       {cls: 'entr', label: 'Beúszás',               id: 2,  sub: 4, dur: 500,  dirs: 'fly'},
+    float:     {cls: 'entr', label: 'Belebegés',             id: 42, sub: 0, dur: 1000, dirs: 'float'},
     wipe:      {cls: 'entr', label: 'Törlés balról',         id: 22, sub: 8, dur: 500},
     pulse:     {cls: 'emph', label: 'Lüktetés',              id: 26, sub: 0, dur: 500},
     grow:      {cls: 'emph', label: 'Nagyítás (150%)',       id: 6,  sub: 0, dur: 1000},
     spin:      {cls: 'emph', label: 'Forgás (360°)',         id: 8,  sub: 0, dur: 1000},
     disappear: {cls: 'exit', label: 'Eltűnés',               id: 1,  sub: 0, dur: 0,    instant: true},
     fadeOut:   {cls: 'exit', label: 'Elhalványulás',         id: 10, sub: 0, dur: 500},
-    flyOut:    {cls: 'exit', label: 'Kirepülés lefelé',      id: 2,  sub: 4, dur: 500},
+    flyOut:    {cls: 'exit', label: 'Kiúszás',               id: 2,  sub: 4, dur: 500,  dirs: 'fly'},
+    floatOut:  {cls: 'exit', label: 'Kilebegés',             id: 42, sub: 0, dur: 1000, dirs: 'float'},
     wipeOut:   {cls: 'exit', label: 'Törlés balra',          id: 22, sub: 8, dur: 500},
+  };
+  // directions (like PowerPoint's effect options). Fly: where the object comes from / goes to. Float: up or down.
+  const DIRS = {
+    fly: {b: 'alulról / lefelé', t: 'felülről / felfelé', l: 'balról / balra', r: 'jobbról / jobbra', tl: 'balra fentről', tr: 'jobbra fentről', bl: 'balra lentről', br: 'jobbra lentről'},
+    float: {u: 'felfelé', d: 'lefelé'}
+  };
+  const DIR_DEFAULT = {fly: 'b', float: 'u'};
+  const FLY_SUB = {t: 1, r: 2, b: 4, l: 8, tr: 3, br: 6, bl: 12, tl: 9};
+  const dirOf = a => { const k = EFFECTS[a.effect].dirs; return k ? (DIRS[k][a.dir] ? a.dir : DIR_DEFAULT[k]) : null; };
+  /** PowerPoint preset id / subtype of an animation (direction included). */
+  const preset = a => {
+    const E = EFFECTS[a.effect], d = dirOf(a);
+    if (E.dirs === 'fly') return {id: 2, sub: FLY_SUB[d]};
+    if (E.dirs === 'float') return {id: d === 'd' ? 47 : 42, sub: 0};
+    return {id: E.id, sub: E.sub};
   };
   const CLASSES = {entr: 'Belépő', emph: 'Kiemelés', exit: 'Kilépő'};
   const DEFAULT = {entr: 'fade', emph: 'pulse', exit: 'fadeOut'};
@@ -84,5 +101,5 @@ export const Anim = (() => {
     for (const a of s.anims) { const o = s.objects.find(q => q.id === a.target); if (o?.byParagraph && a.byParagraph == null) a.byParagraph = true; }
     for (const o of s.objects) delete o.byParagraph;
   }
-  return {EFFECTS, CLASSES, DEFAULT, TRIGGERS, durOf, delayOf, splitsByParagraph, pieceKeys, expand, numbers, ranges, groups, timeline, initiallyHidden, migrateSlide};
+  return {DIRS, dirOf, preset, EFFECTS, CLASSES, DEFAULT, TRIGGERS, durOf, delayOf, splitsByParagraph, pieceKeys, expand, numbers, ranges, groups, timeline, initiallyHidden, migrateSlide};
 })();
