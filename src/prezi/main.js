@@ -3,18 +3,18 @@ import './prezi.css';
 import JSZip from 'jszip';
 import { NodeSelection } from '@tiptap/pm/state';
 import { CellSelection, TableMap } from '@tiptap/pm/tables';
-import { loadFonts } from '../fonts.js';
-import { startMathJax, renderInto, mathReady } from '../math.js';
+import { startMathJax, renderInto, mathReady, activeMathFont } from '../math.js';
+import { FONT_SETS, DEFAULT_FONT, applyTextFont, loadTextFamily } from './fontsets.js';
 import { openMathEditor, isMathEditorOpen } from '../mathEditor.js';
 import { tableContext } from '../editor/extensions.js';
 import { svg as svgIcon } from '../icons.js';
-import { isTauri, savePresentation, saveExport, openPresentation, openPathFile, watchOpenedFiles, setCurrentPath, autosave, loadAutosave } from '../files.js';
+import { isTauri, savePresentation, saveExport, openPresentation, openPathFile, watchOpenedFiles, setCurrentPath, getCurrentPath, autosave, loadAutosave } from '../files.js';
 import { Anim } from './anim.js';
 import { W, H, uid, clone, emptyDoc, textDoc, tableDoc, T, M, isEmptyText, blockCount, makeBackground, phName, ph, TITLE_PROMPT,
   defaultMaster, defaultTemplates, newSlide as makeSlide, syncPlaceholders as syncPh, migrate,
   flatObjects, findObject, parentGroup, bounds, fitGroup, moveObject, scaleFrom } from './model.js';
 import { renderStatic, pieceEls, mountEditor, setTextHooks, mathPending } from './textview.js';
-import { buildPptx, buildPdf } from './export.js';
+import { buildPptx, buildPdf, slideCanvas } from './export.js';
 
 const $ = s => document.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -22,11 +22,10 @@ const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(
 const r1 = v => Math.round(v * 10) / 10;
 const PT = 0.75, MM = 96 / 25.4;
 const CLS_COLOR = {entr: '#1f9d55', emph: '#c98a0b', exit: '#c0392b'};
-const LS = {left: 'matekosprezi.leftw', panel: 'matekosprezi.panel', badges: 'matekosprezi.badges', sections: 'matekosprezi.sections'};
+const LS = {right: 'matekosprezi.rightw', left: 'matekosprezi.leftw', panel: 'matekosprezi.panel', badges: 'matekosprezi.badges', sections: 'matekosprezi.sections'};
 const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
 
-startMathJax();
 
 /* ================================================================== state */
 let doc, media = {}, cur = 0, curAnim = null;
@@ -49,7 +48,7 @@ const syncPlaceholders = s => syncPh(doc, s);
 
 function blankDoc() {
   media = {bg1: makeBackground()};
-  doc = {format: 'mprezi', version: 3, size: {w: W, h: H}, master: defaultMaster('bg1'), templates: defaultTemplates(), slides: []};
+  doc = {format: 'mprezi', version: 4, size: {w: W, h: H}, font: activeMathFont() || DEFAULT_FONT, master: defaultMaster('bg1'), templates: defaultTemplates(), slides: []};
 }
 function demoDoc() {
   blankDoc();
@@ -89,7 +88,19 @@ function snapshot() { return JSON.stringify({doc, cur, mode, tcur}); }
 function setStatus(t) { $('#status').textContent = t ?? (dirty ? 'Nem mentett módosítások' : ''); }
 function resetHistory() { history = [snapshot()]; hIdx = 0; dirty = false; $('#docTitle').value = doc.title || 'Névtelen bemutató'; setStatus(''); }
 let autoT = 0;
-function saveSoon() { clearTimeout(autoT); autoT = setTimeout(() => autosave({doc: JSON.parse(snapshot()).doc, media, title: doc.title}), 1200); }
+const autoValue = () => ({doc: JSON.parse(snapshot()).doc, media, title: doc.title, path: getCurrentPath(), dirty});
+function saveSoon() { clearTimeout(autoT); autoT = setTimeout(() => autosave(autoValue()), 1200); }
+/** The math font is chosen when MathJax starts – a different font set restarts the editor with the same presentation. */
+async function restartWithFont(key) {
+  busy('Betűtípus váltása…');
+  clearTimeout(autoT); await autosave(autoValue());
+  location.reload();
+}
+async function switchFont(key) {
+  if (!FONT_SETS[key] || key === (doc.font || DEFAULT_FONT)) return;
+  if (editing) exitEdit();
+  doc.font = key; commit(); await restartWithFont(key);
+}
 function syncEditor() { if (editing && ed) { const o = objById(editing); if (o) o.doc = ed.getJSON(); } }
 function commit() {
   syncEditor();
@@ -125,14 +136,26 @@ function shapeSVG(o) {
   return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${body}</svg>`;
 }
 function txtStyle(t, o) {
-  Object.assign(t.style, {fontSize: o.size + 'px', color: o.color, textAlign: o.align, fontWeight: o.bold ? 700 : 400, fontStyle: o.italic ? 'italic' : 'normal',
+  Object.assign(t.style, {letterSpacing: o.letterSpacing ? o.letterSpacing + 'pt' : '', fontSize: o.size + 'px', color: o.color, textAlign: o.align, fontWeight: o.bold ? 700 : 400, fontStyle: o.italic ? 'italic' : 'normal',
     textDecorationLine: [o.underline && 'underline', o.strike && 'line-through'].filter(Boolean).join(' ') || 'none'});
 }
 let measureT = 0;
 const onMathRendered = () => { clearTimeout(measureT); measureT = setTimeout(() => { measureTexts(); drawSelection(); drawBadges(); }, 30); };
 /** One object as DOM. (ox, oy) = origin of the parent (a group's top-left corner). */
+/* automatic fields (template builder): slide number and date */
+const MONTHS = ['január', 'február', 'március', 'április', 'május', 'június', 'július', 'augusztus', 'szeptember', 'október', 'november', 'december'];
+let renderNum = null;                              // number of the slide being drawn (null: master / layout)
+function fieldText(f) {
+  const d = new Date(), p2 = n => String(n).padStart(2, '0');
+  if (f === 'slideNumber') return renderNum == null ? '‹#›' : String(renderNum);
+  if (f === 'dateLong') return `${d.getFullYear()}. ${MONTHS[d.getMonth()]} ${d.getDate()}.`;
+  if (f === 'dateShort') return `${d.getFullYear()}. ${p2(d.getMonth() + 1)}. ${p2(d.getDate())}.`;
+  return '';
+}
 function objEl(o, rmode, tpl = false, ox = 0, oy = 0) {
+  if (o.field) o = {...o, doc: textDoc([T(fieldText(o.field))])};
   const el = document.createElement('div');
+  if (o.hidden) el.hidden = true;
   el.className = `obj ${o.type}${tpl ? ' tpl' : ''}${o.placeholder ? ' placeholder' : ''}${o.locked ? ' locked' : ''}${o.shape ? ' s-' + o.shape : ''}`;
   el.dataset.id = o.id;
   Object.assign(el.style, {left: (o.x - ox) + 'px', top: (o.y - oy) + 'px', width: o.w + 'px', height: o.h + 'px'});
@@ -166,9 +189,11 @@ function paintLayoutBase(clip, L, rmode, withLayoutObjs) {
 }
 function newClip(el) { el.innerHTML = ''; const c = document.createElement('div'); c.className = 'clip'; el.appendChild(c); return c; }
 function renderSlide(s, el, rmode) {
-  const clip = newClip(el);
+  const clip = newClip(el), i = doc.slides.indexOf(s);
+  renderNum = i >= 0 ? i + 1 : null;
   paintLayoutBase(clip, layoutOf(s), rmode, true);
   for (const o of s.objects) clip.appendChild(objEl(o, rmode));
+  renderNum = null;
   return clip;
 }
 function renderTemplate(key, el, rmode) {
@@ -258,7 +283,7 @@ function drawBadges() {
   const s = tgt(), rg = Anim.ranges(Anim.expand(s)), map = {};
   for (const a of s.anims) if (rg[a.id]) (map[a.target] ??= []).push({r: rg[a.id], cls: Anim.EFFECTS[a.effect].cls});
   for (const [id, arr] of Object.entries(map)) {
-    const o = objById(id); if (!o) continue;
+    const o = objById(id); if (!o || o.hidden) continue;
     const b = document.createElement('div'), bb = bounds(o); b.className = 'badges';
     Object.assign(b.style, {left: bb.x + 'px', top: bb.y + 'px'});
     b.innerHTML = arr.map(({r, cls}) => `<span class="badge ${cls}" title="${Anim.CLASSES[cls]}">${r[0] === r[1] ? r[0] : r[0] + '–' + r[1]}</span>`).join('');
@@ -271,7 +296,7 @@ const slidesNav = $('#slides'), mainEl = $('#main');
 function setLeftWidth(w) {
   w = Math.max(130, Math.min(420, Math.round(w)));
   mainEl.style.setProperty('--lw', w + 'px'); document.body.style.setProperty('--lw', w + 'px');
-  mainEl.style.setProperty('--tk', ((w - 46) / W).toFixed(4));
+  mainEl.style.setProperty('--tk', ((w - 64) / W).toFixed(4));
   return w;
 }
 setLeftWidth(+lsGet(LS.left) || 176);
@@ -281,6 +306,20 @@ $('#lsplit').addEventListener('pointerdown', e => {
   const mv = ev => { setLeftWidth(w0 + ev.clientX - x0); fitStage(); };
   const up = ev => { sp.releasePointerCapture(ev.pointerId); sp.classList.remove('drag'); sp.removeEventListener('pointermove', mv); sp.removeEventListener('pointerup', up);
     lsSet(LS.left, String(setLeftWidth(w0 + ev.clientX - x0))); fitStage(); };
+  sp.addEventListener('pointermove', mv); sp.addEventListener('pointerup', up);
+});
+function setRightWidth(w) {
+  w = Math.max(240, Math.min(560, Math.round(w)));
+  mainEl.style.setProperty('--rw', w + 'px'); document.body.style.setProperty('--rw', w + 'px');
+  return w;
+}
+setRightWidth(+lsGet(LS.right) || 300);
+$('#rsplit').addEventListener('pointerdown', e => {
+  e.preventDefault(); const sp = e.currentTarget; sp.setPointerCapture(e.pointerId); sp.classList.add('drag');
+  const x0 = e.clientX, w0 = $('#props').getBoundingClientRect().width;
+  const mv = ev => { setRightWidth(w0 - (ev.clientX - x0)); fitStage(); };
+  const up = ev => { sp.releasePointerCapture(ev.pointerId); sp.classList.remove('drag'); sp.removeEventListener('pointermove', mv); sp.removeEventListener('pointerup', up);
+    lsSet(LS.right, String(setRightWidth(w0 - (ev.clientX - x0)))); fitStage(); };
   sp.addEventListener('pointermove', mv); sp.addEventListener('pointerup', up);
 });
 function thumbFrame(label, cls) {
@@ -427,6 +466,7 @@ stage.addEventListener('pointerdown', e => {
     if (tEl && o.type === 'group') { select(tEl.dataset.id); enterEdit(tEl.dataset.id, e); return; }
     if (isText(o)) {
       if (mode === 'template' && o.placeholder) { toast('A helykitöltő mintaszövegét a jobb oldali panelen adhatod meg.'); return; }
+      if (o.field) { toast('Automatikus mező – a tartalma magától frissül. A formázását a menüszalaggal állíthatod.'); return; }
       enterEdit(id, e); return;
     }
   }
@@ -447,7 +487,7 @@ stage.addEventListener('pointermove', e => {
     let m = stage.querySelector('.marquee'); if (!m) { m = document.createElement('div'); m.className = 'marquee'; stage.appendChild(m); }
     const x0 = Math.min(p.x, action.p0.x), y0 = Math.min(p.y, action.p0.y), x1 = Math.max(p.x, action.p0.x), y1 = Math.max(p.y, action.p0.y);
     Object.assign(m.style, {left: x0 + 'px', top: y0 + 'px', width: (x1 - x0) + 'px', height: (y1 - y0) + 'px'});
-    const hit = tgt().objects.filter(o => !o.locked && !(isEmptyText(o) && o.placeholder && false)).filter(o => { const b = bounds(o); return b.x < x1 && b.x + b.w > x0 && b.y < y1 && b.y + b.h > y0; }).map(o => o.id);
+    const hit = tgt().objects.filter(o => !o.locked && !o.hidden).filter(o => { const b = bounds(o); return b.x < x1 && b.x + b.w > x0 && b.y < y1 && b.y + b.h > y0; }).map(o => o.id);
     setSel([...action.base, ...hit]); drawSelection();
     return;
   }
@@ -528,7 +568,7 @@ function select(id) {
 /* ================================================================== text editing (Matekos Doksi editor) */
 setTextHooks({onEdit: (pos, node) => openMath(pos, node), onRendered: onMathRendered, onPreview: p => showPreview(p)});
 function enterEdit(id, ev) {
-  const o = objById(id); if (!isTextLike(o) || o.locked) return;
+  const o = objById(id); if (!isTextLike(o) || o.locked || o.field) return;
   if (sel !== id) { setSel([id]); curAnim = null; }
   editing = id;
   const el = stage.querySelector(`.obj[data-id="${id}"]`), txt = el.querySelector('.txt');
@@ -568,6 +608,7 @@ function exitEdit() {
 /** Run a TipTap command on the selected text box: directly while editing, otherwise on its whole content. */
 function withEditor(fn) {
   const o = selObj(); if (!isTextLike(o) || o.locked) return;
+  if (o.field) { toast('Automatikus mezőnél csak az egész doboz formázható (betű, szín, igazítás).'); return; }
   if (editing === o.id) { fn(ed.chain().focus()); return; }
   if (mode === 'template' && o.placeholder) { toast('A helykitöltő formázását a menüszalag betű- és igazítás-gombjaival állíthatod.'); return; }
   enterEdit(o.id); ed.commands.selectAll(); fn(ed.chain().focus()); exitEdit();
@@ -826,6 +867,11 @@ function ungroupSelected() {
   if (tgt().anims) tgt().anims = tgt().anims.filter(a => a.target !== g.id);
   setSel(g.children.map(c => c.id)); commit();
 }
+function toggleHidden(id) {
+  const o = objById(id); if (!o) return;
+  if (editing === id) exitEdit();
+  o.hidden = !o.hidden || undefined; if (o.hidden) setSel(selIds.filter(x => x !== id)); commit();
+}
 function toggleLock(id) {
   const o = objById(id); if (!o) return;
   if (editing === id) exitEdit();
@@ -860,7 +906,10 @@ function positionBody() {
   const o = objs[0];
   if (!o) return '<div class="phint" style="margin:0">Jelölj ki egy objektumot a dián vagy a Rétegek listában. Több objektum: Shift+kattintás, vagy húzz keretet az üres területen.</div>';
   const round = Math.round, rot = o.rot > 180 ? o.rot - 360 : (o.rot || 0), lk = o.locked ? 'disabled' : '';
-  return `${o.locked ? `<div class="phint lockhint">${svgIcon('lock')} Zárolva – a Rétegek résznél oldható fel.</div>` : ''}
+  const colors = o.type === 'shape' ? `<div class="colbtns">
+      <button class="btn colbtn" data-pop="popFill" ${o.shape === 'line' || o.locked ? 'disabled' : ''} title="Kitöltés színe"><i class="dot fill" style="--c:${o.fill || 'transparent'}"></i>Kitöltés</button>
+      <button class="btn colbtn" data-pop="popStroke" ${lk} title="Körvonal színe és vastagsága"><i class="dot ring" style="--c:${o.stroke || 'transparent'}"></i>${o.shape === 'line' ? 'Vonal' : 'Körvonal'}</button></div>` : '';
+  return `${colors}${o.locked ? `<div class="phint lockhint">${svgIcon('lock')} Zárolva – a Rétegek résznél oldható fel.</div>` : ''}
     ${slider('pX', 'Vízszintes', round(o.x), -round(o.w) + 10, W - 10, 1, lk)}
     ${slider('pY', 'Függőleges', round(o.y), -round(o.h) + 10, H - 10, 1, lk)}
     ${slider('pW', 'Szélesség', round(o.w), 16, W, 1, lk)}
@@ -876,17 +925,17 @@ function layersBody() {
   const objs = tgt().objects, one = selObj(), top = one && tgt().objects.includes(one);
   const dis = top && !one.locked ? '' : 'disabled';
   const multiTop = tgt().objects.filter(o => selIds.includes(o.id)).length > 1;
-  const rows = [...objs].reverse().map(o => `<div class="lyr${selIds.includes(o.id) ? ' on' : ''}${o.locked ? ' isl' : ''}" draggable="true" data-id="${o.id}">
+  const rows = [...objs].reverse().map(o => `<div class="lyr${selIds.includes(o.id) ? ' on' : ''}${o.locked ? ' isl' : ''}${o.hidden ? ' ish' : ''}" draggable="true" data-id="${o.id}">
     <span class="grip">${svgIcon('grip')}</span>${svgIcon(typeIcon(o))}<span class="lname">${esc(o.name ?? TYPE_LABEL[o.type] ?? '')}${o.type === 'group' ? ` <small>(${o.children.length})</small>` : ''}</span>
+    <button class="lk eye${o.hidden ? ' on' : ''}" data-hide="${o.id}" title="${o.hidden ? 'Megjelenítés' : 'Elrejtés (a dián, a lejátszásban és az exportban sem látszik)'}">${svgIcon(o.hidden ? 'eyeOff' : 'eye')}</button>
     <button class="lk${o.locked ? ' on' : ''}" data-lock="${o.id}" title="${o.locked ? 'Feloldás' : 'Zárolás: nem mozdítható, nem jelölhető ki a dián'}">${svgIcon(o.locked ? 'lock' : 'unlock')}</button></div>`).join('');
-  return `<div class="btnrow arr">
-      <button class="tb" data-arr="toFront" ${dis} title="Előtérbe hozás (legfelülre)">${svgIcon('toFront')}</button>
-      <button class="tb" data-arr="forward" ${dis} title="Előrébb hozás egy szinttel">${svgIcon('front')}</button>
-      <button class="tb" data-arr="backward" ${dis} title="Hátrébb küldés egy szinttel">${svgIcon('back')}</button>
-      <button class="tb" data-arr="toBack" ${dis} title="Háttérbe küldés (legalulra)">${svgIcon('toBack')}</button>
-      <span class="sp"></span>
-      <button class="tb" data-arr="group" ${multiTop ? '' : 'disabled'} title="Csoportosítás (Ctrl/⌘+G)">${svgIcon('group')}</button>
-      <button class="tb" data-arr="ungroup" ${one?.type === 'group' ? '' : 'disabled'} title="Csoport bontása (Ctrl/⌘+Shift+G)">${svgIcon('ungroup')}</button></div>
+  return `<div class="arrgrid">
+      <button class="tb" data-arr="toFront" ${dis} title="A legfelső rétegre">${svgIcon('arrFront')}<span>Legfelülre</span></button>
+      <button class="tb" data-arr="forward" ${dis} title="Egy réteggel feljebb">${svgIcon('arrForward')}<span>Feljebb</span></button>
+      <button class="tb" data-arr="backward" ${dis} title="Egy réteggel lejjebb">${svgIcon('arrBackward')}<span>Lejjebb</span></button>
+      <button class="tb" data-arr="toBack" ${dis} title="A legalsó rétegre">${svgIcon('arrBack')}<span>Legalulra</span></button>
+      <button class="tb" data-arr="group" ${multiTop ? '' : 'disabled'} title="A kijelöltek csoportosítása (Ctrl/⌘+G)">${svgIcon('group')}<span>Csoportosítás</span></button>
+      <button class="tb" data-arr="ungroup" ${one?.type === 'group' ? '' : 'disabled'} title="A csoport szétbontása (Ctrl/⌘+Shift+G)">${svgIcon('ungroup')}<span>Szétbontás</span></button></div>
     <div class="layers" id="layerList">${rows || '<div class="phint" style="margin:4px 0">Ezen a dián még nincs objektum.</div>'}</div>
     <div class="phint">Legfelül az előtérben lévő. Húzással átrendezhető; Shift+kattintás: több kijelölése.</div>`;
 }
@@ -905,7 +954,7 @@ function renderProps() {
       <div class="fld">Háttérkép<div class="imgpick">${L.background ? `<img src="${media[L.background]}" alt="">` : ''}<button class="btn" id="pBgPick">Kép…</button>${L.background ? '<button class="btn" id="pBgClear">Eltávolítás</button>' : ''}</div></div></div>`;
     h += `<div class="phint">${isM ? 'Ami a mesterre kerül (logó, lábléc, díszítés), minden elrendezésen megjelenik.' : 'Helykitöltőt a menüszalag „Helykitöltő” gombjával adhatsz hozzá.'}</div></section>`;
   }
-  h += section('pos', 'Elhelyezés', positionBody());
+  h += section('pos', 'Megjelenés és elhelyezés', positionBody());
   h += section('layers', 'Rétegek', layersBody());
   if (mode === 'slides') h += section('anim', 'Animációk', animBody());
   props.innerHTML = h;
@@ -949,6 +998,7 @@ function bindProps(o) {
   // layers
   props.querySelectorAll('[data-arr]').forEach(b => b.onclick = () => ({toFront: () => reorder((i, n) => n), forward: () => reorder((i, n) => Math.min(n, i + 1)),
     backward: () => reorder(i => Math.max(0, i - 1)), toBack: () => reorder(() => 0), group: groupSelected, ungroup: ungroupSelected})[b.dataset.arr]());
+  props.querySelectorAll('.colbtn').forEach(b => b.onclick = () => showPop(b.dataset.pop, b));
   bindLayers();
   if (mode === 'slides') bindAnims();
 }
@@ -974,6 +1024,7 @@ function bindLayers() {
   });
   list.addEventListener('click', e => {
     const lk = e.target.closest('[data-lock]'); if (lk) { toggleLock(lk.dataset.lock); return; }
+    const hd = e.target.closest('[data-hide]'); if (hd) { toggleHidden(hd.dataset.hide); return; }
     const r = e.target.closest('.lyr'); if (!r) return;
     if (editing) exitEdit();
     const id = r.dataset.id;
@@ -1130,7 +1181,6 @@ function updateRibbon() {
     const k = b.dataset.k; b.disabled = k === 'any' ? !selIds.length : k === 'text' ? !isTextLike(o) || !!o.locked : !isShape(o) || !!o.locked;
   }
   $('#sizeIn').disabled = !isTextLike(o);
-  if (o?.shape === 'line') ribbon.querySelector('[data-pop=popFill]').disabled = true;
   ribbon.querySelector('[data-cmd=undo]').disabled = !edit && hIdx <= 0;
   ribbon.querySelector('[data-cmd=redo]').disabled = !edit && hIdx >= history.length - 1;
   const act = (m, box) => isTextLike(o) && (edit ? ed.isActive(m) : !!o[box]);
@@ -1149,8 +1199,6 @@ function updateRibbon() {
     $('#styleSel').value = edit ? (ed.isActive('heading', {level: 1}) ? 'h1' : ed.isActive('heading', {level: 2}) ? 'h2' : ed.isActive('heading', {level: 3}) ? 'h3' : 'p') : 'p';
   }
   $('#styleSel').disabled = !isText(o);
-  $('#fillBar').style.background = isShape(o) ? (o.fill || 'transparent') : '#c9d1da';
-  $('#strokeBar').style.background = isShape(o) ? (o.stroke || 'transparent') : '#c9d1da';
   $('#bTpl').classList.toggle('primary', mode === 'template');
   $('#bTpl').textContent = mode === 'template' ? 'Sablon bezárása' : 'Sablon';
   if (!edit || !ed?.isActive('table')) $('#tableBar').hidden = true;
@@ -1162,6 +1210,7 @@ function showPop(id, anchor) {
   const p = $('#' + id);
   if (openPop === p) return closePops();
   closePops(); if (p.onopen) p.onopen();
+  if (p.querySelector('.cpicker')) { refreshPickers(); p.querySelectorAll('.cpicker').forEach(b => b._reset?.()); }
   p.hidden = false;
   const r = anchor.getBoundingClientRect();
   p.style.left = Math.max(8, Math.min(r.left, innerWidth - p.offsetWidth - 8)) + 'px';
@@ -1172,12 +1221,65 @@ function showPop(id, anchor) {
 function closePops() { if (openPop) { openPop.hidden = true; openPop = null; openAnchor = null; tblCtx = null; } }
 document.addEventListener('pointerdown', e => { if (openPop && !openPop.contains(e.target) && !(openAnchor && openAnchor.contains(e.target))) closePops(); }, true);
 for (const p of $$('.pop')) p.addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
+/* colour pickers: defaults + the colours saved in this presentation + custom colour, eyedropper */
+const BASE_COLORS = ['#ffffff', '#d8d8d8', '#000000', '#da291c'];
+const pickers = [];
 function swatches(box, colors, onPick, noneLabel) {
-  box.innerHTML = colors.map(c => `<button class="sw" data-c="${c}" style="background:${c}" title="${c}" aria-label="${c}"></button>`).join('')
-    + '<label class="sw custom" title="Egyéni szín"><input type="color" aria-label="Egyéni szín"></label>'
-    + (noneLabel ? `<button class="sw none" data-c="none">${noneLabel}</button>` : '');
-  box.addEventListener('click', e => { const b = e.target.closest('button[data-c]'); if (b) { onPick(b.dataset.c); closePops(); } });
-  box.querySelector('input').addEventListener('change', e => { onPick(e.target.value); closePops(); });
+  const all = [...BASE_COLORS, ...colors.filter(c => !BASE_COLORS.includes(c.toLowerCase()))];
+  box.className = 'cpicker';
+  box.innerHTML = `<div class="swg">${all.map(c => `<button class="sw" data-c="${c}" style="background:${c}" title="${c}" aria-label="${c}"></button>`).join('')}</div>
+    <div class="libwrap"><div class="ptitle">Ennek a bemutatónak a színei</div><div class="swg lib"></div></div>
+    <div class="ccust"><button class="tb eyed" title="Pipetta: szín felvétele a képernyőről">${svgIcon('eyedrop')}</button>
+      <label class="sw custom" title="Egyéni szín választása"><input type="color" aria-label="Egyéni szín"></label>
+      <span class="chex">#000000</span><span class="sp"></span>
+      <button class="btn cok" disabled>OK</button><button class="btn csave" disabled title="Hozzáadás ennek a bemutatónak a színeihez">Mentés</button></div>
+    ${noneLabel ? `<button class="sw none" data-c="none">${noneLabel}</button>` : ''}`;
+  const inp = box.querySelector('input[type=color]'), hex = box.querySelector('.chex'), ok = box.querySelector('.cok'), save = box.querySelector('.csave');
+  const pending = c => { inp.value = c; hex.textContent = c; hex.style.setProperty('--c', c); ok.disabled = save.disabled = false; };
+  box.addEventListener('click', e => {
+    const del = e.target.closest('[data-del]');
+    if (del) { doc.colors = (doc.colors || []).filter(c => c !== del.dataset.del); commit(); refreshPickers(); e.stopPropagation(); return; }
+    const b = e.target.closest('button[data-c]'); if (b) { onPick(b.dataset.c); closePops(); }
+  });
+  inp.addEventListener('input', () => pending(inp.value));
+  inp.addEventListener('change', () => pending(inp.value));
+  ok.onclick = () => { onPick(inp.value); closePops(); };
+  save.onclick = () => { const c = inp.value.toLowerCase(); doc.colors = [...new Set([...(doc.colors || []), c])]; onPick(c); closePops(); commit(); };
+  box.querySelector('.eyed').onclick = () => eyedrop(c => { pending(c); });
+  box._reset = () => { ok.disabled = save.disabled = true; hex.textContent = inp.value; };
+  pickers.push(box);
+}
+function refreshPickers() {
+  const lib = doc.colors || [];
+  for (const box of pickers) {
+    box.querySelector('.libwrap').hidden = !lib.length;
+    box.querySelector('.lib').innerHTML = lib.map(c => `<span class="libsw"><button class="sw" data-c="${c}" style="background:${c}" title="${c}"></button><button class="del" data-del="${c}" title="Törlés a bemutató színei közül">×</button></span>`).join('');
+  }
+}
+/** Pick a colour from the screen: the browser's eyedropper where available, otherwise from a picture of the slide. */
+async function eyedrop(done) {
+  if (window.EyeDropper) {
+    const pop = openPop, anchor = openAnchor;
+    try { const r = await new window.EyeDropper().open(); if (pop && anchor) { showPop(pop.id, anchor); } done(r.sRGBHex); } catch (e) { /* cancelled */ }
+    return;
+  }
+  if (mode !== 'slides') { toast('A pipetta itt nem érhető el.'); return; }
+  const pop = openPop, anchor = openAnchor; closePops();
+  busy('Pipetta előkészítése…');
+  let canvas;
+  try { canvas = await slideCanvas(doc, tgt(), renderSlide, layoutOf); } catch (e) { busy(''); toast('A pipetta nem indítható.'); return; }
+  busy('');
+  toast('Kattints a dián a felvenni kívánt színre (Esc: mégse).');
+  const veil = document.createElement('div'); veil.className = 'eyeveil'; document.body.appendChild(veil);
+  const finish = c => { veil.remove(); removeEventListener('keydown', esc, true); if (pop && anchor) showPop(pop.id, anchor); if (c) done(c); };
+  const esc = e => { if (e.key === 'Escape') { e.stopPropagation(); finish(null); } };
+  addEventListener('keydown', esc, true);
+  veil.onclick = e => {
+    const r = stage.getBoundingClientRect(), x = (e.clientX - r.left) / scale, y = (e.clientY - r.top) / scale;
+    if (x < 0 || y < 0 || x >= W || y >= H) return finish(null);
+    const k = canvas.width / W, d = canvas.getContext('2d').getImageData(Math.floor(x * k), Math.floor(y * k), 1, 1).data;
+    finish('#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join(''));
+  };
 }
 const TEXT_COLORS = ['#111111', '#5d6875', '#c0392b', '#d35400', '#b7950b', '#1e8449', '#117a65', '#1f5f74', '#2e4a9e', '#7d3c98', '#ad1457'];
 swatches($('#swText'), TEXT_COLORS, c => {
@@ -1188,12 +1290,27 @@ swatches($('#swText'), TEXT_COLORS, c => {
 swatches($('#swHi'), ['#fff176', '#c5f0a4', '#b3ecf5', '#f8bbd0', '#ffd59e', '#e1bee7', '#e0e0e0'], c => withEditor(ch => (c === 'none' ? ch.unsetHighlight() : ch.setHighlight({color: c})).run()), 'Nincs kiemelés');
 swatches($('#swCell'), ['#e8eef5', '#eaf4e4', '#fdf3d7', '#f9e1e1', '#ece6f5', '#eeeeee', '#d6e4f0'], c => forCells('cells', () => ({background: c === 'none' ? null : c})), 'Nincs kitöltés');
 swatches($('#swBorder'), ['#7d8590', '#111111', '#1f5f74', '#2e4a9e', '#c0392b', '#1e8449', '#b7950b'], c => forCells(borderScope === 'table' ? 'table' : 'cells', () => ({borderColor: c === 'none' ? null : c})), 'Alapértelmezett');
-swatches($('#swFill'), ['#d6eaf8', '#dbe9ee', '#eaf4e4', '#fdf3d7', '#f9e1e1', '#ece6f5', '#eeeeee', '#f6d365', '#2f5d8a', '#1f5f74', '#1e8449', '#c0392b', '#d35400', '#ffffff', '#111111'],
+swatches($('#swFill'), ['#d6eaf8', '#dbe9ee', '#eaf4e4', '#fdf3d7', '#f9e1e1', '#ece6f5', '#eeeeee', '#f6d365', '#2f5d8a', '#1f5f74', '#1e8449', '#c0392b', '#d35400'],
   c => { const o = selObj(); if (isShape(o)) { o.fill = c === 'none' ? null : c; commit(); } }, 'Nincs kitöltés');
 swatches($('#swStroke'), TEXT_COLORS, c => { const o = selObj(); if (!isShape(o)) return; o.stroke = c === 'none' ? (o.shape === 'line' ? o.stroke : null) : c; if (o.stroke && !o.strokeWidth) o.strokeWidth = 3; commit(); }, 'Nincs körvonal');
 $('#bwStroke').innerHTML = [1, 2, 3, 4, 6, 8].map(w => `<button class="pitem" data-w="${w}">${w} px</button>`).join('');
 $('#bwStroke').onclick = e => { const b = e.target.closest('button'), o = selObj(); if (!b || !isShape(o)) return; o.strokeWidth = +b.dataset.w; if (!o.stroke) o.stroke = '#2f5d8a'; closePops(); commit(); };
 $('#popStroke').onopen = () => { const o = selObj(); for (const b of $('#bwStroke').children) b.classList.toggle('on', isShape(o) && !!o.stroke && +b.dataset.w === o.strokeWidth); };
+/* font size list, letter spacing */
+const SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 96];
+$('#sizeGrid').innerHTML = SIZES.map(v => `<button class="pitem" data-size="${v}">${v}</button>`).join('');
+$('#popSize').onopen = () => { const cur_ = parseFloat($('#sizeIn').value); for (const b of $('#sizeGrid').children) b.classList.toggle('on', +b.dataset.size === cur_); };
+$('#sizeGrid').onclick = e => { const b = e.target.closest('[data-size]'); if (!b) return; closePops(); $('#sizeIn').value = b.dataset.size; setSize(b.dataset.size); };
+const SPACINGS = [['-1', 'Szűk (−1 pt)'], ['-0.5', 'Kissé szűk (−0,5 pt)'], ['0', 'Normál'], ['1', 'Ritkított (1 pt)'], ['2', 'Ritkított (2 pt)'], ['4', 'Nagyon ritkított (4 pt)']];
+$('#spacingList').innerHTML = SPACINGS.map(([v, l]) => `<button class="pitem" data-sp="${v}">${l}</button>`).join('');
+function setSpacing(v) {
+  const o = selObj(); if (!isTextLike(o) || !isFinite(v)) return;
+  if (inEdit() && !ed.state.selection.empty) { (v ? ed.chain().focus().setLetterSpacing(v + 'pt') : ed.chain().focus().unsetLetterSpacing()).run(); return; }
+  o.letterSpacing = v || undefined; styled(o); commit();
+}
+$('#spacingList').onclick = e => { const b = e.target.closest('[data-sp]'); if (!b) return; closePops(); setSpacing(+b.dataset.sp); };
+$('#spacingOk').onclick = () => { const v = parseFloat(String($('#spacingIn').value).replace(',', '.')); closePops(); setSpacing(v); };
+$('#popSpacing').onopen = () => { const o = selObj(); $('#spacingIn').value = o?.letterSpacing ?? 0; for (const b of $('#spacingList').children) b.classList.toggle('on', +b.dataset.sp === (o?.letterSpacing || 0)); };
 // bullets, numbering, line height, paragraph spacing (Doksi)
 const BUL = ['•', '◦', '▪', '–', '➤', '➔', '✓', '★', '◆', '❖', '☐', '→'];
 $('#bulGrid').innerHTML = BUL.map(b => `<button data-bul="${b}" aria-label="${b}">${b}</button>`).join('');
@@ -1209,7 +1326,6 @@ $('#popNum').addEventListener('click', e => { const b = e.target.closest('[data-
   withEditor(c => { if (!ed.isActive('orderedList')) c.toggleOrderedList(); c.updateAttributes('orderedList', {numStyle: b.dataset.num}).run(); }); });
 $('#lineList').innerHTML = [1, 1.15, 1.25, 1.5, 2].map(v => `<button class="pitem" data-lh="${v}">${String(v).replace('.', ',')}</button>`).join('');
 $('#lineList').addEventListener('click', e => { const b = e.target.closest('[data-lh]'); if (!b) return; closePops(); withEditor(c => c.setParaAttrs({lineHeight: +b.dataset.lh}).run()); });
-$('#openPara').addEventListener('click', () => { const a = $('[data-pop="popLine"]'); closePops(); showPop('popPara', a); });
 $('#popPara').onopen = () => {
   const a = ed ? (ed.isActive('heading') ? ed.getAttributes('heading') : ed.getAttributes('paragraph')) : {};
   for (const inp of $$('#popPara [data-pf]')) { const k = inp.dataset.pf; if (inp.type === 'checkbox') inp.checked = !!a[k]; else inp.value = a[k] ?? (k === 'lineHeight' ? 1.25 : 0); }
@@ -1218,8 +1334,16 @@ $('#popPara').addEventListener('change', e => { const k = e.target.dataset.pf; i
 
 /* animation gallery, placeholders, template builder */
 $('#popPh').addEventListener('click', e => {
+  const f = e.target.closest('[data-field]');
+  if (f) {
+    closePops(); if (mode !== 'template') return; if (editing) exitEdit();
+    const isNum = f.dataset.field === 'slideNumber';
+    const o = {id: uid(), name: isNum ? 'Diaszám' : 'Dátum', type: 'text', field: f.dataset.field, x: isNum ? 1100 : 900, y: 664, w: isNum ? 120 : 300, h: 30, rot: 0,
+      size: 21.33, color: '#6b7785', align: 'right', doc: emptyDoc()};
+    tgt().objects.push(o); setSel([o.id]); commit(); return;
+  }
   const b = e.target.closest('[data-ph]'); closePops();
-  if (!b || mode !== 'template' || tcur === 'master') { if (b && tcur === 'master') toast('Helykitöltő csak elrendezésre tehető.'); return; }
+  if (!b || mode !== 'template' || tcur === 'master') { if (b && tcur === 'master') toast('Helykitöltő csak elrendezésre tehető (a diaszám és a dátum a mesterre is).'); return; }
   if (editing) exitEdit();
   const L = tgt(); let key = b.dataset.ph, n = 2;
   while (L.objects.some(o => o.placeholder === key)) key = b.dataset.ph + n++;
@@ -1334,6 +1458,8 @@ async function doSave(saveAs) {
 }
 function loadDocument(d, m, name, path) {
   doc = d; media = m; if (name) doc.title = doc.title || name.replace(/\.mprezi$/i, '');
+  doc.font = FONT_SETS[doc.font] ? doc.font : DEFAULT_FONT;
+  if (doc.font !== activeMathFont()) { setCurrentPath(path ?? null); resetHistory(); restartWithFont(doc.font); return; }
   mode = 'slides'; cur = 0; setSel([]); curAnim = null; setCurrentPath(path ?? null);
   resetHistory(); renderAll(); fitStage();
 }
@@ -1362,6 +1488,7 @@ $('#expPdfSteps').onclick = () => doExport('pdfSteps');
 $('#bSave').onclick = () => doSave(false);
 $('#bOpen').onclick = doOpen;
 $('#bPlay').onclick = () => startShow(cur);
+$('#fontSel').onchange = e => switchFont(e.target.value);
 $('#zoomSel').onchange = e => { zoom = e.target.value === 'auto' ? 'auto' : +e.target.value; fitStage(); };
 $('#docTitle').onchange = e => { doc.title = e.target.value.trim() || 'Névtelen bemutató'; dirty = true; setStatus(); saveSoon(); };
 let arm = 0;
@@ -1421,10 +1548,19 @@ addEventListener('beforeunload', e => { if (dirty && !isTauri()) e.preventDefaul
 (async function init() {
   if (lsGet(LS.panel) === '0') { mainEl.classList.add('noprops'); document.body.classList.add('noprops-on'); }
   const saved = await loadAutosave();
+  let fontKey = FONT_SETS[saved?.doc?.font] ? saved.doc.font : DEFAULT_FONT;
+  startMathJax(FONT_SETS[fontKey].math);
+  loadTextFamily('bonum');                         // the logo
+  const fontLoad = applyTextFont(fontKey);
+  $('#fontSel').innerHTML = Object.entries(FONT_SETS).map(([k, f]) => `<option value="${k}" title="${f.note}">${f.label}</option>`).join('');
   if (saved?.doc) { try { doc = migrate(saved.doc); media = saved.media || {}; doc.title = saved.title || doc.title; } catch (e) { demoDoc(); } }
   else demoDoc();
-  resetHistory(); fitStage(); renderAll();
-  loadFonts().then(() => { measureTexts(); drawSelection(); drawBadges(); renderThumbs(); });
+  doc.font = fontKey; $('#fontSel').value = fontKey;
+  resetHistory();
+  if (saved?.path) setCurrentPath(saved.path);
+  if (saved?.dirty) { dirty = true; setStatus(); }
+  fitStage(); renderAll();
+  fontLoad.then(() => { measureTexts(); drawSelection(); drawBadges(); renderThumbs(); });
   mathReady.then(() => setTimeout(() => { measureTexts(); drawSelection(); drawBadges(); }, 100));
   if (isTauri()) {
     try { const p = await watchOpenedFiles(async path => openResult(await openPathFile(path))); if (p) openResult(await openPathFile(p)); }
@@ -1433,6 +1569,6 @@ addEventListener('beforeunload', e => { if (dirty && !isTauri()) e.preventDefaul
 })();
 
 // hooks for automated tests
-window.mprezi = {get doc() { return doc; }, get media() { return media; }, get editor() { return ed; }, get sel() { return sel; }, set sel(v) { select(v); }, get selIds() { return selIds; }, setSel: ids => { setSel(ids); drawSelection(); renderProps(); updateRibbon(); }, groupSelected, ungroupSelected, addShape, addTable, toggleLock,
+window.mprezi = {snapshotTest: async () => { const c = await slideCanvas(doc, tgt(), renderSlide, layoutOf); return [...c.getContext('2d').getImageData(640, 5, 1, 1).data]; }, get doc() { return doc; }, get media() { return media; }, get editor() { return ed; }, get sel() { return sel; }, set sel(v) { select(v); }, get selIds() { return selIds; }, setSel: ids => { setSel(ids); drawSelection(); renderProps(); updateRibbon(); }, groupSelected, ungroupSelected, addShape, addTable, toggleLock,
   gotoSlide, enterEdit, exitEdit, commit, renderAll, buildPptx: () => buildPptx(doc, renderSlide, layoutOf, () => {}),
   buildPdf: m => buildPdf(doc, renderSlide, layoutOf, m, () => {}), renderSlide, packMprezi, unpackMprezi, loadDocument, Anim};

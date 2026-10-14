@@ -100,7 +100,7 @@ export function newSlide(doc, template) {
   const L = doc.templates[template] ?? Object.values(doc.templates)[0];
   return {id: uid(), template, objects: L.objects.filter(o => o.placeholder).map(phClone), anims: []};
 }
-export const PH_STYLE = ['size', 'color', 'bold', 'italic', 'underline', 'strike', 'align'];
+export const PH_STYLE = ['size', 'color', 'bold', 'italic', 'underline', 'strike', 'align', 'letterSpacing'];
 /** Keep a slide's placeholders in step with its layout (unless moved / restyled on the slide). */
 export function syncPlaceholders(doc, s) {
   const L = doc.templates[s.template]; if (!L) return;

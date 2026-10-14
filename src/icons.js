@@ -64,6 +64,13 @@ export const ICONS = {
   unlock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>',
   group: '<rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="3 2.5"/><rect x="6.5" y="6.5" width="6" height="6" rx="1"/><circle cx="15" cy="15" r="3"/>',
   ungroup: '<rect x="3" y="3" width="9" height="9" rx="1.5"/><circle cx="16.5" cy="16.5" r="4"/>',
+  eyeOff: '<path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6A17 17 0 0 0 2 12s3.6 7 10 7a9.6 9.6 0 0 0 4.4-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
+  spacing: '<path d="M7 15 10 5h1l3 10M8 12h5"/><path d="M3 20h18M3 20l2-2M3 20l2 2M21 20l-2-2M21 20l-2 2"/>',
+  eyedrop: '<path d="m14 7 3 3"/><path d="M5 19l1.5-.5L16 9l-1-1-9.5 9.5L5 19z"/><path d="M14.5 5.5l2-2a2.1 2.1 0 0 1 3 3l-2 2-3-3z"/>',
+  arrFront: '<rect x="3" y="11" width="10" height="10" rx="1.5" stroke-dasharray="2.5 2"/><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" fill-opacity=".35"/><path d="M20 12V3M17 6l3-3 3 3"/>',
+  arrForward: '<rect x="3" y="9" width="10" height="10" rx="1.5"/><rect x="8" y="4" width="10" height="10" rx="1.5" fill="currentColor" fill-opacity=".35"/><path d="M21 21v-5M19 18l2-2 2 2"/>',
+  arrBackward: '<rect x="8" y="4" width="10" height="10" rx="1.5"/><rect x="3" y="9" width="10" height="10" rx="1.5" fill="currentColor" fill-opacity=".35"/><path d="M21 16v5M19 19l2 2 2-2"/>',
+  arrBack: '<rect x="7" y="7" width="10" height="10" rx="1.5" stroke-dasharray="2.5 2"/><rect x="3" y="11" width="10" height="10" rx="1.5" fill="currentColor" fill-opacity=".35"/><path d="M20 12v9M17 18l3 3 3-3"/>',
   eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>'
 };

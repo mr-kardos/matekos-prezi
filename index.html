@@ -18,6 +18,7 @@
     <button class="btn" id="bExport" title="Exportálás PowerPoint-bemutatóba vagy PDF-be">Exportálás</button>
     <button class="btn" id="bTpl" title="Sablonszerkesztő: mester és elrendezések (mint a PowerPoint diaminta-nézete)">Sablon</button>
     <button class="btn" id="bPlay" title="Lejátszás az aktuális diától (F5)">Lejátszás</button>
+    <select id="fontSel" class="sel fontsel" title="A bemutató betűtípusa (szöveg és képletek)" aria-label="Betűtípus"></select>
     <select id="zoomSel" class="sel" title="Nagyítás" aria-label="Nagyítás">
       <option value="auto">Illesztés</option><option value="50">50%</option><option value="75">75%</option><option value="100">100%</option><option value="125">125%</option><option value="150">150%</option>
     </select>
@@ -31,8 +32,7 @@
       <select id="styleSel" class="sel style" title="Bekezdésstílus" aria-label="Bekezdésstílus" data-k="text">
         <option value="p">Normál</option><option value="h1">Címsor 1</option><option value="h2">Címsor 2</option><option value="h3">Címsor 3</option>
       </select>
-      <input id="sizeIn" class="sel size" list="sizeList" inputmode="decimal" title="Betűméret (pt)" aria-label="Betűméret" value="24">
-      <datalist id="sizeList"><option value="12"><option value="14"><option value="16"><option value="18"><option value="20"><option value="24"><option value="28"><option value="32"><option value="36"><option value="40"><option value="44"><option value="54"><option value="60"><option value="72"></datalist>
+      <span class="sizebox"><input id="sizeIn" class="sel size" inputmode="decimal" title="Betűméret (pt)" aria-label="Betűméret" value="24"><button class="tb mini sizedd" data-pop="popSize" data-k="text" data-icon="chev" title="Betűméretek"></button></span>
     </div>
     <div class="grp">
       <button class="tb" data-cmd="bold" data-k="text" title="Félkövér (Ctrl/⌘+B) – szerkesztés közben a kijelölésre, egyébként az egész dobozra"><b>B</b></button>
@@ -58,6 +58,8 @@
       <button class="tb" data-cmd="outdent" data-k="text" data-icon="outdent" title="Behúzás csökkentése (listában Shift+Tab)"></button>
       <button class="tb" data-cmd="indent" data-k="text" data-icon="indent" title="Behúzás növelése (listában Tab)"></button>
       <button class="tb" data-pop="popLine" data-k="text" data-icon="lineH" title="Sorköz"></button>
+      <button class="tb" data-pop="popPara" data-k="text" data-icon="para" title="Bekezdés: behúzások és bekezdésköz"></button>
+      <button class="tb" data-pop="popSpacing" data-k="text" data-icon="spacing" title="Betűköz"></button>
     </div>
     <div class="grp">
       <button class="tb" data-cmd="text" data-icon="textbox" title="Szövegdoboz (T)"><span class="lbl">Szövegdoboz</span></button>
@@ -69,11 +71,7 @@
       <button class="tb" data-cmd="triangle" data-icon="triangle" title="Háromszög"></button>
       <button class="tb" data-cmd="arrow" data-icon="arrow" title="Nyíl (A)"></button>
       <button class="tb" data-cmd="line" data-icon="line" title="Vonal (L)"></button>
-      <button class="tb tplonly" data-pop="popPh" data-icon="placeholder" title="Helykitöltő hozzáadása az elrendezéshez"><span class="lbl">Helykitöltő</span></button>
-    </div>
-    <div class="grp">
-      <button class="tb cbtn" data-pop="popFill" data-k="shape" data-icon="fill" title="Kitöltés"><i class="cbar" id="fillBar"></i></button>
-      <button class="tb cbtn" data-pop="popStroke" data-k="shape" data-icon="stroke" title="Körvonal: szín és vastagság"><i class="cbar" id="strokeBar"></i></button>
+      <button class="tb tplonly" data-pop="popPh" data-icon="placeholder" title="Helykitöltő hozzáadása az elrendezéshez"><span class="lbl">Helykitöltő, mező</span></button>
     </div>
     <div class="grp">
       <button class="tb" data-cmd="delete" data-k="any" data-icon="trash" title="Törlés (Delete)"></button>
@@ -83,7 +81,7 @@
   <div class="ctxbar" id="tableBar" hidden>
     <span class="ctxlabel">Táblázat</span>
     <button class="tb wide" data-pop="popTblIns" data-icon="tblAdd" title="Sorok vagy oszlopok beszúrása"><span class="lbl">Beszúrás ▾</span></button>
-    <button class="tb wide" data-pop="popTblDel" data-icon="tblDel" title="Sorok, oszlopok vagy a táblázat törlése"><span class="lbl">Törlés ▾</span></button>
+    <button class="tb wide" data-pop="popTblDel" data-icon="tblDel" title="Sorok vagy oszlopok törlése (az egész táblázatot a Törlés gombbal törölheted)"><span class="lbl">Törlés ▾</span></button>
     <button class="tb" data-tbl="mergeOrSplit" data-icon="merge" title="Cellák egyesítése / felosztása"></button>
     <span class="ctxsep"></span>
     <button class="tb" data-valign="top" data-icon="vtop" title="Cellatartalom felülre"></button>
@@ -106,6 +104,7 @@
   <nav id="slides" aria-label="Diák"></nav>
   <div class="lsplit" id="lsplit" title="Húzd a panel szélességének állításához" role="separator" aria-orientation="vertical"></div>
   <main id="work" class="ws"><div id="stageWrap"><div id="stage" class="slide"></div></div></main>
+  <div class="rsplit" id="rsplit" title="Húzd a panel szélességének állításához" role="separator" aria-orientation="vertical"></div>
   <aside id="props" aria-label="Tulajdonságok"></aside>
   <button class="tb panelopen" id="panelOpen" data-icon="panel" title="Jobb oldali panel megnyitása"></button>
 </div>
@@ -147,7 +146,7 @@
   <div class="ptitle">Sorköz</div>
   <div id="lineList"></div>
   <div class="psep"></div>
-  <button class="pitem" id="openPara">Behúzások és bekezdésköz…</button>
+  
 </div>
 <div class="pop" id="popPara" hidden>
   <div class="ptitle">Kijelölt bekezdések</div>
@@ -172,7 +171,7 @@
   <button class="pitem" data-tbl="deleteRow">Sor törlése</button>
   <button class="pitem" data-tbl="deleteColumn">Oszlop törlése</button>
   <div class="psep"></div>
-  <button class="pitem" data-tbl="deleteTable">Táblázat törlése</button>
+  
 </div>
 <div class="pop" id="popTable" hidden><div class="tgrid" id="tgrid"></div><div class="tlabel" id="tlabel">Válassz méretet</div></div>
 <!-- popovers: Prezi -->
@@ -181,9 +180,20 @@
   <div class="ptitle">Körvonal színe</div><div class="swg" id="swStroke"></div>
   <div class="ptitle" style="margin-top:8px">Vastagság</div><div class="bwg" id="bwStroke"></div>
 </div>
+<div class="pop" id="popSize" hidden><div class="ptitle">Betűméret (pt)</div><div class="sizegrid" id="sizeGrid"></div></div>
+<div class="pop" id="popSpacing" hidden>
+  <div class="ptitle">Betűköz</div>
+  <div id="spacingList"></div>
+  <div class="prow"><label>Egyéni (pt) <input type="number" id="spacingIn" step="0.1" min="-5" max="30"></label><button class="btn" id="spacingOk">OK</button></div>
+  <div class="phint">Szerkesztés közben a kijelölt szövegre, egyébként az egész dobozra.</div>
+</div>
 <div class="pop" id="popPh" hidden>
   <div class="ptitle">Helykitöltő hozzáadása</div>
   <button class="pitem" data-ph="title">Cím</button><button class="pitem" data-ph="subtitle">Alcím</button><button class="pitem" data-ph="body">Szöveg</button>
+  <div class="psep"></div><div class="ptitle">Automatikus mező</div>
+  <button class="pitem" data-field="slideNumber">Diaszám</button>
+  <button class="pitem" data-field="dateLong">Dátum (2026. október 14.)</button>
+  <button class="pitem" data-field="dateShort">Dátum (2026. 10. 14.)</button>
 </div>
 
 

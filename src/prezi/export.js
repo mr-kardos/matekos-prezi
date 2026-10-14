@@ -10,7 +10,7 @@ import JSZip from 'jszip';
 import { parse as parseFont } from 'opentype.js';
 import { jsPDF } from 'jspdf';
 import 'svg2pdf.js';
-import { FONT_B64 } from '../fonts.js';
+import { fontFiles } from './fontsets.js';
 import { Anim } from './anim.js';
 import { pieceEls, mathPending } from './textview.js';
 import { PPTX_SKELETON } from './pptx-skeleton.js';
@@ -21,13 +21,14 @@ const xesc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace
 const n2 = v => Math.round(v * 100) / 100;
 
 /* ---------- fonts (the very files the app displays with) ---------- */
-let FONTS = null;
-function fonts() {
-  if (FONTS) return FONTS;
-  const ab = b64 => { const s = atob(b64), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u.buffer; };
-  FONTS = {r: parseFont(ab(FONT_B64.normal)), b: parseFont(ab(FONT_B64.bold)), i: parseFont(ab(FONT_B64.italic)), bi: parseFont(ab(FONT_B64.bolditalic))};
-  return FONTS;
+let FONTS = null, FONTS_KEY = null;
+/** Parse the text font of the presentation's font set (the very files the slides are displayed with). */
+async function prepareFonts(key) {
+  if (FONTS && FONTS_KEY === key) return;
+  const f = await fontFiles(key);
+  FONTS = {r: parseFont(f.r), b: parseFont(f.b), i: parseFont(f.i), bi: parseFont(f.bi)}; FONTS_KEY = key;
 }
+const fonts = () => FONTS;
 const fontKey = cs => (parseInt(cs.fontWeight) >= 600 ? 'b' : '') + (/italic|oblique/.test(cs.fontStyle) ? 'i' : '') || 'r';
 const ascCache = new Map();
 /** Distance from a text range's top edge to its baseline, as laid out by this browser (cached per font). */
@@ -117,7 +118,7 @@ function slidePieces(s, el, model) {
   let n = 0;
   const visit = (child, tplLayer) => {
     if (child.tagName === 'IMG') { pieces.push({key: 'bg' + n++, name: 'Háttér', raster: child.src, x: 0, y: 0, w: W, h: H, rot: 0}); return; }
-    if (!child.classList.contains('obj') || child.style.visibility === 'hidden') return;
+    if (!child.classList.contains('obj') || child.style.visibility === 'hidden' || child.hidden) return;
     const o = model.get(child.dataset.id); if (!o) return;
     const tpl = tplLayer || child.classList.contains('tpl');
     if (o.type === 'group') { for (const c of child.querySelector(':scope > .rot').children) visit(c, tpl); return; }
@@ -142,7 +143,8 @@ function slidePieces(s, el, model) {
 }
 
 /** Render every slide off-screen and collect its pieces. */
-async function collect(doc, renderSlide, layoutOf, onProgress) {
+async function collect(doc, renderSlide, layoutOf, onProgress, only = null) {
+  await prepareFonts(doc.font || 'bonum');
   const host = document.createElement('div');
   Object.assign(host.style, {position: 'fixed', left: '-20000px', top: '0', width: W + 'px', height: H + 'px', overflow: 'hidden'});
   document.body.appendChild(host);
@@ -150,7 +152,7 @@ async function collect(doc, renderSlide, layoutOf, onProgress) {
   for (const g of [doc.master, ...Object.values(doc.templates)]) for (const o of flatObjects(g.objects)) model.set(o.id, o);
   const out = [];
   try {
-    for (const [si, s] of doc.slides.entries()) {
+    for (const [si, s] of (only ? [[0, only]] : doc.slides.entries())) {
       onProgress?.(si + 1, doc.slides.length);
       for (const o of flatObjects(s.objects)) model.set(o.id, o);
       const el = document.createElement('div'); el.className = 'slide'; host.innerHTML = ''; host.appendChild(el);
@@ -319,4 +321,15 @@ export async function buildPdf(doc, renderSlide, layoutOf, mode, onProgress) {
     }
   }
   return pdf.output('blob');
+}
+
+/** A picture of one slide as the export sees it (used by the eyedropper where the browser has none). */
+export async function slideCanvas(doc, s, renderSlide, layoutOf) {
+  const [{pieces, bg}] = await collect(doc, renderSlide, layoutOf, null, s);
+  const svg = pageSVG(pieces, bg, {vis: {}, grow: {}});
+  const img = new Image(), url = URL.createObjectURL(new Blob([svg], {type: 'image/svg+xml'}));
+  await new Promise((ok, err) => { img.onload = ok; img.onerror = err; img.src = url; });
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  c.getContext('2d').drawImage(img, 0, 0, W, H); URL.revokeObjectURL(url);
+  return c;
 }

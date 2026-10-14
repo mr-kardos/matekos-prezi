@@ -1,7 +1,7 @@
 // Text boxes use the Matekos Doksi editor: the same TipTap extensions, formula node ($…$ typing,
 // pasted TeX, formula editor), tables and lists. A box that is not being edited is drawn from the same
 // document with the same HTML, CSS and MathJax rendering, so it looks exactly like the live editor.
-import { Editor, generateHTML } from '@tiptap/core';
+import { Editor, Extension, generateHTML } from '@tiptap/core';
 import Document from '@tiptap/extension-document';
 import StarterKit from '@tiptap/starter-kit';
 import { TextStyle, Color, FontSize } from '@tiptap/extension-text-style';
@@ -15,6 +15,24 @@ import { renderInto } from '../math.js';
 import { emptyDoc } from './model.js';
 
 const hooks = {onEdit: null, onRendered: null, onPreview: null};
+
+/** Letter spacing as a text style (like the font size): <span style="letter-spacing:…">. */
+const LetterSpacing = Extension.create({
+  name: 'letterSpacing',
+  addGlobalAttributes() {
+    return [{types: ['textStyle'], attributes: {letterSpacing: {
+      default: null,
+      parseHTML: el => el.style.letterSpacing || null,
+      renderHTML: a => a.letterSpacing ? {style: `letter-spacing:${a.letterSpacing}`} : {}
+    }}}];
+  },
+  addCommands() {
+    return {
+      setLetterSpacing: v => ({chain}) => chain().setMark('textStyle', {letterSpacing: v}).run(),
+      unsetLetterSpacing: () => ({chain}) => chain().setMark('textStyle', {letterSpacing: null}).removeEmptyTextStyle().run()
+    };
+  }
+});
 export function setTextHooks(h) { Object.assign(hooks, h); }
 
 /** kind 'text': text boxes (no tables); kind 'table': table objects (the document is exactly one table). */
@@ -28,7 +46,7 @@ function extensions(kind = 'text') {
     }),
     ...(table ? [Document.extend({content: 'table'}), KvTable, KvTableRow, KvTableHeader, KvTableCell] : []),
     ListItem, KvBulletList, KvOrderedList, ListMarkers,
-    TextStyle, Color, FontSize,
+    TextStyle, Color, FontSize, LetterSpacing,
     Highlight.configure({multicolor: true}),
     TextAlign.configure({types: table ? ['paragraph'] : ['heading', 'paragraph']}),
     Subscript, Superscript,
@@ -83,6 +101,10 @@ export function renderStatic(host, json, onRendered, kind = 'text') {
   pm.innerHTML = html;
   for (const t of pm.querySelectorAll(':scope > table')) { const w = document.createElement('div'); w.className = 'tableWrapper'; t.replaceWith(w); w.appendChild(t); }
   addMarkers(pm);
+  for (const b of pm.querySelectorAll('p, h1, h2, h3')) {
+    const hasContent = [...b.childNodes].some(n => !(n.nodeType === 1 && n.classList.contains('lm')) && (n.nodeType !== 3 || n.data.length));
+    if (!hasContent) b.appendChild(document.createElement('br'));
+  }
   for (const sp of pm.querySelectorAll('span.math')) {
     sp.contentEditable = 'false';
     renderInto(sp, sp.getAttribute('data-tex') || '', sp.getAttribute('data-display') === '1', onRendered, !!sp.closest('strong,b'));
@@ -111,6 +133,8 @@ export function mountEditor(host, json, {onUpdate, onSelection, onFocus, onBlur}
     content: json || emptyDoc(),
     editorProps: {
       attributes: {spellcheck: 'true', lang: 'hu'},
+      // pasted text and formulas take the size and font of the text box
+      transformPastedHTML: html => html.replace(/(font-size|font-family|line-height)\s*:[^;"']*;?/gi, ''),
       handleDOMEvents: {
         dragstart: (view, e) => { if (e.target?.closest?.('td,th')) { e.preventDefault(); return true; } return false; }
       }

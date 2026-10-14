@@ -1,11 +1,16 @@
-# Matekos Prezi 0.2
+# Matekos Prezi 0.4
 
 Presentation editor with live inline TeX, the twin of **Matekos Doksi**. Built with **TipTap**
 (text editor), **MathJax 4** (formulas), **MathLive** (visual formula editor) and **Tauri 2**
 (Windows/macOS app). The formula editor, `$…$` typing, pasted TeX, tables, lists and fonts are
 the same code as in Matekos Doksi.
 
-All slide text is TeX Gyre Bonum, all math is TeX Gyre Bonum Math. Slides are 1280 × 720 px
+Each presentation uses one of 9 font sets (text font + matching MathJax 4 math font), chosen in the
+top bar: TeX Gyre Bonum (default), Pagella, Termes, Schola, Latin Modern, New Computer Modern, STIX Two,
+Fira Sans, DejaVu Serif. Every text font and math font was tested for the Hungarian letters ő ű Ő Ű (also
+inside formulas, `\text{…}`, bold and italic); Computer Modern (MathJax "tex") and Asana Math failed and
+are not offered. Switching the font set restarts the editor with the same presentation (MathJax picks its
+math font at start-up). Slides are 1280 × 720 px
 (16:9, exactly PowerPoint's slide size: 1 px = 9525 EMU = 0.75 pt).
 
 ## Installers without a terminal
@@ -38,6 +43,11 @@ Browser test version: `npm run build:web` → one self-contained `dist-web/index
 * Animations: entrance, emphasis and exit effects; on click / with previous / after previous;
   duration and delay; whole text or paragraph by paragraph (both can be combined on one object).
   Coloured sequence numbers on the slide (can be hidden) and a timeline in the right panel.
+* Layers: show/hide (eye) and lock each object, drag to reorder, group / ungroup.
+* Colours: every colour picker has white, #D8D8D8, black and #DA291C, the colours saved in the presentation
+  (`doc.colors`, stored in the .mprezi file), a custom colour with OK / Mentés (save to this presentation)
+  and an eyedropper (the browser's own where available, otherwise picking from a picture of the slide).
+* Template builder: automatic slide number and date fields (master or layouts).
 * Slideshow preview inside the app.
 
 ## Export
@@ -59,5 +69,16 @@ browser placed it), so the export always matches the editor.
 
 ## Fonts
 
-`src/fonts/bonum-*.ttf` (TeX Gyre Bonum) and the MathJax Bonum math font, as in Matekos Doksi.
-Licence: GUST Font License (`fonts-official/GUST-FONT-LICENSE.txt`).
+Text fonts: `src/fonts/families/<name>/{r,b,i,bi}.(ttf|otf)`; math fonts: the `@mathjax/mathjax-<name>-font`
+packages (copied into `public/mathjax/fonts` at build time).
+
+| Set | Text font | Licence |
+|---|---|---|
+| bonum, pagella, termes, schola | TeX Gyre (GUST e-foundry) | GUST Font License |
+| modern | Latin Modern Roman | GUST Font License |
+| newcm | New Computer Modern | GUST Font License |
+| stix2 | STIX Two Text | SIL Open Font License |
+| fira | Fira Sans | SIL Open Font License |
+| dejavu | DejaVu Serif | Bitstream Vera / DejaVu licence (free) |
+
+Licence texts: `fonts-official/`.
