@@ -8,7 +8,7 @@ import { FONT_SETS, DEFAULT_FONT, applyTextFont, loadTextFamily, allFamilies, fa
 import { openMathEditor, isMathEditorOpen } from '../mathEditor.js';
 import { tableContext } from '../editor/extensions.js';
 import { svg as svgIcon } from '../icons.js';
-import { isTauri, savePresentation, saveExport, openPresentation, openPathFile, watchOpenedFiles, setCurrentPath, getCurrentPath, getCurrentHandle, setCurrentHandle, currentFileName, autosave, loadAutosave } from '../files.js';
+import { pickFile, isTauri, savePresentation, saveExport, openPresentation, openPathFile, watchOpenedFiles, setCurrentPath, getCurrentPath, getCurrentHandle, setCurrentHandle, currentFileName, autosave, loadAutosave } from '../files.js';
 import { Anim } from './anim.js';
 import { W, H, uid, clone, emptyDoc, textDoc, tableDoc, T, M, isEmptyText, blockCount, makeBackground, phName, ph, TITLE_PROMPT,
   defaultMaster, defaultTemplates, newSlide as makeSlide, syncPlaceholders as syncPh, migrate,
@@ -1855,6 +1855,7 @@ $('#expPdf2').onclick = () => doExport('pdf');
 $('#expPdfSteps2').onclick = () => doExport('pdfSteps');
 $('#fNew').onclick = () => { closePops(); newPresentation(); };
 $('#fOpen').onclick = () => { closePops(); doOpen(); };
+$('#fImport').onclick = () => { closePops(); importPowerPoint(); };
 $('#fSaveAs').onclick = () => { closePops(); doSave(true); };
 document.querySelector('.splitdd').onclick = e => showPop('popSave', e.currentTarget);
 $('#bSave').onclick = () => doSave(false);
@@ -1865,6 +1866,68 @@ $('#popZoom').onopen = () => { for (const b of $$('#popZoom [data-zoom]')) b.cla
 $('#popZoom').addEventListener('click', e => { const b = e.target.closest('[data-zoom]'); if (!b) return; closePops(); zoom = b.dataset.zoom === 'auto' ? 'auto' : +b.dataset.zoom; $('#zoomLabel').textContent = zoom === 'auto' ? '' : zoom + '%'; fitStage(); });
 $('#bExport').onclick = e => showPop('popExport', e.currentTarget);
 $('#docTitle').onchange = e => { doc.title = e.target.value.trim() || 'Névtelen bemutató'; dirty = true; setStatus(); saveSoon(); };
+/* ---------- PowerPoint import ---------- */
+let impHost = null;
+async function waitMath(el) {
+  await mathReady;
+  for (let i = 0; i < 200 && el.querySelector('.math .mpending:not(.merr)'); i++) await new Promise(r => setTimeout(r, 25));
+}
+/** Render a text object off-screen exactly like on the slide; `cb(textRoot, left, top)` reads the layout. */
+async function renderForImport(o, cb) {
+  if (!impHost) {
+    impHost = document.createElement('div'); impHost.className = 'slide imphost';
+    Object.assign(impHost.style, {position: 'fixed', left: '-6000px', top: '0', width: W + 'px', height: H + 'px', transform: 'none', visibility: 'hidden', pointerEvents: 'none'});
+    document.body.appendChild(impHost);
+  }
+  const fams = new Set([fontSet(doc.font).text]); if (o.font) fams.add(o.font);
+  JSON.stringify(o.doc).replace(/MP ([a-z0-9]+)/g, (_, f) => fams.add(f));
+  await Promise.all([...fams].map(f => loadTextFamily(f)));
+  impHost.innerHTML = '';
+  const el = objEl({...o, rot: 0, x: 0, y: 0}, 'thumb'); el.style.visibility = 'visible'; impHost.appendChild(el);
+  await waitMath(el);
+  try {
+    if (cb) { const r = el.getBoundingClientRect(); return cb(el.querySelector('.txt'), r.left, r.top); }
+    return el.firstChild.offsetHeight;
+  } finally { impHost.innerHTML = ''; }
+}
+async function measureMath(tex) {
+  if (!impHost) await renderForImport({id: 'x', type: 'text', x: 0, y: 0, w: 10, h: 10, size: 10, color: '#000', doc: emptyDoc()});
+  const sp = document.createElement('span'); sp.style.fontSize = '100px'; impHost.appendChild(sp);
+  await mathReady; await new Promise(res => renderInto(sp, tex, false, res));
+  const r = (sp.querySelector('svg') || sp).getBoundingClientRect(); sp.remove();
+  return {h: r.height / 100 || 1.2, w: r.width / 100 || 1};
+}
+function showReport(title, lines) {
+  const box = $('#cfm'); $('#cfmMsg').innerHTML = `<b>${esc(title)}</b>` + lines.map(l => `<br>${l}`).join('');
+  $('#cfmNo').hidden = true; $('#cfmYes').textContent = 'Rendben'; box.hidden = false; box.classList.add('report');
+  $('#cfmYes').onclick = () => { box.hidden = true; $('#cfmNo').hidden = false; box.classList.remove('report'); $('#cfmYes').onclick = null; };
+}
+async function importPowerPoint(given) {
+  if (editing) exitEdit();
+  if (!given && dirty && !await confirmBox('Az importált fájl új bemutatóként nyílik meg; a mostani nem mentett módosításai elvesznek. Folytatod?', 'Importálás')) return;
+  const f = given || await pickFile('PowerPoint-bemutató', ['pptx']); if (!f) return;
+  busy('PowerPoint-fájl beolvasása…');
+  try {
+    const {importPptx, placeContent} = await import('./importPptx.js');
+    const r = await importPptx(f.data, {onProgress: m => busy(m)});
+    if (!r.doc.slides.length) throw new Error('nem találtam diát');
+    await placeContent(r.doc, {renderText: renderForImport, measureMath, onProgress: m => busy(m), textJSON: r.textJSON, boxStyle: r.boxStyle, report: r.report});
+    const d = r.doc;
+    d.font = doc.font || DEFAULT_FONT; d.styles = defaultStyles(); d.title = f.name.replace(/\.pptx$/i, '');
+    for (const s_ of d.slides) { const ids = new Set(flatObjects(s_.objects).map(o => o.id)); s_.anims = (s_.anims || []).filter(a => ids.has(a.target)); if (!s_.transition) delete s_.transition; }
+    if (!Object.keys(d.templates).length) d.templates = PRESETS.ures.build().templates;
+    for (const s_ of d.slides) if (!d.templates[s_.template]) s_.template = Object.keys(d.templates)[0];
+    loadDocument(migrate(d), r.media, f.name.replace(/\.pptx$/i, '.mprezi'), null);
+    sessionOpen = true; showHome(false); dirty = true; setStatus(); saveSoon();
+    busy('');
+    const rep_ = r.report, lines = [`${rep_.slides} dia beolvasva.`];
+    if (rep_.formulas) lines.push(`Képletek: ${rep_.formulas} – ebből ${rep_.inline} a szövegbe illesztve, ${rep_.standalone} önálló képletdobozként.`);
+    if (rep_.failed.length) lines.push(`<span style="color:var(--accent)">Nem sikerült átalakítani ${rep_.failed.length} képletet</span> (dia: ${[...new Set(rep_.failed.map(x => x.slide))].join(', ')}). Ezek a helyükön képként vagy piros „[képlet – írd be újra]” jelöléssel maradtak.`);
+    if (rep_.skipped.length) { const c = {}; for (const x of rep_.skipped) c[x.what] = (c[x.what] || 0) + 1; lines.push('Kihagyva / egyszerűsítve: ' + Object.entries(c).map(([w, n]) => `${w} ×${n}`).join(', ') + '.'); }
+    lines.push('Az eredeti PowerPoint-fájl nem változott. Mentéskor új .mprezi fájl készül.');
+    showReport('PowerPoint importálása kész', lines);
+  } catch (e) { console.error(e); busy(''); toast('Az importálás nem sikerült: ' + (e.message || e)); }
+}
 async function newPresentation() {
   if (!await confirmBox(dirty ? 'Új bemutatót kezdesz. A mostani nem mentett módosításai elvesznek. Folytatod?' : 'Új, üres bemutatót kezdesz. Folytatod?', 'Új bemutató')) return false;
   if (editing) stopEditor();
@@ -1960,6 +2023,6 @@ addEventListener('beforeunload', e => { if (dirty && !isTauri()) e.preventDefaul
 })();
 
 // hooks for automated tests
-window.mprezi = {snapshotTest: async () => { const c = await slideCanvas(doc, tgt(), renderSlide, layoutOf); return [...c.getContext('2d').getImageData(640, 5, 1, 1).data]; }, get doc() { return doc; }, get media() { return media; }, get editor() { return ed; }, get sel() { return sel; }, set sel(v) { select(v); }, get selIds() { return selIds; }, setSel: ids => { setSel(ids); drawSelection(); renderProps(); updateRibbon(); }, groupSelected, ungroupSelected, addShape, addTable, toggleLock,
+window.mprezi = {dbgRender: (o, cb) => renderForImport(o, cb), importBuffer: (data, name) => importPowerPoint({data, name}), snapshotTest: async () => { const c = await slideCanvas(doc, tgt(), renderSlide, layoutOf); return [...c.getContext('2d').getImageData(640, 5, 1, 1).data]; }, get doc() { return doc; }, get media() { return media; }, get editor() { return ed; }, get sel() { return sel; }, set sel(v) { select(v); }, get selIds() { return selIds; }, setSel: ids => { setSel(ids); drawSelection(); renderProps(); updateRibbon(); }, groupSelected, ungroupSelected, addShape, addTable, toggleLock,
   gotoSlide, enterEdit, exitEdit, commit, renderAll, buildPptx: () => buildPptx(doc, renderSlide, layoutOf, () => {}),
   buildPdf: m => buildPdf(doc, renderSlide, layoutOf, m, () => {}), renderSlide, packMprezi, unpackMprezi, loadDocument, Anim};

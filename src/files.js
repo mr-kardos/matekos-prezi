@@ -87,6 +87,22 @@ export async function openPresentation() {
     inp.click();
   });
 }
+/** Pick any file (e.g. a PowerPoint file to import). Returns {data: ArrayBuffer, name} or null. */
+export async function pickFile(label, exts) {
+  if (isTauri()) {
+    const {open} = await import('@tauri-apps/plugin-dialog');
+    const path = await open({multiple: false, filters: [{name: label, extensions: exts}]});
+    if (!path) return null;
+    const {readFile} = await import('@tauri-apps/plugin-fs');
+    const bytes = await readFile(path);
+    return {data: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), name: baseName(path)};
+  }
+  return new Promise(resolve => {
+    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = exts.map(e => '.' + e).join(',');
+    inp.onchange = async () => { const f = inp.files[0]; resolve(f ? {data: await f.arrayBuffer(), name: f.name} : null); };
+    inp.click();
+  });
+}
 /** Desktop: read a presentation from a path (e.g. a double-clicked .mprezi file). */
 export async function openPathFile(path) {
   const {readFile} = await import('@tauri-apps/plugin-fs');

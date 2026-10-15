@@ -485,3 +485,5 @@ body.painting #stage, body.painting #stage *{ cursor:copy !important; }
 .pbcard.locked span{ display:flex; align-items:center; gap:5px; }
 .pbcard.locked span svg{ width:14px; height:14px; color:var(--ink-2); }
 .pbcard small{ font-weight:400; font-size:11px; color:var(--ink-2); margin-top:-4px; }
+.cfm.report .cfm-card{ width:min(560px, calc(100vw - 32px)); }
+.cfm.report #cfmMsg{ line-height:1.6; }

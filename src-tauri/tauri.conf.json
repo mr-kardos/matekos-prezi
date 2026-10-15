@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Matekos Prezi",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "identifier": "hu.matekosprezi.editor",
   "build": {
     "frontendDist": "../dist",
@@ -63,7 +63,8 @@
         "startMenuFolder": "Matekos Prezi",
         "customLanguageFiles": {
           "Hungarian": "installer/hungarian.nsh"
-        }
+        },
+        "installerIcon": "icons/icon.ico"
       }
     },
     "shortDescription": "Bemutatókészítő élő TeX-képletekkel, PowerPoint- és PDF-exporttal",
