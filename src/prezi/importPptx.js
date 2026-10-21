@@ -127,7 +127,8 @@ export async function importPptx(buf, {onProgress} = {}) {
     const cs = desc(x, 'clrScheme');
     if (cs) for (const c of cs.children) { const v = c.firstElementChild; if (v) colors[c.localName] = v.getAttribute('val') && v.localName === 'srgbClr' ? v.getAttribute('val') : v.getAttribute('lastClr') || v.getAttribute('val'); }
     fonts.major = desc(desc(x, 'majorFont'), 'latin')?.getAttribute('typeface'); fonts.minor = desc(desc(x, 'minorFont'), 'latin')?.getAttribute('typeface');
-    master.theme = {colors, fonts}; return master.theme;
+    const lnW = descs(desc(x, 'lnStyleLst'), 'ln').map(l => num(l.getAttribute('w'), 12700));
+    master.theme = {colors, fonts, lnW}; return master.theme;
   }
   const clrMapOf = el => { const m = desc(el, 'clrMap'); const o = {}; if (m) for (const a of m.attributes) o[a.name] = a.value; return o; };
 
@@ -195,21 +196,79 @@ export async function importPptx(buf, {onProgress} = {}) {
   const hasText = t => t.paras.some(p => p.runs.some(r => r.text && r.text.trim()));
 
   /* ---- shapes ---- */
+  /** Transparency of a colour holder (a:alpha), 1 = opaque. */
+  const alphaOf = holder => { const c = holder && [...holder.children].find(e => /Clr$/.test(e.localName)); const a = c && ch(c, 'alpha'); return a ? num(a.getAttribute('val'), 100000) / 100000 : 1; };
+  const refIdx = el => el ? num(el.getAttribute('idx'), 0) : 0;
   const lineProps = (spPr, styleEl, ctx) => {
-    const ln = ch(spPr, 'ln');
+    const ln = ch(spPr, 'ln'), ref = styleEl && ch(styleEl, 'lnRef');
     if (ln && ch(ln, 'noFill')) return null;
-    const c = (ln && colorOf(ch(ln, 'solidFill'), ctx)) || (styleEl && colorOf(ch(styleEl, 'lnRef'), ctx));
+    const own = ln && ch(ln, 'solidFill');
+    const c = own ? colorOf(own, ctx) : ref && refIdx(ref) > 0 ? colorOf(ref, ctx) : null;
     if (!c) return null;
-    return {stroke: c, strokeWidth: Math.max(0.5, Math.round(px(num(ln?.getAttribute('w'), 12700)) * 10) / 10)};
+    const w = ln?.getAttribute('w') != null ? num(ln.getAttribute('w')) : ref && refIdx(ref) > 0 ? (ctx.theme.lnW?.[refIdx(ref) - 1] ?? 12700) : 12700;
+    return {stroke: c, strokeWidth: Math.max(0.5, Math.round(px(w) * 10) / 10), alpha: own ? alphaOf(own) : 1,
+      head: !!(ln && (ch(ln, 'headEnd')?.getAttribute('type') || 'none') !== 'none'), tail: !!(ln && (ch(ln, 'tailEnd')?.getAttribute('type') || 'none') !== 'none')};
   };
   const fillProp = (spPr, styleEl, ctx) => {
     if (!spPr) return undefined;
     if (ch(spPr, 'noFill')) return null;
     const sf = ch(spPr, 'solidFill'); if (sf) return colorOf(sf, ctx);
     if (ch(spPr, 'gradFill')) { const gs = desc(spPr, 'gs'); return gs ? colorOf(gs, ctx) : null; }
-    if (styleEl && !ch(spPr, 'blipFill')) return colorOf(ch(styleEl, 'fillRef'), ctx);
+    if (ch(spPr, 'pattFill')) return colorOf(ch(ch(spPr, 'pattFill'), 'fgClr'), ctx);
+    const ref = styleEl && ch(styleEl, 'fillRef');
+    if (ref && !ch(spPr, 'blipFill')) return refIdx(ref) > 0 ? colorOf(ref, ctx) : null;
     return undefined;
   };
+  const fillAlpha = spPr => { const sf = spPr && (ch(spPr, 'solidFill') || desc(ch(spPr, 'gradFill'), 'gs')); return sf ? alphaOf(sf) : 1; };
+
+  /* PowerPoint shapes Prezi does not have as such: outlines in a unit box (0..1), drawn at any size */
+  const reg = (n, r0 = 0.5, rot = -90) => Array.from({length: n}, (_, i) => { const a = (rot + i * 360 / n) * Math.PI / 180; return [0.5 + r0 * Math.cos(a), 0.5 + r0 * Math.sin(a)]; });
+  const poly = pts => [['M', ...pts[0]], ...pts.slice(1).map(p => ['L', ...p]), ['Z']];
+  const star = (n, inner) => poly(Array.from({length: n * 2}, (_, i) => { const a = (-90 + i * 180 / n) * Math.PI / 180, r = i % 2 ? inner * 0.5 : 0.5; return [0.5 + r * Math.cos(a), 0.5 + r * Math.sin(a)]; }));
+  const PRESET_PATHS = {
+    rtTriangle: poly([[0, 0], [0, 1], [1, 1]]), diamond: poly([[0.5, 0], [1, 0.5], [0.5, 1], [0, 0.5]]),
+    parallelogram: poly([[0.25, 0], [1, 0], [0.75, 1], [0, 1]]), trapezoid: poly([[0, 1], [0.25, 0], [0.75, 0], [1, 1]]),
+    pentagon: poly(reg(5)), hexagon: poly([[0.25, 0], [0.75, 0], [1, 0.5], [0.75, 1], [0.25, 1], [0, 0.5]]),
+    heptagon: poly(reg(7)), octagon: poly([[0.29, 0], [0.71, 0], [1, 0.29], [1, 0.71], [0.71, 1], [0.29, 1], [0, 0.71], [0, 0.29]]),
+    decagon: poly(reg(10)), dodecagon: poly(reg(12)), star4: star(4, 0.38), star5: star(5, 0.38), star6: star(6, 0.5), star8: star(8, 0.6),
+    homePlate: poly([[0, 0], [0.8, 0], [1, 0.5], [0.8, 1], [0, 1]]), chevron: poly([[0, 0], [0.75, 0], [1, 0.5], [0.75, 1], [0, 1], [0.25, 0.5]]),
+    plus: poly([[0.35, 0], [0.65, 0], [0.65, 0.35], [1, 0.35], [1, 0.65], [0.65, 0.65], [0.65, 1], [0.35, 1], [0.35, 0.65], [0, 0.65], [0, 0.35], [0.35, 0.35]]),
+    snip1Rect: poly([[0, 0], [0.83, 0], [1, 0.17], [1, 1], [0, 1]]), flowChartDecision: poly([[0.5, 0], [1, 0.5], [0.5, 1], [0, 0.5]]),
+    flowChartInputOutput: poly([[0.2, 0], [1, 0], [0.8, 1], [0, 1]]), flowChartMerge: poly([[0, 0], [1, 0], [0.5, 1]]), flowChartExtract: poly([[0.5, 0], [1, 1], [0, 1]]),
+    upDownArrow: poly([[0.5, 0], [1, 0.25], [0.7, 0.25], [0.7, 0.75], [1, 0.75], [0.5, 1], [0, 0.75], [0.3, 0.75], [0.3, 0.25], [0, 0.25]]),
+    leftRightArrow: poly([[0, 0.5], [0.25, 0], [0.25, 0.3], [0.75, 0.3], [0.75, 0], [1, 0.5], [0.75, 1], [0.75, 0.7], [0.25, 0.7], [0.25, 1]]),
+  };
+  /** Custom geometry (a:custGeom) -> unit-box path, or null when it uses formulas we cannot evaluate. */
+  function custPath(spPr) {
+    const pl = desc(ch(spPr, 'custGeom'), 'pathLst'); if (!pl) return null;
+    const out = [];
+    for (const p of chs(pl, 'path')) {
+      const pw = num(p.getAttribute('w'), 0), phh = num(p.getAttribute('h'), 0); if (!pw || !phh) return null;
+      let cx = 0, cy = 0; const pt = e => { const x = e.getAttribute('x'), y = e.getAttribute('y'); if (!/^-?\d+$/.test(x) || !/^-?\d+$/.test(y)) throw 0; return [+x / pw, +y / phh]; };
+      try {
+        for (const c of p.children) {
+          const pts = chs(c, 'pt').map(pt);
+          if (c.localName === 'moveTo') { out.push(['M', ...pts[0]]); [cx, cy] = pts[0]; }
+          else if (c.localName === 'lnTo') { out.push(['L', ...pts[0]]); [cx, cy] = pts[0]; }
+          else if (c.localName === 'cubicBezTo') { out.push(['C', ...pts[0], ...pts[1], ...pts[2]]); [cx, cy] = pts[2]; }
+          else if (c.localName === 'quadBezTo') { out.push(['Q', ...pts[0], ...pts[1]]); [cx, cy] = pts[1]; }
+          else if (c.localName === 'arcTo') {
+            const wR = num(c.getAttribute('wR')) / pw, hR = num(c.getAttribute('hR')) / phh, st = num(c.getAttribute('stAng')) / 60000 * Math.PI / 180, sw = num(c.getAttribute('swAng')) / 60000 * Math.PI / 180;
+            const ox = cx - wR * Math.cos(st), oy = cy - hR * Math.sin(st), n = Math.max(1, Math.ceil(Math.abs(sw) / (Math.PI / 2))), d = sw / n;
+            for (let i = 0; i < n; i++) {
+              const a0 = st + i * d, a1 = a0 + d, kk = 4 / 3 * Math.tan(d / 4);
+              const p0 = [ox + wR * Math.cos(a0), oy + hR * Math.sin(a0)], p3 = [ox + wR * Math.cos(a1), oy + hR * Math.sin(a1)];
+              out.push(['C', p0[0] - kk * wR * Math.sin(a0), p0[1] + kk * hR * Math.cos(a0), p3[0] + kk * wR * Math.sin(a1), p3[1] - kk * hR * Math.cos(a1), ...p3]);
+              [cx, cy] = p3;
+            }
+          }
+          else if (c.localName === 'close') out.push(['Z']);
+        }
+      } catch (e) { return null; }
+    }
+    return out.length ? out : null;
+  }
+  const flipPath = (path, fh, fv) => path.map(([c, ...v]) => [c, ...v.map((n, i) => i % 2 ? (fv ? 1 - n : n) : (fh ? 1 - n : n))]);
 
   /** Read the shapes of a spTree into objects (absolute px). `tf` maps child EMU coordinates (groups). */
   async function readTree(tree, ctx, out, tf = v => v, opts = {}) {
@@ -260,19 +319,29 @@ export async function importPptx(buf, {onProgress} = {}) {
     const blip = desc(ch(spPr, 'blipFill'), 'blip');
     if (blip) { const t = ctx.rels[rid(blip)]?.target, key = t && await mediaKey(t); if (key) objs.push({id: uid(), type: 'image', name: 'Kép', media: key, ...g}); }
     else if ((fill || line) && !ph) {
-      const shape = {rect: 'rect', roundRect: 'rect', snip1Rect: 'rect', round2SameRect: 'rect', flowChartProcess: 'rect', ellipse: 'ellipse', flowChartConnector: 'ellipse',
-        triangle: 'triangle', rtTriangle: 'triangle', rightArrow: 'arrow', leftArrow: 'arrow', upArrow: 'arrow', downArrow: 'arrow', line: 'line', straightConnector1: 'line'}[prst];
+      const shape = {rect: 'rect', roundRect: 'rect', round2SameRect: 'rect', flowChartProcess: 'rect', flowChartAlternateProcess: 'rect', ellipse: 'ellipse', flowChartConnector: 'ellipse',
+        triangle: 'triangle', rightArrow: 'arrow', leftArrow: 'arrow', upArrow: 'arrow', downArrow: 'arrow', line: 'line', straightConnector1: 'line'}[prst];
+      const base = {fill: fill || null, stroke: line?.stroke || null, strokeWidth: line?.strokeWidth || 0};
+      const fa = fill ? fillAlpha(spPr) : 1, la = line ? line.alpha : 1;      // transparency of the fill / of the outline only
+      if (fa < 0.999) base.fillOpacity = Math.round(fa * 1000) / 1000;
+      if (la < 0.999) base.strokeOpacity = Math.round(la * 1000) / 1000;
       if (shape === 'line') { readLine(sp, ctx, out, tf); return; }
+      const path = PRESET_PATHS[prst] || (prst === 'custom' ? custPath(spPr) : null);
       if (shape) {
-        const extraRot = {leftArrow: 180, upArrow: 270, downArrow: 90}[prst] || 0;
-        const o = {id: uid(), type: 'shape', shape, name: {rect: 'Téglalap', ellipse: 'Ellipszis', triangle: 'Háromszög', arrow: 'Nyíl'}[shape], ...g,
-          fill: fill || null, stroke: line?.stroke || null, strokeWidth: line?.strokeWidth || 0};
-        if (extraRot && (extraRot === 90 || extraRot === 270)) { const cx = o.x + o.w / 2, cy = o.y + o.h / 2; [o.w, o.h] = [o.h, o.w]; o.x = cx - o.w / 2; o.y = cy - o.h / 2; }
+        let extraRot = {leftArrow: 180, upArrow: 270, downArrow: 90}[prst] || 0;
+        if (shape === 'triangle' && r.flipV) extraRot += 180;
+        if (shape === 'arrow' && r.flipH) extraRot += 180;
+        const o = {id: uid(), type: 'shape', shape, name: {rect: 'Téglalap', ellipse: 'Ellipszis', triangle: 'Háromszög', arrow: 'Nyíl'}[shape], ...g, ...base};
+        if (extraRot % 180 === 90) { const cx = o.x + o.w / 2, cy = o.y + o.h / 2; [o.w, o.h] = [o.h, o.w]; o.x = cx - o.w / 2; o.y = cy - o.h / 2; }
         o.rot = ((o.rot || 0) + extraRot) % 360;
-        if (prst === 'roundRect') o.radius = Math.round(Math.min(o.w, o.h) * 0.1667);
+        if (prst === 'roundRect') { const adj = desc(ch(desc(spPr, 'prstGeom'), 'avLst'), 'gd'); const f = adj ? num((adj.getAttribute('fmla') || '').split(' ')[1], 16667) / 100000 : 0.16667; o.radius = Math.round(Math.min(o.w, o.h) * f); }
         objs.push(o);
-      } else if (fill || line) report.skipped.push({slide: ctx.slideNo, what: `alakzat (${prst}) – téglalapként`}),
-        objs.push({id: uid(), type: 'shape', shape: 'rect', name: 'Alakzat', ...g, fill: fill || null, stroke: line?.stroke || null, strokeWidth: line?.strokeWidth || 0});
+      } else if (path) {
+        objs.push({id: uid(), type: 'shape', shape: 'path', name: 'Alakzat', ...g, ...base, path: flipPath(path, r.flipH, r.flipV)});
+      } else {
+        report.skipped.push({slide: ctx.slideNo, what: `alakzat (${prst}) – téglalapként`});
+        objs.push({id: uid(), type: 'shape', shape: 'rect', name: 'Alakzat', ...g, ...base});
+      }
     }
     // its text
     const txBody = ch(sp, 'txBody');
@@ -294,9 +363,11 @@ export async function importPptx(buf, {onProgress} = {}) {
     const t = tf(r), x1 = X(t.x), y1 = Y(t.y), x2 = x1 + px(t.cx), y2 = y1 + px(t.cy);
     const [ax, ay, bx, by] = [t.flipH ? x2 : x1, t.flipV ? y2 : y1, t.flipH ? x1 : x2, t.flipV ? y1 : y2];
     const len = Math.hypot(bx - ax, by - ay); if (len < 1) return;
-    const line = lineProps(ch(el, 'spPr'), ch(el, 'style'), ctx) || {stroke: '#000000', strokeWidth: 1};
+    const line = lineProps(ch(el, 'spPr'), ch(el, 'style'), ctx) || {stroke: '#000000', strokeWidth: 1, alpha: 1};
+    if (line.head || line.tail) report.skipped.push({slide: ctx.slideNo, what: 'vonal nyílhegye (vonalként)'});
     const ang = Math.atan2(by - ay, bx - ax) * 180 / Math.PI, cx = (ax + bx) / 2, cy = (ay + by) / 2, hh = Math.max(8, line.strokeWidth + 6);
-    out.push({id: uid(), type: 'shape', shape: 'line', name: 'Vonal', x: cx - len / 2, y: cy - hh / 2, w: len, h: hh, rot: ((ang % 360) + 360) % 360, fill: null, ...line, spid: spidOf(el)});
+    const {alpha, head, tail, ...ln} = line;
+    out.push({id: uid(), type: 'shape', shape: 'line', name: 'Vonal', x: cx - len / 2, y: cy - hh / 2, w: len, h: hh, rot: ((ang % 360) + 360) % 360, fill: null, ...ln, ...(alpha < 0.999 ? {opacity: alpha} : {}), spid: spidOf(el)});
   }
   async function readPic(pic, ctx, out, tf) {
     const r = xfrmOf(pic); if (!r) return;
@@ -304,10 +375,10 @@ export async function importPptx(buf, {onProgress} = {}) {
     const key = t && await mediaKey(t);
     if (!key) { report.skipped.push({slide: ctx.slideNo, what: 'kép (EMF/WMF vagy hiányzó formátum)'}); return; }
     const g = geom(tf(r));
-    const crop = desc(pic, 'srcRect');
-    let mkey = key;
-    if (crop && ['l', 't', 'r', 'b'].some(a => num(crop.getAttribute(a)))) mkey = await cropImage(key, ['l', 't', 'r', 'b'].map(a => num(crop.getAttribute(a)) / 100000));
-    out.push({id: uid(), type: 'image', name: 'Kép', media: mkey, ...g, spid: spidOf(pic)});
+    const crop = desc(pic, 'srcRect'), o = {id: uid(), type: 'image', name: 'Kép', media: key, ...g, spid: spidOf(pic)};
+    if (crop && ['l', 't', 'r', 'b'].some(a => num(crop.getAttribute(a)))) o.crop = Object.fromEntries(['l', 't', 'r', 'b'].map(a => [a, Math.max(0, num(crop.getAttribute(a)) / 100000)]));
+    const am = desc(blip, 'alphaModFix'); if (am) o.opacity = num(am.getAttribute('amt'), 100000) / 100000;
+    out.push(o);
   }
   async function cropImage(key, [l, t, r, b]) {
     try {

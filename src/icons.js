@@ -81,6 +81,9 @@ export const ICONS = {
   distV: '<path d="M3 3h18M3 21h18"/><rect x="7" y="9.5" width="10" height="5" rx="1"/>',
   trans: '<rect x="2.5" y="6" width="9" height="12" rx="1.5"/><rect x="12.5" y="6" width="9" height="12" rx="1.5" fill="currentColor" fill-opacity=".25"/><path d="M5.5 3.5h8.5l-2-2M14 3.5l-2 2"/>',
   painter: '<rect x="4" y="3" width="14" height="6" rx="1.5"/><path d="M18 6h2v5h-8v3"/><rect x="10.5" y="14" width="3" height="7" rx="1"/>',
+  crop: '<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/>',
+  uncrop: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 3v5H3M16 21v-5h5"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>'
 };

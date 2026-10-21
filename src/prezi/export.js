@@ -131,26 +131,26 @@ const wrapSVG = (w, h, body) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:x
 function slidePieces(s, el, model) {
   const pieces = [], clip = el.querySelector('.clip');
   let n = 0;
-  const visit = (child, tplLayer) => {
+  const visit = (child, tplLayer, gOp = 1) => {
     if (child.tagName === 'IMG') { pieces.push({key: 'bg' + n++, name: 'Háttér', raster: child.src, x: 0, y: 0, w: W, h: H, rot: 0}); return; }
     if (!child.classList.contains('obj') || child.style.visibility === 'hidden' || child.hidden) return;
     const o = model.get(child.dataset.id); if (!o) return;
     const tpl = tplLayer || child.classList.contains('tpl');
-    if (o.type === 'group') { for (const c of child.querySelector(':scope > .rot').children) visit(c, tpl); return; }
+    if (o.type === 'group') { for (const c of child.querySelector(':scope > .rot').children) visit(c, tpl, gOp * (o.opacity ?? 1)); return; }
     const key = tpl ? 'tpl-' + o.id + '-' + n++ : o.id, name = o.name || o.type;
     const box = child.getBoundingClientRect(), ox = box.left, oy = box.top;
-    const opacity = o.opacity != null && o.opacity < 1 ? o.opacity : null;
-    if (o.type === 'image') { pieces.push({key, name, raster: child.querySelector('img').src, x: o.x, y: o.y, w: o.w, h: o.h, rot: o.rot || 0, opacity}); return; }
-    if (o.type === 'shape') { pieces.push({key, name, svg: wrapSVG(o.w, o.h, child.querySelector('svg').innerHTML), x: o.x, y: o.y, w: o.w, h: o.h, rot: o.rot || 0}); return; }
+    const op = (o.opacity ?? 1) * gOp, opacity = op < 0.999 ? Math.round(op * 1000) / 1000 : null;
+    if (o.type === 'image') { pieces.push({key, name, raster: child.querySelector('img').src, x: o.x, y: o.y, w: o.w, h: o.h, rot: o.rot || 0, opacity, crop: o.crop || null}); return; }
+    if (o.type === 'shape') { pieces.push({key, name, svg: wrapSVG(o.w, o.h, child.querySelector('svg').innerHTML), x: o.x, y: o.y, w: o.w, h: o.h, rot: o.rot || 0, opacity}); return; }
     const txt = child.querySelector('.txt');
     if (!tpl && o.type === 'text' && Anim.splitsByParagraph(s, o)) {
       pieceEls(txt).forEach((p, i) => {
         const pr = p.getBoundingClientRect(), y0 = Math.max(0, pr.top - oy - 6), y1 = Math.min(o.h, pr.bottom - oy + 6);
-        pieces.push({key: `${o.id}#${i}`, name: `${name} – ${i + 1}. bekezdés`, svg: wrapSVG(o.w, y1 - y0, textBody([p], txt, ox, oy + y0)), x: o.x, y: o.y + y0, w: o.w, h: y1 - y0, rot: 0});
+        pieces.push({key: `${o.id}#${i}`, name: `${name} – ${i + 1}. bekezdés`, svg: wrapSVG(o.w, y1 - y0, textBody([p], txt, ox, oy + y0)), x: o.x, y: o.y + y0, w: o.w, h: y1 - y0, rot: 0, opacity});
       });
     } else {
       const pad = o.type === 'table' ? 4 : 0;            // table borders reach half a line width outside the box
-      pieces.push({key, name, svg: wrapSVG(o.w + 2 * pad, o.h + 2 * pad, textBody([txt], txt, ox - pad, oy - pad)), x: o.x - pad, y: o.y - pad, w: o.w + 2 * pad, h: o.h + 2 * pad, rot: o.rot || 0});
+      pieces.push({key, name, svg: wrapSVG(o.w + 2 * pad, o.h + 2 * pad, textBody([txt], txt, ox - pad, oy - pad)), x: o.x - pad, y: o.y - pad, w: o.w + 2 * pad, h: o.h + 2 * pad, rot: o.rot || 0, opacity});
     }
   };
   for (const child of clip.children) visit(child, false);
@@ -188,7 +188,7 @@ function picXML(p, spid, rImg, rSvg) {
   const ext = rSvg ? `<a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}"><asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" r:embed="${rSvg}"/></a:ext></a:extLst>` : '';
   const rot = p.rot ? ` rot="${Math.round(p.rot * 60000)}"` : '';
   return `<p:pic><p:nvPicPr><p:cNvPr id="${spid}" name="${xesc(p.name)}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>`
-    + `<p:blipFill><a:blip r:embed="${rImg}">${p.opacity != null ? `<a:alphaModFix amt="${Math.round(p.opacity * 100000)}"/>` : ''}${ext}</a:blip><a:stretch><a:fillRect/></a:stretch></p:blipFill>`
+    + `<p:blipFill><a:blip r:embed="${rImg}">${p.opacity != null ? `<a:alphaModFix amt="${Math.round(p.opacity * 100000)}"/>` : ''}${ext}</a:blip>${p.crop ? `<a:srcRect l="${Math.round((p.crop.l || 0) * 100000)}" t="${Math.round((p.crop.t || 0) * 100000)}" r="${Math.round((p.crop.r || 0) * 100000)}" b="${Math.round((p.crop.b || 0) * 100000)}"/>` : ''}<a:stretch><a:fillRect/></a:stretch></p:blipFill>`
     + `<p:spPr><a:xfrm${rot}><a:off x="${e(p.x)}" y="${e(p.y)}"/><a:ext cx="${e(p.w)}" cy="${e(p.h)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
 }
 /** Off-slide position for fly in / fly out (PowerPoint formula strings). */
@@ -336,8 +336,12 @@ function pageSVG(pieces, bg, st) {
     if (st.vis[p.key] === false) continue;
     const cx = p.x + p.w / 2, cy = p.y + p.h / 2, k = st.grow[p.key] ? 1.5 : 1;
     const tf = `translate(${n2(cx)},${n2(cy)}) rotate(${p.rot || 0}) scale(${k}) translate(${n2(-p.w / 2)},${n2(-p.h / 2)})`;
-    const inner = p.svg ? p.svg.replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '') : `<image href="${p.raster}" xlink:href="${p.raster}" width="${n2(p.w)}" height="${n2(p.h)}" preserveAspectRatio="none"${p.opacity != null ? ` opacity="${p.opacity}"` : ''}/>`;
-    body += `<g transform="${tf}"><svg x="0" y="0" width="${n2(p.w)}" height="${n2(p.h)}" viewBox="0 0 ${n2(p.w)} ${n2(p.h)}" overflow="visible">${inner}</svg></g>`;
+    let inner;
+    if (p.svg) inner = p.svg.replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
+    else if (p.crop) { const {l = 0, t = 0, r = 0, b = 0} = p.crop, fw = p.w / (1 - l - r), fh = p.h / (1 - t - b);
+      inner = `<svg x="0" y="0" width="${n2(p.w)}" height="${n2(p.h)}" viewBox="0 0 ${n2(p.w)} ${n2(p.h)}" overflow="hidden"><image href="${p.raster}" xlink:href="${p.raster}" x="${n2(-l * fw)}" y="${n2(-t * fh)}" width="${n2(fw)}" height="${n2(fh)}" preserveAspectRatio="none"/></svg>`; }
+    else inner = `<image href="${p.raster}" xlink:href="${p.raster}" width="${n2(p.w)}" height="${n2(p.h)}" preserveAspectRatio="none"/>`;
+    body += `<g transform="${tf}"${p.opacity != null ? ` opacity="${p.opacity}"` : ''}><svg x="0" y="0" width="${n2(p.w)}" height="${n2(p.h)}" viewBox="0 0 ${n2(p.w)} ${n2(p.h)}" overflow="visible">${inner}</svg></g>`;
   }
   return wrapSVG(W, H, body);
 }

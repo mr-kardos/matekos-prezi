@@ -73,12 +73,22 @@
       <button class="tb" data-cmd="triangle" data-icon="triangle" title="Háromszög"></button>
       <button class="tb" data-cmd="arrow" data-icon="arrow" title="Nyíl (A)"></button>
       <button class="tb" data-cmd="line" data-icon="line" title="Vonal (L)"></button>
+    </div>
+    <div class="grp">
+      <button class="tb" data-pop="popFind" data-icon="search" title="Keresés és csere (Ctrl/⌘+F)"></button>
       <button class="tb tplonly" data-pop="popPh" data-icon="placeholder" title="Helykitöltő hozzáadása az elrendezéshez"><span class="lbl">Helykitöltő, mező</span></button>
     </div>
     <div class="grp">
       <button class="tb" data-cmd="delete" data-k="any" data-icon="trash" title="Törlés (Delete)"></button>
     </div>
 
+  </div>
+  <div class="ctxbar" id="imgBar" hidden>
+    <span class="ctxlabel">Kép</span>
+    <button class="tb wide" id="imgCrop" data-icon="crop" title="Körbevágás: húzd a keret szélét vagy sarkát. Kész: kattints ide újra, vagy Enter / Esc"><span class="lbl">Körbevágás</span></button>
+    <button class="tb wide" id="imgUncrop" data-icon="uncrop" title="A teljes kép visszaállítása"><span class="lbl">Eredeti kép</span></button>
+    <span class="ctxsep"></span>
+    <button class="tb wide" id="imgReplace" data-icon="image" title="Másik kép ugyanide, ugyanekkora méretben"><span class="lbl">Kép cseréje…</span></button>
   </div>
   <div class="ctxbar" id="tableBar" hidden>
     <span class="ctxlabel">Táblázat</span>
@@ -191,10 +201,18 @@
   <div class="psep"></div>
   <div class="ptitle">Egyéb betűtípusok <span class="phint">(a képletek az alapbetűtípus matematikai betűit használják)</span></div><div id="fontOther"></div>
 </div>
+<div class="pop" id="popFind" hidden>
+  <div class="ptitle">Keresés és csere</div>
+  <div class="frow"><input id="findIn" type="text" placeholder="Keresett szöveg" spellcheck="false"></div>
+  <div class="frow"><input id="replIn" type="text" placeholder="Csere erre" spellcheck="false"></div>
+  <label class="chk"><input type="checkbox" id="findCase"> Kis- és nagybetű számít</label>
+  <div class="frow fbtns"><button class="btn" id="findNext">Következő</button><button class="btn" id="findRepl">Csere</button><button class="btn primary" id="findAll">Mindet</button></div>
+  <div class="phint" id="findInfo">Az összes dia szövegében és táblázataiban keres.</div>
+</div>
 <div class="pop" id="popSize" hidden><div class="ptitle">Betűméret (pt)</div><div class="sizegrid" id="sizeGrid"></div></div>
 <div class="pop" id="popSpacing" hidden>
   <div class="ptitle">Betűköz</div>
-  <div class="sprow"><input type="range" id="spacingR" min="-3" max="10" step="0.1" value="0"><input type="number" id="spacingIn" min="-3" max="10" step="0.1" value="0"><span>pt</span><button class="btn" id="spacingReset" title="Normál betűköz">0</button></div>
+  <div class="sprow"><input type="range" id="spacingR" min="-3" max="10" step="0.1" value="0"><input type="number" id="spacingIn" min="-3" max="10" step="0.1" value="0"><span>pt</span></div>
   <div class="phint">Szerkesztés közben a kijelölt szövegre, egyébként az egész dobozra.</div>
 </div>
 <div class="pop" id="popPh" hidden>
@@ -250,7 +268,7 @@
   <div class="home-card">
     <img class="home-logo-img" src="/app-icon.png" alt="" width="84" height="84">
     <h1>Matekos Prezi</h1>
-    <p class="home-sub">Bemutatók élő TeX-képletekkel, működő PowerPoint-animációkkal</p>
+    <p class="home-sub home-ver">v1.0</p>
     <div class="home-btns">
       <button class="hbtn primary" id="homeNew"><span class="hico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span>Új bemutató</button>
       <button class="hbtn" id="homeOpen"><span class="hico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 10h18"/></svg></span>Meglévő megnyitása</button>

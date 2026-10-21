@@ -129,12 +129,12 @@ function markPlaceholders() {
 function build() {
   dlg = document.getElementById('mathDlg');
   dlg.innerHTML = `
-    <div class="md-head" id="mdHead"><b>Képletszerkesztő</b><span class="phint">Kattints a képletbe, és építsd fel a gombokkal vagy gépeléssel · Enter: kész · Esc: bezár</span><button class="md-x" id="mdX" aria-label="Bezárás">×</button></div>
+    <div class="md-head" id="mdHead"><b>Képletszerkesztő</b><span class="phint">Építsd fel gombokkal vagy gépeléssel · Enter vagy Ctrl+M: kész · Esc: bezár · Ctrl+H: kitevő · Ctrl+L: index</span><button class="md-x" id="mdX" aria-label="Bezárás">×</button></div>
     <div class="mk-tabs" id="mkTabs">${CATS.map((c, i) => `<button data-c="${i}" class="${i === 0 ? 'on' : ''}">${c[0]}</button>`).join('')}</div>
     <div class="mk-row mk-pal" id="mkPal"></div>
-    <math-field id="mdField" math-virtual-keyboard-policy="manual"></math-field>
+    <div class="md-fwrap" id="mdFwrap"><math-field id="mdField" math-virtual-keyboard-policy="manual"></math-field><div class="md-fgrip" id="mdFgrip" title="Húzd a mező (és a betűk) nagyításához"></div></div>
     <details class="md-tex"><summary>TeX-kód</summary><textarea id="mdTex" spellcheck="false" rows="2"></textarea></details>
-    <div class="md-prevwrap"><span class="md-plabel">Végleges megjelenés</span><div class="md-prev" id="mdPrev"></div></div>
+    <details class="md-prevd" open><summary>Végleges megjelenés</summary><div class="md-prev" id="mdPrev"></div></details>
     <div class="md-foot"><span class="sp"></span><button class="btn" id="mdDel" hidden>Képlet törlése</button><button class="btn" id="mdCancel">Mégse</button><button class="btn primary" id="mdOk">Beszúrás</button></div>`;
   mf = dlg.querySelector('#mdField');
   texBox = dlg.querySelector('#mdTex');
@@ -148,14 +148,38 @@ function build() {
   mf.addEventListener('selection-change', markPlaceholders);
   new MutationObserver(markPlaceholders).observe(mf.shadowRoot, { subtree: true, childList: true, characterData: true });
   const st = document.createElement('style');
-  st.textContent = '.kv-ph{display:inline-block!important;width:.6em;height:.76em;line-height:.76em;vertical-align:-.03em;color:transparent!important;outline:1.5px dashed #2f9a46;outline-offset:-1px;border-radius:1px}';
+  st.textContent = '.kv-ph{color:#2f9a46!important}';
   mf.shadowRoot.appendChild(st);
   mf.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); apply(); }
-    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+    const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase(), altGr = e.getModifierState && e.getModifierState('AltGraph');
+    const stop = () => { e.preventDefault(); e.stopPropagation(); };
+    if (e.key === 'Enter' && !e.shiftKey) { stop(); apply(); return; }
+    if (e.key === 'Escape') { stop(); close(); return; }
+    if (mod && !e.altKey && k === 'm') { stop(); apply(); return; }
+    if (mod && !e.altKey && k === 'h') { stop(); mf.executeCommand('moveToSuperscript'); return; }
+    if (mod && !e.altKey && k === 'l') { stop(); mf.executeCommand('moveToSubscript'); return; }
+    // the character the keyboard really produced (MathLive may guess the layout wrongly: on a Hungarian
+    // keyboard Shift+7 is "=", which it took for "/" and turned into a fraction)
+    if (e.key.length === 1 && (altGr || (!mod && !e.altKey)) && !/[\p{L}\p{N}\s]/u.test(e.key)) {
+      stop();
+      if (e.key === '/') mf.executeCommand(['insert', '\\frac{#@}{#?}']);
+      else if (e.key === '^') mf.executeCommand('moveToSuperscript');
+      else if (e.key === '_') mf.executeCommand('moveToSubscript');
+      else mf.executeCommand(['typedText', e.key]);
+    }
   }, true);
+  // the live field: drag its corner to make it (and its letters) bigger
+  const fw = dlg.querySelector('#mdFwrap'), grip = dlg.querySelector('#mdFgrip');
+  const setFH = h => { h = Math.max(56, Math.min(360, h)); fw.style.height = h + 'px'; mf.style.fontSize = Math.round(h * 0.31) + 'px'; return h; };
+  setFH(+localStorage.getItem('matekosprezi.mdField') || 84);
+  grip.addEventListener('pointerdown', e => {
+    e.preventDefault(); grip.setPointerCapture(e.pointerId); const y0 = e.clientY, h0 = fw.getBoundingClientRect().height;
+    const mv = ev => setFH(h0 + ev.clientY - y0);
+    const up = ev => { grip.removeEventListener('pointermove', mv); grip.removeEventListener('pointerup', up); try { localStorage.setItem('matekosprezi.mdField', String(setFH(h0 + ev.clientY - y0))); } catch (_) {} };
+    grip.addEventListener('pointermove', mv); grip.addEventListener('pointerup', up);
+  });
   texBox.addEventListener('input', () => { mf.value = texBox.value; markPlaceholders(); syncFromField(); });
-  texBox.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); apply(); } else if (e.key === 'Escape') close(); });
+  texBox.addEventListener('keydown', e => { if ((e.key === 'Enter' && !e.shiftKey) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'm')) { e.preventDefault(); apply(); } else if (e.key === 'Escape') close(); });
   const pick = e => {
     const b = e.target.closest('.mk'); if (!b) return;
     const list = b.dataset.g === 'f' ? FREQUENT : CATS[curCat][1];
@@ -244,5 +268,8 @@ export function openMathEditor({ tex = '', editing = false, top = 80, onApply: o
   texBox.value = tex;
   syncFromField();
   requestAnimationFrame(() => { markPlaceholders(); mf.focus(); mf.executeCommand('moveToMathfieldEnd'); });
+  setTimeout(() => { if (isMathEditorOpen() && document.activeElement !== mf) { mf.focus(); mf.executeCommand('moveToMathfieldEnd'); } }, 80);
 }
 export function isMathEditorOpen() { return dlg && !dlg.hidden; }
+/** Ctrl+M while the editor is open: finish (insert / update). */
+export function applyMathEditor() { if (isMathEditorOpen()) apply(); }

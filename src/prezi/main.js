@@ -5,7 +5,7 @@ import { NodeSelection } from '@tiptap/pm/state';
 import { CellSelection, TableMap } from '@tiptap/pm/tables';
 import { startMathJax, renderInto, mathReady, activeMathFont } from '../math.js';
 import { FONT_SETS, DEFAULT_FONT, applyTextFont, loadTextFamily, allFamilies, familyLabel, familyCSS, familyFromCSS, registerAllFamilies, fontSet } from './fontsets.js';
-import { openMathEditor, isMathEditorOpen } from '../mathEditor.js';
+import { openMathEditor, isMathEditorOpen, applyMathEditor } from '../mathEditor.js';
 import { tableContext } from '../editor/extensions.js';
 import { svg as svgIcon } from '../icons.js';
 import { pickFile, isTauri, savePresentation, saveExport, openPresentation, openPathFile, watchOpenedFiles, setCurrentPath, getCurrentPath, getCurrentHandle, setCurrentHandle, currentFileName, autosave, loadAutosave } from '../files.js';
@@ -187,11 +187,16 @@ const redo = () => { if (editing) return ed.commands.redo(); if (hIdx < history.
 function shapeSVG(o) {
   const line = o.shape === 'line';
   const sw = o.stroke ? (o.strokeWidth ?? 3) : 0, h2 = sw / 2, {w, h} = o;
-  const fill = o.fill || 'none', st = o.stroke ? ` stroke="${o.stroke}" stroke-width="${sw}" stroke-linejoin="round"${line ? ' stroke-linecap="round"' : ''}` : '';
+  const fill = (o.fill || 'none') + (o.fill && o.fillOpacity != null ? `" fill-opacity="${o.fillOpacity}` : ''),
+    st = o.stroke ? ` stroke="${o.stroke}" stroke-width="${sw}" stroke-linejoin="round"${line ? ' stroke-linecap="round"' : ''}${o.strokeOpacity != null ? ` stroke-opacity="${o.strokeOpacity}"` : ''}` : '';
   let body;
   if (o.shape === 'rect') body = `<rect x="${h2}" y="${h2}" width="${Math.max(0, w - sw)}" height="${Math.max(0, h - sw)}" rx="${o.radius ?? 0}" fill="${fill}"${st}/>`;
   else if (o.shape === 'ellipse') body = `<ellipse cx="${w / 2}" cy="${h / 2}" rx="${Math.max(0, w / 2 - h2)}" ry="${Math.max(0, h / 2 - h2)}" fill="${fill}"${st}/>`;
   else if (o.shape === 'triangle') body = `<polygon points="${r1(w / 2)},${r1(h2 * 1.2)} ${r1(w - h2 * 1.2)},${r1(h - h2)} ${r1(h2 * 1.2)},${r1(h - h2)}" fill="${fill}"${st}/>`;
+  else if (o.shape === 'path' && Array.isArray(o.path)) {
+    const d = o.path.map(([c, ...v]) => c + v.map((n, i) => r1(i % 2 ? n * h : n * w)).join(' ')).join(' ');
+    body = `<path d="${d}" fill="${fill}"${st}/>`;
+  }
   else if (line) body = `<line x1="${r1(Math.min(h2, w / 2))}" y1="${h / 2}" x2="${r1(Math.max(w / 2, w - h2))}" y2="${h / 2}" fill="none"${st}/>`;
   else {
     const hl = Math.min(h * 0.9, w * 0.45), t = h * 0.22, m = h / 2;
@@ -227,6 +232,7 @@ function objEl(o, rmode, tpl = false, ox = 0, oy = 0) {
   const r = document.createElement('div'); r.className = 'rot';
   if (o.rot) r.style.transform = `rotate(${o.rot}deg)`;
   el.appendChild(r);
+  if (o.opacity != null && o.opacity < 1) r.style.opacity = o.opacity;
   if (o.type === 'group') { for (const c of o.children) r.appendChild(objEl(c, rmode, tpl, o.x, o.y)); return el; }
   if (o.type === 'text' || o.type === 'table') {
     const empty = isEmptyText(o);
@@ -237,7 +243,11 @@ function objEl(o, rmode, tpl = false, ox = 0, oy = 0) {
     txtStyle(t, o); r.appendChild(t);
     renderStatic(t, o.doc, rmode === 'edit' ? onMathRendered : null, kindOf(o));
   } else if (o.type === 'shape') r.innerHTML = shapeSVG(o);
-  else if (o.type === 'image') { r.innerHTML = `<img src="${media[o.media] ?? ''}" alt="" draggable="false">`; if (o.opacity != null) r.style.opacity = o.opacity; }
+  else if (o.type === 'image') {
+    if (o.crop) { const {l = 0, t = 0, r: rr = 0, b = 0} = o.crop, fw = 1 / (1 - l - rr), fh = 1 / (1 - t - b);
+      r.innerHTML = `<div class="cropbox"><img src="${media[o.media] ?? ''}" alt="" draggable="false" style="left:${-l * fw * 100}%;top:${-t * fh * 100}%;width:${fw * 100}%;height:${fh * 100}%"></div>`; }
+    else r.innerHTML = `<img src="${media[o.media] ?? ''}" alt="" draggable="false">`;
+  }
   return el;
 }
 function paintBackground(clip, src) {
@@ -334,7 +344,8 @@ function drawSelection() {
     d.innerHTML = '<div class="stem"></div><div class="h move" data-h="move" title="A kijelöltek mozgatása">' + svgIcon('move') + '</div>';
     return;
   }
-  const o = objs[0], d = frame(o, 'one' + (editing === o.id ? ' editing' : '') + (o.locked ? ' locked' : ''));
+  const o = objs[0], d = frame(o, 'one' + (editing === o.id ? ' editing' : '') + (o.locked ? ' locked' : '') + (cropping === o.id ? ' cropping' : ''));
+  if (cropping === o.id) drawCropGhost(); else stage.querySelectorAll('.cropghost').forEach(x => x.remove());
   d.id = 'sel';
   if (o.locked) return;
   const widthOnly = isText(o) || o.shape === 'line', hs = widthOnly ? HANDLES_W : HANDLES_FULL;
@@ -405,14 +416,14 @@ function renderSlideList() {
   slidesNav.innerHTML = '<div class="plist" id="plist"></div>';
   const list = $('#plist');
   doc.slides.forEach((s, i) => {
-    const t = thumbFrame(i + 1, i === cur ? 'cur' : ''); t.draggable = true;
+    const t = thumbFrame(i + 1, i === cur ? 'cur' : ''); t.draggable = true; t.dataset.i = i;
     renderSlide(s, t.querySelector('.slide'), 'thumb');
     if (s.transition) t.querySelector('.no').insertAdjacentHTML('beforeend', `<span class="trmark" title="Diaváltás: ${esc(TRANSITIONS[s.transition.type]?.label ?? '')}">★</span>`);
     t.onclick = () => { gotoSlide(i); slideFocus = true; };
-    t.ondragstart = e => e.dataTransfer.setData('text/slide', i);
+    t.ondragstart = e => e.dataTransfer.setData('text/slide', WIN + ':' + i);
     t.ondragover = e => { e.preventDefault(); t.classList.add('dragover'); };
     t.ondragleave = () => t.classList.remove('dragover');
-    t.ondrop = e => { e.preventDefault(); const from = e.dataTransfer.getData('text/slide'); if (from !== '') moveSlide(+from, i); };
+    t.ondrop = e => { const from = e.dataTransfer.getData('text/slide'); if (!from.startsWith(WIN + ':')) return; e.preventDefault(); e.stopPropagation(); moveSlide(+from.split(':')[1], i); };
     list.appendChild(t);
     if (i === cur) {
       const a = document.createElement('div'); a.className = 'slide-actions';
@@ -607,15 +618,55 @@ function startHandle(h, p, e) {
   action = {type: 'resize', h, p0: p, o0: clone(o), moved: true};
   stage.setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation();
 }
+/* picture cropping: the frame's handles cut the picture, the picture itself stays where it is */
+let cropping = null;
+function fullRect(o) {
+  const {l = 0, t = 0, r = 0, b = 0} = o.crop || {}, fw = o.w / (1 - l - r), fh = o.h / (1 - t - b);
+  return {x: o.x - l * fw, y: o.y - t * fh, w: fw, h: fh};
+}
+function startCrop() {
+  const o = selObj(); if (o?.type !== 'image' || o.locked) return;
+  if (o.rot) { toast('Elforgatott kép nem vágható körbe – előbb állítsd 0°-ra.'); return; }
+  cropping = o.id; drawSelection(); updateImgBar();
+}
+function endCrop() { if (!cropping) return; cropping = null; stage.querySelectorAll('.cropghost').forEach(x => x.remove()); commit(); updateImgBar(); }
+function drawCropGhost() {
+  stage.querySelectorAll('.cropghost').forEach(x => x.remove());
+  const o = cropping && objById(cropping); if (!o) return;
+  const F = fullRect(o), g = document.createElement('div'); g.className = 'cropghost';
+  Object.assign(g.style, {left: F.x + 'px', top: F.y + 'px', width: F.w + 'px', height: F.h + 'px'});
+  g.innerHTML = `<img src="${media[o.media]}" alt="">`; stage.insertBefore(g, stage.firstChild.nextSibling);
+}
+function updateImgBar() {
+  const o = selObj(), show = o?.type === 'image' && !o.locked && !editing;
+  $('#imgBar').hidden = !show; if (!show) { if (cropping && (!o || o.id !== cropping)) { cropping = null; stage.querySelectorAll('.cropghost').forEach(x => x.remove()); } return; }
+  $('#imgCrop').classList.toggle('on', cropping === o.id);
+  $('#imgUncrop').disabled = !o.crop;
+}
+$('#imgBar').addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
+$('#imgCrop').onclick = () => cropping ? endCrop() : startCrop();
+$('#imgUncrop').onclick = () => { const o = selObj(); if (!o?.crop) return; Object.assign(o, fullRect(o)); delete o.crop; cropping = null; commit(); };
+$('#imgReplace').onclick = () => { const o = selObj(); if (o?.type !== 'image') return; pickImage(key => { o.media = key; commit(); }); };
 /** Resize in the object's rotated frame, keeping the opposite handle fixed. Groups scale uniformly. */
 function doResize(o, p, keepRatio) {
+  if (cropping === o.id) {                                       // crop: the frame moves over the fixed picture
+    const {h, p0, o0} = action, F = fullRect(o0), dx = p.x - p0.x, dy = p.y - p0.y;
+    let x0 = o0.x, y0 = o0.y, x1 = o0.x + o0.w, y1 = o0.y + o0.h;
+    if (h.includes('w')) x0 = Math.min(x1 - 10, Math.max(F.x, x0 + dx)); if (h.includes('e')) x1 = Math.max(x0 + 10, Math.min(F.x + F.w, x1 + dx));
+    if (h.includes('n')) y0 = Math.min(y1 - 10, Math.max(F.y, y0 + dy)); if (h.includes('s')) y1 = Math.max(y0 + 10, Math.min(F.y + F.h, y1 + dy));
+    Object.assign(o, {x: x0, y: y0, w: x1 - x0, h: y1 - y0});
+    const c = {l: (x0 - F.x) / F.w, t: (y0 - F.y) / F.h, r: (F.x + F.w - x1) / F.w, b: (F.y + F.h - y1) / F.h};
+    for (const k_ in c) c[k_] = Math.max(0, Math.round(c[k_] * 10000) / 10000);
+    if (c.l + c.t + c.r + c.b > 0.0001) o.crop = c; else delete o.crop;
+    return;
+  }
   const {h, p0, o0} = action, t = (o0.rot || 0) * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
   const dx = p.x - p0.x, dy = p.y - p0.y;
   const lx = dx * c + dy * s, ly = -dx * s + dy * c;
   const sx = h.includes('e') ? 1 : h.includes('w') ? -1 : 0, sy = h.includes('s') ? 1 : h.includes('n') ? -1 : 0;
   let w = Math.max(16, o0.w + sx * lx), hh = Math.max(16, o0.h + sy * ly);
   if (isText(o) || o.shape === 'line') hh = o0.h;
-  else if ((keepRatio || o.type === 'image' || o.type === 'group') && sx && sy) { const k = Math.max(w / o0.w, hh / o0.h); w = o0.w * k; hh = o0.h * k; }
+  else if ((keepRatio || o.type === 'group' || (o.type === 'image' && !o.crop)) && sx && sy) { const k = Math.max(w / o0.w, hh / o0.h); w = o0.w * k; hh = o0.h * k; }
   else if (o.type === 'group') { const k = sx ? w / o0.w : hh / o0.h; w = o0.w * k; hh = o0.h * k; }
   const cx0 = o0.x + o0.w / 2, cy0 = o0.y + o0.h / 2, ax = -sx * o0.w / 2, ay = -sy * o0.h / 2;
   const Ax = cx0 + ax * c - ay * s, Ay = cy0 + ax * s + ay * c, nx = sx * w / 2, ny = sy * hh / 2;
@@ -1065,7 +1116,7 @@ function positionBody() {
     ${slider('pR', 'Elforgatás (°)', round(rot), -180, 180, 1, o.type === 'group' ? 'disabled title="Csoport nem forgatható – a tagjai igen"' : lk)}
     ${o.type === 'shape' ? slider('pSW', o.shape === 'line' ? 'Vastagság (px)' : 'Körvonal (px)', o.stroke ? (o.strokeWidth || 0) : 0, o.shape === 'line' ? 1 : 0, 30, 1, lk) : ''}
     ${o.shape === 'rect' ? slider('pRad', 'Lekerekítés', o.radius || 0, 0, Math.round(Math.min(o.w, o.h) / 2), 1, lk) : ''}
-    ${o.type === 'image' ? slider('pOp', 'Átlátszatlanság (%)', round((o.opacity ?? 1) * 100), 10, 100, 1, lk) : ''}
+    ${slider('pOp', 'Átlátszatlanság (%)', round((o.opacity ?? 1) * 100), 5, 100, 1, lk)}
     ${o.placeholder && mode === 'template' ? fld('Helykitöltő mintaszövege (csak szerkesztés közben látszik)', `<input type="text" id="pPrompt" value="${esc(o.prompt ?? '')}">`, true) : ''}
     ${o.placeholder && mode === 'slides' ? `<div class="phint">${esc(phName(o.placeholder))} helykitöltő – helye és formája az elrendezést követi, amíg itt nem módosítod.</div>` : ''}`;
 }
@@ -1150,7 +1201,7 @@ function bindProps(o) {
       pW: v => { if (o.type === 'group') { o0 ??= clone(o); scaleFrom(o, o0, Math.max(16, v) / o0.w, o0.x, o0.y); } else o.w = Math.max(16, v); },
       pH: v => { if (o.type === 'group') { o0 ??= clone(o); scaleFrom(o, o0, Math.max(16, v) / o0.h, o0.x, o0.y); } else o.h = Math.max(16, v); },
       pR: v => { o.rot = ((v % 360) + 360) % 360; }, pSW: v => { o.strokeWidth = Math.max(0, v); if (v > 0 && !o.stroke) o.stroke = '#2f5d8a'; if (!v && o.shape !== 'line') o.stroke = null; },
-      pRad: v => { o.radius = Math.max(0, v); }, pOp: v => { o.opacity = v / 100; }
+      pRad: v => { o.radius = Math.max(0, v); }, pOp: v => { o.opacity = v >= 100 ? undefined : v / 100; }
     };
     for (const [id, set] of Object.entries(SETTERS)) for (const suffix of ['', 'R']) {
       const el = $('#' + id + suffix); if (!el) continue;
@@ -1431,6 +1482,7 @@ function updateRibbon() {
     const k = b.dataset.k; b.disabled = k === 'any' ? !selIds.length : k === 'text' ? !isTextLike(o) || !!o.locked : !isShape(o) || !!o.locked;
   }
   $('#sizeIn').disabled = !isTextLike(o);
+  updateImgBar();
   $('.bar1 [data-cmd=undo]').disabled = !edit && hIdx <= 0;
   $('.bar1 [data-cmd=redo]').disabled = !edit && hIdx >= history.length - 1;
   ribbon.querySelector('[data-cmd=painter]').classList.toggle('on', !!painter);
@@ -1587,7 +1639,6 @@ const spR = $('#spacingR'), spN = $('#spacingIn');
 spR.oninput = () => { spN.value = spR.value; setSpacing(+spR.value, false); };
 spR.onchange = () => setSpacing(+spR.value, true);
 spN.onchange = () => { const v = parseFloat(String(spN.value).replace(',', '.')); if (!isFinite(v)) return; spR.value = v; setSpacing(v, true); };
-$('#spacingReset').onclick = () => { spR.value = spN.value = 0; setSpacing(0, true); };
 $('#popSpacing').onopen = () => {
   const o = selObj(); let v = o?.letterSpacing || 0;
   if (inEdit()) { const ls = ed.getAttributes('textStyle').letterSpacing; if (ls) v = parseFloat(ls); }
@@ -1929,7 +1980,7 @@ async function importPowerPoint(given) {
   } catch (e) { console.error(e); busy(''); toast('Az importálás nem sikerült: ' + (e.message || e)); }
 }
 async function newPresentation() {
-  if (!await confirmBox(dirty ? 'Új bemutatót kezdesz. A mostani nem mentett módosításai elvesznek. Folytatod?' : 'Új, üres bemutatót kezdesz. Folytatod?', 'Új bemutató')) return false;
+  if (dirty && !await confirmBox(dirty ? 'Új bemutatót kezdesz. A mostani nem mentett módosításai elvesznek. Folytatod?' : 'Új, üres bemutatót kezdesz. Folytatod?', 'Új bemutató')) return false;
   if (editing) stopEditor();
   blankDoc(); doc.slides.push(newSlide('cimdia')); loadDocument(doc, media, null, null); saveSoon(); sessionOpen = true; showHome(false); return true;
 }
@@ -1946,6 +1997,167 @@ let sessionOpen = false;            // a presentation was opened / created / con
 $('#fHome').onclick = () => { closePops(); sessionOpen = true; if (editing) exitEdit(); clearTimeout(autoT); autosave(autoValue()); showHome(true); };
 function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('on'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('on'), 2800); }
 
+/* ================================================================== clipboard, drag & drop */
+// Objects and slides travel through the system clipboard as text ("MPREZI-CLIP:" + JSON, pictures included),
+// so they can be pasted into another slide, another presentation or another Matekos Prezi window.
+const CLIP = 'MPREZI-CLIP:', WIN = uid();
+function mediaOf(objs, extra = []) { const keys = new Set(extra.filter(Boolean)); for (const o of flatObjects(objs)) if (o.media) keys.add(o.media); return Object.fromEntries([...keys].filter(k => media[k]).map(k => [k, media[k]])); }
+function clipObjects(ids) {
+  const objs = ids.map(objById).filter(Boolean).map(clone), all = new Set(flatObjects(objs).map(o => o.id));
+  return {kind: 'objects', win: WIN, slide: tgt().id ?? tcur, objects: objs, anims: (tgt().anims || []).filter(a => all.has(a.target)).map(clone), media: mediaOf(objs)};
+}
+function clipSlide(i) {
+  const sl = clone(doc.slides[i]), L = doc.templates[sl.template];
+  return {kind: 'slide', win: WIN, slides: [sl], layouts: L ? {[sl.template]: clone(L)} : {}, media: mediaOf([...sl.objects, ...(L ? L.objects : [])], [L?.background])};
+}
+const clipText = d => CLIP + JSON.stringify(d);
+function readClip(text) { if (!text || !text.startsWith(CLIP)) return null; try { return JSON.parse(text.slice(CLIP.length)); } catch (e) { return null; } }
+const reid = (o, map) => { const n = uid(); map.set(o.id, n); o.id = n; if (o.children) o.children.forEach(c => reid(c, map)); };
+/** Paste / drop clipboard data. `at`: slide point to place the objects (drop), else +20 px when pasted onto the same slide. */
+function pasteData(d, at) {
+  if (editing) exitEdit();
+  Object.assign(media, d.media || {});
+  if (d.kind === 'slide') {
+    if (mode !== 'slides') { toast('Diát a diaszerkesztőben lehet beilleszteni.'); return; }
+    let at_ = cur + 1;
+    for (const sl of d.slides) {
+      const map = new Map(); sl.id = uid(); sl.objects.forEach(o => reid(o, map));
+      sl.anims = (sl.anims || []).filter(a => map.has(a.target)).map(a => ({...a, id: uid(), target: map.get(a.target)}));
+      if (!doc.templates[sl.template]) {
+        const L = d.layouts?.[sl.template];
+        if (L) { let k = sl.template; while (doc.templates[k]) k += '_'; L.objects.forEach(o => reid(o, new Map())); doc.templates[k] = L; sl.template = k; }
+        else sl.template = Object.keys(doc.templates)[0];
+      }
+      doc.slides.splice(at_++, 0, sl);
+    }
+    cur = at_ - 1; setSel([]); commit(); toast(d.slides.length > 1 ? `${d.slides.length} dia beillesztve.` : 'Dia beillesztve.'); return;
+  }
+  if (d.kind !== 'objects' || !d.objects?.length) return;
+  const map = new Map(), objs = d.objects;
+  objs.forEach(o => { reid(o, map); delete o.placeholder; delete o.locked; });
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const o of objs) { const b = bounds(o); x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
+  const dx = at ? at.x - (x0 + x1) / 2 : (d.win === WIN && d.slide === (tgt().id ?? tcur) ? 20 : 0), dy = at ? at.y - (y0 + y1) / 2 : dx;
+  for (const o of objs) { moveObject(o, dx, dy); tgt().objects.push(o); }
+  if (mode === 'slides') tgt().anims.push(...(d.anims || []).filter(a => map.has(a.target)).map(a => ({...a, id: uid(), target: map.get(a.target)})));
+  setSel(objs.map(o => o.id)); curAnim = null; commit();
+}
+function addImageFromDataURL(url, at) {
+  const img = new Image();
+  img.onload = () => {
+    if (editing) exitEdit();
+    const key = 'img' + uid(); media[key] = url;
+    const k = Math.min(1, 800 / img.width, 500 / img.height), w = Math.round(img.width * k), h = Math.round(img.height * k);
+    const o = addObject({type: 'image', name: nextName('Kép'), media: key, w, h});
+    if (at) { o.x = Math.round(at.x - w / 2); o.y = Math.round(at.y - h / 2); }
+    commit();
+  };
+  img.src = url;
+}
+const fileToURL = f => new Promise(res => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.readAsDataURL(f); });
+function addTextBox(text, at) {
+  if (editing) exitEdit();
+  const st = stylesOf().body, paras = text.replace(/\r/g, '').split('\n');
+  const o = addObject({type: 'text', name: nextName('Szöveg'), w: 620, size: st.size, color: st.color, align: 'left', styleRef: 'body',
+    doc: {type: 'doc', content: paras.map(t => t ? {type: 'paragraph', content: [{type: 'text', text: t}]} : {type: 'paragraph'})}});
+  if (at) { o.x = Math.round(at.x - 310); o.y = Math.round(at.y - 20); }
+  commit();
+}
+const clipTarget = e => !sh && $('#home').hidden && $('#cfm').hidden && !isMathEditorOpen() && !e.target.closest?.('input, textarea, select, math-field');
+document.addEventListener('copy', e => {
+  if (!clipTarget(e) || editing) return;
+  let d = null;
+  if (slideFocus && mode === 'slides' && !selIds.length) d = clipSlide(cur);
+  else if (selIds.length) d = clipObjects(selIds);
+  if (!d) return;
+  e.preventDefault(); e.clipboardData.setData('text/plain', clipText(d)); toast(d.kind === 'slide' ? 'Dia másolva.' : 'Másolva.');
+});
+document.addEventListener('cut', e => {
+  if (!clipTarget(e) || editing) return;
+  if (slideFocus && mode === 'slides' && !selIds.length) {
+    if (doc.slides.length < 2) return;
+    e.preventDefault(); e.clipboardData.setData('text/plain', clipText(clipSlide(cur)));
+    doc.slides.splice(cur, 1); cur = Math.min(cur, doc.slides.length - 1); commit(); toast('Dia kivágva.'); return;
+  }
+  if (!selIds.length) return;
+  e.preventDefault(); e.clipboardData.setData('text/plain', clipText(clipObjects(selIds))); deleteSelected();
+});
+document.addEventListener('paste', async e => {
+  if (!clipTarget(e)) return;
+  const cd = e.clipboardData, text = cd.getData('text/plain'), d = readClip(text);
+  const files = [...cd.files].filter(f => f.type.startsWith('image/'));
+  if (d) { e.preventDefault(); e.stopPropagation(); pasteData(d); return; }
+  if (files.length) { e.preventDefault(); e.stopPropagation(); for (const f of files) addImageFromDataURL(await fileToURL(f)); return; }
+  if (editing) return;                                           // the text editor pastes text itself
+  if (text && text.trim()) {
+    e.preventDefault(); addTextBox('');
+    const o = selObj(); renderAll(); enterEdit(o.id); requestAnimationFrame(() => ed?.view.pasteText(text));
+  }
+}, true);
+// drag & drop: pictures, text, and objects / slides from another Matekos Prezi window
+const dropPoint = e => { const r = stage.getBoundingClientRect(); return {x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale}; };
+work.addEventListener('dragover', e => { if ([...e.dataTransfer.types].some(t => t === 'Files' || t === 'text/plain')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+work.addEventListener('drop', async e => {
+  const dt = e.dataTransfer, text = dt.getData('text/plain'), d = readClip(text), at = dropPoint(e);
+  const files = [...dt.files].filter(f => f.type.startsWith('image/'));
+  if (!d && !files.length && !text) return;
+  e.preventDefault();
+  if (d) { if (d.win === WIN && d.kind === 'objects' && d.slide === (tgt().id ?? tcur)) return; pasteData(d, d.kind === 'objects' ? at : null); return; }
+  if (files.length) { for (const f of files) addImageFromDataURL(await fileToURL(f), at); return; }
+  if (text.trim()) addTextBox(text, at);
+});
+slidesNav.addEventListener('dragover', e => { if ([...e.dataTransfer.types].includes('text/plain')) e.preventDefault(); });
+slidesNav.addEventListener('drop', e => { const d = readClip(e.dataTransfer.getData('text/plain')); if (!d || d.win === WIN) return; e.preventDefault(); pasteData(d); });
+document.addEventListener('dragstart', e => {
+  const row = e.target.closest?.('.lyr[data-id]');
+  if (row) { e.dataTransfer.setData('text/plain', clipText(clipObjects(selIds.includes(row.dataset.id) ? selIds : [row.dataset.id]))); e.dataTransfer.effectAllowed = 'copyMove'; return; }
+  const th = e.target.closest?.('#plist .thumb[data-i]');
+  if (th && mode === 'slides') { e.dataTransfer.setData('text/plain', clipText(clipSlide(+th.dataset.i))); e.dataTransfer.effectAllowed = 'copy'; }
+});
+
+/* ================================================================== find & replace */
+let findPos = -1;
+function findRegex() { const q = $('#findIn').value; if (!q) return null; return new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $('#findCase').checked ? 'g' : 'gi'); }
+/** All matches in the presentation: [{si, id, n (match index inside the object)}] */
+function findAll() {
+  const re = findRegex(), out = []; if (!re) return out;
+  doc.slides.forEach((sl, si) => { for (const o of flatObjects(sl.objects)) if (isTextLike(o) && !o.field) {
+    let n = 0; (function walk(x) { if (x.type === 'text') for (const _ of x.text.matchAll(re)) out.push({si, id: o.id, n: n++}); (x.content || []).forEach(walk); })(o.doc || {}); } });
+  return out;
+}
+function findNext() {
+  if (editing) syncEditor();
+  const all = findAll(); if (!all.length) { $('#findInfo').textContent = 'Nincs találat.'; return; }
+  findPos = (findPos + 1) % all.length; const m = all[findPos];
+  $('#findInfo').textContent = `${findPos + 1}. találat / ${all.length}`;
+  if (mode !== 'slides') return;
+  if (cur !== m.si) { if (editing) exitEdit(); gotoSlide(m.si); }
+  if (editing !== m.id) { if (editing) exitEdit(); select(m.id); enterEdit(m.id); }
+  const re = findRegex(); let n = 0, hit = null;
+  ed.state.doc.descendants((node, pos) => { if (hit || !node.isText) return; for (const x of node.text.matchAll(re)) { if (n++ === m.n) { hit = {from: pos + x.index, to: pos + x.index + x[0].length}; break; } } });
+  if (hit) { ed.commands.setTextSelection(hit); ed.commands.scrollIntoView(); }
+}
+function replaceOne() {
+  const re = findRegex(); if (!re || !editing || !ed) { findNext(); return; }
+  const {from, to} = ed.state.selection, txt = ed.state.doc.textBetween(from, to);
+  if (from !== to && new RegExp('^(?:' + re.source + ')$', re.flags.replace('g', '')).test(txt)) { ed.chain().focus().insertContentAt({from, to}, $('#replIn').value).run(); syncEditor(); findPos--; }
+  findNext();
+}
+function replaceAll() {
+  const re = findRegex(); if (!re) return; if (editing) exitEdit();
+  let count = 0; const rep = $('#replIn').value;
+  const fix = list => { for (const o of flatObjects(list)) if (isTextLike(o) && !o.field && o.doc) (function walk(x) {
+    if (x.type === 'text') { const t = x.text.replace(re, () => { count++; return rep; }); if (t !== x.text) x.text = t; } (x.content || []).forEach(walk);
+    if (x.content) x.content = x.content.filter(c => c.type !== 'text' || c.text); })(o.doc); };
+  for (const sl of doc.slides) fix(sl.objects);
+  $('#findInfo').textContent = count ? `${count} csere történt.` : 'Nincs találat.'; findPos = -1;
+  if (count) commit();
+}
+$('#findNext').onclick = findNext; $('#findRepl').onclick = replaceOne; $('#findAll').onclick = replaceAll;
+$('#findIn').addEventListener('input', () => { findPos = -1; const n = findAll().length; $('#findInfo').textContent = $('#findIn').value ? `${n} találat` : 'Az összes dia szövegében és táblázataiban keres.'; });
+$('#findIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); findNext(); } });
+$('#replIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); replaceOne(); } });
+
 /* ================================================================== keyboard */
 let clipboard = null, nudgeT = 0;
 addEventListener('keydown', e => {
@@ -1956,11 +2168,17 @@ addEventListener('keydown', e => {
     else if (k === 'escape') stopShow();
     return;
   }
+  // Ctrl+M a second time closes the formula editor (the first one, typed in a text, opened it during this same key press)
+  if (isMathEditorOpen() && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'm' && !e.target.closest?.('.ProseMirror')) { e.preventDefault(); applyMathEditor(); return; }
   if (isMathEditorOpen() || !$('#cfm').hidden) return;
   if (!$('#home').hidden) return;
   if (mod && k === 's') { e.preventDefault(); doSave(e.shiftKey); return; }
   if (mod && k === 'o') { e.preventDefault(); doOpen(); return; }
   if (k === 'f5') { e.preventDefault(); startShow(cur); return; }
+  if (mod && (k === 'h' || k === 'l') && !e.shiftKey && (editing || isTextLike(selObj()))) {
+    e.preventDefault(); withEditor(c => (k === 'h' ? c.toggleSuperscript() : c.toggleSubscript()).run()); updateRibbon(); return;
+  }
+  if (mod && k === 'f') { e.preventDefault(); showPop('popFind', ribbon.querySelector('[data-pop=popFind]')); $('#findIn').focus(); $('#findIn').select(); return; }
   if (editing) { if (mod && k === 'm') { e.preventDefault(); openMath(null, null); } return; }   // the editor handles the rest
   if (e.target.closest('input, select, textarea')) return;
   if (mod && k === 'm') { e.preventDefault(); openMath(null, null); return; }
@@ -1970,14 +2188,13 @@ addEventListener('keydown', e => {
   if (mod && k === 'a') { e.preventDefault(); setSel(tgt().objects.filter(q => !q.locked).map(q => q.id)); drawSelection(); renderProps(); updateRibbon(); return; }
   if (mod && k === 'g') { e.preventDefault(); e.shiftKey ? ungroupSelected() : groupSelected(); return; }
   const o = selObj();
-  if (mod && k === 'c' && o) { clipboard = clone(o); return; }
-  if (mod && (k === 'v' || k === 'd') && (clipboard || o)) {
-    const c = clone(k === 'd' ? o : clipboard); if (!c) return; e.preventDefault();
+  if (mod && k === 'd' && o) {
+    const c = clone(o); e.preventDefault();
     const reid = q => { q.id = uid(); if (q.children) q.children.forEach(reid); }; reid(c);
-    moveObject(c, 20, 20); delete c.placeholder; delete c.locked; tgt().objects.push(c); setSel([c.id]); if (k === 'v') clipboard = clone(c); commit(); return;
+    moveObject(c, 20, 20); delete c.placeholder; delete c.locked; tgt().objects.push(c); setSel([c.id]); commit(); return;
   }
   if ((k === 'delete' || k === 'backspace') && selIds.length) { e.preventDefault(); deleteSelected(); return; }
-  if (k === 'escape') { if (painter) { COMMANDS.painter(); return; } select(null); return; }
+  if (k === 'escape' || (k === 'enter' && cropping)) { if (cropping) { endCrop(); return; } if (painter) { COMMANDS.painter(); return; } select(null); return; }
   if (k === 'enter' && isTextLike(o) && !o.locked && !(mode === 'template' && o.placeholder)) { e.preventDefault(); enterEdit(o.id); return; }
   if ((k === 'arrowup' || k === 'arrowdown') && mode === 'slides' && (!selIds.length || slideFocus)) {
     e.preventDefault(); const to = cur + (k === 'arrowup' ? -1 : 1);

@@ -1,4 +1,4 @@
-# Matekos Prezi 0.10
+# Matekos Prezi 1.0
 
 Presentation editor with live inline TeX, the twin of **Matekos Doksi**. Built with **TipTap**
 (text editor), **MathJax 4** (formulas), **MathLive** (visual formula editor) and **Tauri 2**
@@ -65,6 +65,11 @@ Browser test version: `npm run build:web` → one self-contained `dist-web/index
   objects are decoded (MTEF, `src/prezi/mtef.js`) into editable TeX and put into the text where the old slide left
   room for them (runs of spaces or tabs, a text box split in two, a formula at a line end); otherwise they become
   formula boxes of the same size. A report lists what could not be converted.
+* Clipboard: objects and whole slides (select the slide in the left panel) can be copied / cut / pasted
+  between slides, presentations and Matekos Prezi windows; pictures and text paste from other programs;
+  pictures, text, layer rows and slide thumbnails can be dragged into another window.
+* Pictures: crop (undoable), replace; every object has an opacity setting (also imported / exported).
+* Find and replace (Ctrl/⌘+F) across all slides.
 * Slideshow preview inside the app.
 
 ## Export
