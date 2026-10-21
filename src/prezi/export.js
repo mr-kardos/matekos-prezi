@@ -116,11 +116,13 @@ function textBody(roots, stop, ox, oy) {
     }
     // formulas
     for (const sp of root.querySelectorAll('.math')) {
-      const svg = sp.querySelector('svg'); if (!svg) continue;
-      const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal; if (!r.width || !vb.width) continue;
       const color = getComputedStyle(sp).color;
-      const inner = svg.innerHTML.replace(/ data-[\w-]+="[^"]*"/g, '').replace(/currentColor/g, color);
-      body += `<g transform="translate(${n2(r.left - ox)},${n2(r.top - oy)}) scale(${r.width / vb.width},${r.height / vb.height}) translate(${-vb.x},${-vb.y})">${inner}</g>`;
+      // a formula that may break into lines is several pictures (one per line piece)
+      for (const svg of sp.querySelectorAll('mjx-container > svg')) {
+        const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal; if (!r.width || !vb.width) continue;
+        const inner = svg.innerHTML.replace(/ data-[\w-]+="[^"]*"/g, '').replace(/currentColor/g, color);
+        body += `<g transform="translate(${n2(r.left - ox)},${n2(r.top - oy)}) scale(${r.width / vb.width},${r.height / vb.height}) translate(${-vb.x},${-vb.y})">${inner}</g>`;
+      }
     }
   }
   return back + body + lines;
@@ -140,7 +142,9 @@ function slidePieces(s, el, model) {
     const key = tpl ? 'tpl-' + o.id + '-' + n++ : o.id, name = o.name || o.type;
     const box = child.getBoundingClientRect(), ox = box.left, oy = box.top;
     const op = (o.opacity ?? 1) * gOp, opacity = op < 0.999 ? Math.round(op * 1000) / 1000 : null;
-    if (o.type === 'image') { pieces.push({key, name, raster: child.querySelector('img').src, x: o.x, y: o.y, w: o.w, h: o.h, rot: o.rot || 0, opacity, crop: o.crop || null}); return; }
+    if (o.type === 'video') { pieces.push({key, name, raster: MEDIA(o.poster) || child.querySelector('img')?.src, video: MEDIA(o.media), start: o.start || 'click', trim: o.trim, duration: o.duration,
+      x: o.x, y: o.y, w: o.w, h: o.h, rot: o.rot || 0, opacity, crop: o.crop || null, radius: o.radius || 0}); return; }
+    if (o.type === 'image') { pieces.push({key, name, radius: o.radius || 0, raster: child.querySelector('img').src, x: o.x, y: o.y, w: o.w, h: o.h, rot: o.rot || 0, opacity, crop: o.crop || null}); return; }
     if (o.type === 'shape') { pieces.push({key, name, svg: wrapSVG(o.w, o.h, child.querySelector('svg').innerHTML), x: o.x, y: o.y, w: o.w, h: o.h, rot: o.rot || 0, opacity}); return; }
     const txt = child.querySelector('.txt');
     if (!tpl && o.type === 'text' && Anim.splitsByParagraph(s, o)) {
@@ -184,12 +188,22 @@ async function collect(doc, renderSlide, layoutOf, onProgress, only = null) {
 }
 
 /* ---------- PPTX ---------- */
+const geomXML = p => p.radius ? `<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val ${Math.round(Math.min(50000, p.radius / Math.min(p.w, p.h) * 100000))}"/></a:avLst></a:prstGeom>` : '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>';
+/** A video: poster picture + the video file (plays in PowerPoint's slideshow; trimmed like in Prezi). */
+function videoXML(p, spid, rImg, rVid, rMed) {
+  const rot = p.rot ? ` rot="${Math.round(p.rot * 60000)}"` : '', d = p.duration || 0, from = p.trim?.from || 0, to = p.trim?.to ?? d;
+  const trim = from > 0.01 || to < d - 0.01 ? `<p14:trim st="${Math.round(from * 1000)}" end="${Math.round(Math.max(0, d - to) * 1000)}"/>` : '';
+  return `<p:pic><p:nvPicPr><p:cNvPr id="${spid}" name="${xesc(p.name)}"><a:hlinkClick r:id="" action="ppaction://media"/></p:cNvPr><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>`
+    + `<p:nvPr><a:videoFile r:link="${rVid}"/><p:extLst><p:ext uri="{DAA4B4D4-6D71-4841-9C94-3DA1C2BB2C6F}"><p14:media xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" r:embed="${rMed}">${trim}</p14:media></p:ext></p:extLst></p:nvPr></p:nvPicPr>`
+    + `<p:blipFill><a:blip r:embed="${rImg}">${p.opacity != null ? `<a:alphaModFix amt="${Math.round(p.opacity * 100000)}"/>` : ''}</a:blip>${p.crop ? `<a:srcRect l="${Math.round((p.crop.l || 0) * 100000)}" t="${Math.round((p.crop.t || 0) * 100000)}" r="${Math.round((p.crop.r || 0) * 100000)}" b="${Math.round((p.crop.b || 0) * 100000)}"/>` : ''}<a:stretch><a:fillRect/></a:stretch></p:blipFill>`
+    + `<p:spPr><a:xfrm${rot}><a:off x="${e(p.x)}" y="${e(p.y)}"/><a:ext cx="${e(p.w)}" cy="${e(p.h)}"/></a:xfrm>${geomXML(p)}</p:spPr></p:pic>`;
+}
 function picXML(p, spid, rImg, rSvg) {
   const ext = rSvg ? `<a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}"><asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" r:embed="${rSvg}"/></a:ext></a:extLst>` : '';
   const rot = p.rot ? ` rot="${Math.round(p.rot * 60000)}"` : '';
   return `<p:pic><p:nvPicPr><p:cNvPr id="${spid}" name="${xesc(p.name)}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>`
     + `<p:blipFill><a:blip r:embed="${rImg}">${p.opacity != null ? `<a:alphaModFix amt="${Math.round(p.opacity * 100000)}"/>` : ''}${ext}</a:blip>${p.crop ? `<a:srcRect l="${Math.round((p.crop.l || 0) * 100000)}" t="${Math.round((p.crop.t || 0) * 100000)}" r="${Math.round((p.crop.r || 0) * 100000)}" b="${Math.round((p.crop.b || 0) * 100000)}"/>` : ''}<a:stretch><a:fillRect/></a:stretch></p:blipFill>`
-    + `<p:spPr><a:xfrm${rot}><a:off x="${e(p.x)}" y="${e(p.y)}"/><a:ext cx="${e(p.w)}" cy="${e(p.h)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
+    + `<p:spPr><a:xfrm${rot}><a:off x="${e(p.x)}" y="${e(p.y)}"/><a:ext cx="${e(p.w)}" cy="${e(p.h)}"/></a:xfrm>${geomXML(p)}</p:spPr></p:pic>`;
 }
 /** Off-slide position for fly in / fly out (PowerPoint formula strings). */
 function flyEnds(dir) {
@@ -211,7 +225,7 @@ function transitionXML(t) {
   return `<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" Requires="p14">`
     + `<p:transition spd="${spd}" p14:dur="${dur}">${el}</p:transition></mc:Choice><mc:Fallback><p:transition spd="${spd}">${el}</p:transition></mc:Fallback></mc:AlternateContent>`;
 }
-function timingXML(list, spidOf) {
+function timingXML(list, spidOf, videoSpids = []) {
   if (!list.length) return '';
   let id = 2;
   const tgt = k => `<p:tgtEl><p:spTgt spid="${spidOf[k]}"/></p:tgtEl>`;
@@ -222,6 +236,7 @@ function timingXML(list, spidOf) {
   const behaviours = (a, d) => {
     const k = a.key;
     switch (a.effect) {
+      case 'play': return `<p:cmd type="call" cmd="playFrom(${(a.from || 0).toFixed(1)})"><p:cBhvr><p:cTn id="${++id}" dur="${d}" fill="hold"/>${tgt(k)}</p:cBhvr></p:cmd>`;
       case 'appear': return setVis(k, 'visible', 0);
       case 'fade': return setVis(k, 'visible', 0) + filt(k, 'in', 'fade', d);
       case 'wipe': return setVis(k, 'visible', 0) + filt(k, 'in', 'wipe(left)', d);
@@ -258,6 +273,7 @@ function timingXML(list, spidOf) {
     + `<p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite" nodeType="mainSeq"><p:childTnLst>${body}</p:childTnLst></p:cTn>`
     + `<p:prevCondLst><p:cond evt="onPrev" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:prevCondLst>`
     + `<p:nextCondLst><p:cond evt="onNext" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:nextCondLst></p:seq>`
+    + videoSpids.map(sp => `<p:video><p:cMediaNode vol="80000"><p:cTn id="${++id}" display="0" fill="hold"><p:stCondLst><p:cond delay="indefinite"/></p:stCondLst></p:cTn><p:tgtEl><p:spTgt spid="${sp}"/></p:tgtEl></p:cMediaNode></p:video>`).join('')
     + `</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>`;
 }
 async function svgToPng(svg, w, h, k = 2) {
@@ -269,20 +285,36 @@ async function svgToPng(svg, w, h, k = 2) {
 }
 const dataUrlParts = u => { const m = u.match(/^data:([^;]+);base64,(.*)$/); return {mime: m[1], b64: m[2]}; };
 const EXT = {'image/png': 'png', 'image/jpeg': 'jpeg', 'image/gif': 'gif'};
+let MEDIA = () => null;
+/** The page tells the exporter where the media files (videos) are. */
+export function setMediaLookup(fn) { MEDIA = fn; }
+const VEXT = {'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov', 'video/x-m4v': 'm4v'};
 
 export async function buildPptx(doc, renderSlide, layoutOf, onProgress) {
   const slides = await collect(doc, renderSlide, layoutOf, (i, n) => onProgress?.(`Diák előkészítése… ${i}/${n}`));
   const zip = new JSZip();
   for (const [p, c] of Object.entries(PPTX_SKELETON)) zip.file(p, p === 'docProps/app.xml' ? c.replace('{SLIDES}', slides.length) : c);
-  let media = 0, sldIds = '', presRels = '', ctOver = '';
+  let media = 0, sldIds = '', presRels = '', ctOver = ''; const vidTypes = new Set();
   const rasterFile = new Map();
   for (const [si, {s, pieces, bg}] of slides.entries()) {
     onProgress?.(`PowerPoint-fájl írása… ${si + 1}/${slides.length}`);
     let rels = `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>`;
     let rid = 1, tree = '', spid = 1; const spidOf = {};
     const rel = target => { const r = 'rId' + ++rid; rels += `<Relationship Id="${r}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${target}"/>`; return r; };
+    const videos = [];
     for (const p of pieces) {
       let rImg, rSvg;
+      if (p.video) {
+        const vm = p.video.match(/^data:([^;]+);base64,(.*)$/); if (!vm) continue;
+        const vext = VEXT[vm[1]] || 'mp4', vf = `media${++media}.${vext}`; zip.file(`ppt/media/${vf}`, vm[2], {base64: true}); vidTypes.add(vext);
+        const pm = p.raster && dataUrlParts(p.raster), pf = `img${++media}.${EXT[pm?.mime] || 'png'}`;
+        if (pm && EXT[pm.mime]) zip.file(`ppt/media/${pf}`, pm.b64, {base64: true});
+        rImg = rel(pf);
+        const rVid = 'rId' + ++rid; rels += `<Relationship Id="${rVid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/video" Target="../media/${vf}"/>`;
+        const rMed = 'rId' + ++rid; rels += `<Relationship Id="${rMed}" Type="http://schemas.microsoft.com/office/2007/relationships/media" Target="../media/${vf}"/>`;
+        spidOf[p.key] = ++spid; tree += videoXML(p, spid, rImg, rVid, rMed);
+        videos.push(p); continue;
+      }
       if (p.svg) {
         const m = ++media; zip.file(`ppt/media/mp${m}.svg`, p.svg); zip.file(`ppt/media/mp${m}.png`, await svgToPng(p.svg, p.w, p.h));
         rImg = rel(`mp${m}.png`); rSvg = rel(`mp${m}.svg`);
@@ -299,10 +331,13 @@ export async function buildPptx(doc, renderSlide, layoutOf, onProgress) {
       }
       spidOf[p.key] = ++spid; tree += picXML(p, spid, rImg, rSvg);
     }
-    const list = Anim.expand(s).filter(a => spidOf[a.key]);
+    // videos: "on click" = the next click plays it (before the animations), "automatically" = right after the slide appears
+    const plays = videos.map((p, i) => ({key: p.key, id: 'v' + i, effect: 'play', trigger: p.start === 'auto' ? (i === 0 ? 'after' : 'with') : 'click',
+      dur: Math.max(1, Math.round(((p.trim?.to ?? p.duration) - (p.trim?.from || 0)) * 1000)), delay: 0, from: p.trim?.from || 0}));
+    const list = [...plays.filter(x => x.trigger !== 'click'), ...plays.filter(x => x.trigger === 'click'), ...Anim.expand(s).filter(a => spidOf[a.key])];
     const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">`
       + `<p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val="${bg.replace('#', '').toUpperCase()}"/></a:solidFill><a:effectLst/></p:bgPr></p:bg><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>${tree}</p:spTree></p:cSld>`
-      + `<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>${transitionXML(s.transition)}${timingXML(list, spidOf)}</p:sld>`;
+      + `<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>${transitionXML(s.transition)}${timingXML(list, spidOf, videos.map(p => spidOf[p.key]))}</p:sld>`;
     zip.file(`ppt/slides/slide${si + 1}.xml`, xml);
     zip.file(`ppt/slides/_rels/slide${si + 1}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`);
     sldIds += `<p:sldId id="${256 + si}" r:id="rIdS${si + 1}"/>`;
@@ -312,7 +347,8 @@ export async function buildPptx(doc, renderSlide, layoutOf, onProgress) {
   const S = PPTX_SKELETON;
   zip.file('ppt/presentation.xml', S['ppt/presentation.xml'].replace(/<p:sldIdLst>.*?<\/p:sldIdLst>/, `<p:sldIdLst>${sldIds}</p:sldIdLst>`));
   zip.file('ppt/_rels/presentation.xml.rels', S['ppt/_rels/presentation.xml.rels'].replace(/<Relationship Id="rId2"[^>]*slides\/slide1.xml"\/>/, '').replace('</Relationships>', presRels + '</Relationships>'));
-  zip.file('[Content_Types].xml', S['[Content_Types].xml'].replace('</Types>', ctOver + '</Types>'));
+  const vidDefaults = [...vidTypes].map(x => `<Default Extension="${x}" ContentType="${{mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/mp4'}[x]}"/>`).join('');
+  zip.file('[Content_Types].xml', S['[Content_Types].xml'].replace('</Types>', vidDefaults + ctOver + '</Types>'));
   return zip.generateAsync({type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', compression: 'DEFLATE'});
 }
 
@@ -330,6 +366,7 @@ function stepStates(s) {
   for (; gi < groups.length; gi++) { apply(groups[gi]); states.push({vis: {...vis}, grow: {...grow}}); }
   return states;
 }
+let clipN = 0;
 function pageSVG(pieces, bg, st) {
   let body = `<rect width="${W}" height="${H}" fill="${bg}"/>`;
   for (const p of pieces) {
@@ -341,6 +378,8 @@ function pageSVG(pieces, bg, st) {
     else if (p.crop) { const {l = 0, t = 0, r = 0, b = 0} = p.crop, fw = p.w / (1 - l - r), fh = p.h / (1 - t - b);
       inner = `<svg x="0" y="0" width="${n2(p.w)}" height="${n2(p.h)}" viewBox="0 0 ${n2(p.w)} ${n2(p.h)}" overflow="hidden"><image href="${p.raster}" xlink:href="${p.raster}" x="${n2(-l * fw)}" y="${n2(-t * fh)}" width="${n2(fw)}" height="${n2(fh)}" preserveAspectRatio="none"/></svg>`; }
     else inner = `<image href="${p.raster}" xlink:href="${p.raster}" width="${n2(p.w)}" height="${n2(p.h)}" preserveAspectRatio="none"/>`;
+    if (!p.svg && !p.raster) continue;
+    if (!p.svg && p.radius) { const cid = 'rc' + (++clipN); inner = `<defs><clipPath id="${cid}"><rect width="${n2(p.w)}" height="${n2(p.h)}" rx="${n2(p.radius)}" ry="${n2(p.radius)}"/></clipPath></defs><g clip-path="url(#${cid})">${inner}</g>`; }
     body += `<g transform="${tf}"${p.opacity != null ? ` opacity="${p.opacity}"` : ''}><svg x="0" y="0" width="${n2(p.w)}" height="${n2(p.h)}" viewBox="0 0 ${n2(p.w)} ${n2(p.h)}" overflow="visible">${inner}</svg></g>`;
   }
   return wrapSVG(W, H, body);

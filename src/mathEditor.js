@@ -126,16 +126,30 @@ function markPlaceholders() {
   for (const s of root.querySelectorAll('span')) if (s.childElementCount === 0 && s.textContent === '\u25A2' && !s.classList.contains('kv-ph')) s.classList.add('kv-ph');
 }
 
+/** Font size of the live field: the formula fills the box height with the same margin above and below –
+ *  bigger letters for a plain formula, smaller ones as soon as a fraction, an integral… makes it taller. */
+let fitT = 0;
+function fitField() {
+  const fw = dlg && dlg.querySelector('#mdFwrap'); if (!fw || dlg.hidden) return;
+  const H = fw.clientHeight, margin = Math.max(8, H * 0.14), avail = H - 2 * margin;
+  const cur = parseFloat(mf.style.fontSize) || H * 0.4;
+  const box = mf.shadowRoot?.querySelector('.ML__latex') || mf.shadowRoot?.querySelector('.ML__content');
+  const ch = box ? box.getBoundingClientRect().height : 0;
+  let f = ch > 0 ? cur * avail / ch : H * 0.4;
+  f = Math.max(12, Math.min(H * 0.62, f));
+  if (Math.abs(f - cur) > 0.5) mf.style.fontSize = Math.round(f) + 'px';
+}
+const fitSoon = () => { clearTimeout(fitT); fitT = setTimeout(() => { fitField(); setTimeout(fitField, 30); }, 0); };
 function build() {
   dlg = document.getElementById('mathDlg');
   dlg.innerHTML = `
     <div class="md-head" id="mdHead"><b>Képletszerkesztő</b><span class="phint">Építsd fel gombokkal vagy gépeléssel · Enter vagy Ctrl+M: kész · Esc: bezár · Ctrl+H: kitevő · Ctrl+L: index</span><button class="md-x" id="mdX" aria-label="Bezárás">×</button></div>
     <div class="mk-tabs" id="mkTabs">${CATS.map((c, i) => `<button data-c="${i}" class="${i === 0 ? 'on' : ''}">${c[0]}</button>`).join('')}</div>
     <div class="mk-row mk-pal" id="mkPal"></div>
-    <div class="md-fwrap" id="mdFwrap"><math-field id="mdField" math-virtual-keyboard-policy="manual"></math-field><div class="md-fgrip" id="mdFgrip" title="Húzd a mező (és a betűk) nagyításához"></div></div>
+    <div class="md-fwrap" id="mdFwrap"><div class="md-fscroll" id="mdFscroll"><math-field id="mdField" math-virtual-keyboard-policy="manual"></math-field></div><div class="md-fgrip" id="mdFgrip" title="Húzd a mező (és a betűk) nagyításához"></div></div>
     <details class="md-tex"><summary>TeX-kód</summary><textarea id="mdTex" spellcheck="false" rows="2"></textarea></details>
     <details class="md-prevd" open><summary>Végleges megjelenés</summary><div class="md-prev" id="mdPrev"></div></details>
-    <div class="md-foot"><span class="sp"></span><button class="btn" id="mdDel" hidden>Képlet törlése</button><button class="btn" id="mdCancel">Mégse</button><button class="btn primary" id="mdOk">Beszúrás</button></div>`;
+    <div class="md-foot"><label class="chk md-wrapchk" title="Hosszú képlet a szövegdoboz szélén új sorban folytatódik (egyenlőségjel, +, −, zárójel és hasonlók után)"><input type="checkbox" id="mdWrap"> Sortörés a doboz szélén</label><span class="sp"></span><button class="btn" id="mdDel" hidden>Képlet törlése</button><button class="btn" id="mdCancel">Mégse</button><button class="btn primary" id="mdOk">Beszúrás</button></div>`;
   mf = dlg.querySelector('#mdField');
   texBox = dlg.querySelector('#mdTex');
   prev = dlg.querySelector('#mdPrev');
@@ -144,7 +158,7 @@ function build() {
   mf.macros = { ...mf.macros, ...Object.fromEntries(Object.entries(MACROS).map(([k, v]) => [k, { args: 0, def: v, captureSelection: true, expand: false }])) };
   mf.menuItems = [];
   mf.smartFence = true;
-  mf.addEventListener('input', () => { markPlaceholders(); syncFromField(); });
+  mf.addEventListener('input', () => { markPlaceholders(); syncFromField(); fitSoon(); });
   mf.addEventListener('selection-change', markPlaceholders);
   new MutationObserver(markPlaceholders).observe(mf.shadowRoot, { subtree: true, childList: true, characterData: true });
   const st = document.createElement('style');
@@ -163,6 +177,7 @@ function build() {
     if (e.key.length === 1 && (altGr || (!mod && !e.altKey)) && !/[\p{L}\p{N}\s]/u.test(e.key)) {
       stop();
       if (e.key === '/') mf.executeCommand(['insert', '\\frac{#@}{#?}']);
+      else if (e.key === '*') mf.executeCommand(['insert', '\\cdot']);
       else if (e.key === '^') mf.executeCommand('moveToSuperscript');
       else if (e.key === '_') mf.executeCommand('moveToSubscript');
       else mf.executeCommand(['typedText', e.key]);
@@ -170,7 +185,7 @@ function build() {
   }, true);
   // the live field: drag its corner to make it (and its letters) bigger
   const fw = dlg.querySelector('#mdFwrap'), grip = dlg.querySelector('#mdFgrip');
-  const setFH = h => { h = Math.max(56, Math.min(360, h)); fw.style.height = h + 'px'; mf.style.fontSize = Math.round(h * 0.31) + 'px'; return h; };
+  const setFH = h => { h = Math.max(56, Math.min(360, h)); fw.style.height = h + 'px'; fitField(); return h; };
   setFH(+localStorage.getItem('matekosprezi.mdField') || 84);
   grip.addEventListener('pointerdown', e => {
     e.preventDefault(); grip.setPointerCapture(e.pointerId); const y0 = e.clientY, h0 = fw.getBoundingClientRect().height;
@@ -252,13 +267,14 @@ function showCat(i) {
 }
 function hide() { dlg.hidden = true; onApply = onDelete = null; }
 function close() { const a = onApply; hide(); a && a(null); }
-function apply() { const a = onApply, t = cleanTex(); hide(); a && a(t); }
+function apply() { const a = onApply, t = cleanTex(), w = dlg.querySelector('#mdWrap').checked; hide(); a && a(t, w); }
 
 /**
  * Open the editor. onApply(tex) is called with the final TeX ('' = empty), or null when cancelled.
  */
-export function openMathEditor({ tex = '', editing = false, top = 80, onApply: ok, onDelete: del }) {
+export function openMathEditor({ tex = '', editing = false, top = 80, wrap = false, onApply: ok, onDelete: del }) {
   if (!dlg) build();
+  dlg.querySelector('#mdWrap').checked = !!wrap;
   onApply = ok; onDelete = del;
   dlg.querySelector('#mdOk').textContent = editing ? 'Frissítés' : 'Beszúrás';
   dlg.querySelector('#mdDel').hidden = !editing;
@@ -268,7 +284,7 @@ export function openMathEditor({ tex = '', editing = false, top = 80, onApply: o
   texBox.value = tex;
   syncFromField();
   requestAnimationFrame(() => { markPlaceholders(); mf.focus(); mf.executeCommand('moveToMathfieldEnd'); });
-  setTimeout(() => { if (isMathEditorOpen() && document.activeElement !== mf) { mf.focus(); mf.executeCommand('moveToMathfieldEnd'); } }, 80);
+  setTimeout(() => { if (isMathEditorOpen() && document.activeElement !== mf) { mf.focus(); mf.executeCommand('moveToMathfieldEnd'); } fitSoon(); }, 80);
 }
 export function isMathEditorOpen() { return dlg && !dlg.hidden; }
 /** Ctrl+M while the editor is open: finish (insert / update). */

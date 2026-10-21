@@ -182,7 +182,7 @@ export function renderStatic(host, json, onRendered, kind = 'text') {
   for (const sp of pm.querySelectorAll('span.math')) {
     sp.contentEditable = 'false';
     sp.classList.remove('disp');
-    renderInto(sp, sp.getAttribute('data-tex') || '', false, onRendered, !!sp.closest('strong,b'));
+    renderInto(sp, sp.getAttribute('data-tex') || '', false, onRendered, !!sp.closest('strong,b'), sp.getAttribute('data-wrap') === '1');
   }
   host.innerHTML = ''; host.appendChild(pm);
   return pm;

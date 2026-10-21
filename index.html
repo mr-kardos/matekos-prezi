@@ -68,6 +68,7 @@
       <button class="tb" data-cmd="math" data-icon="sigma" title="Képlet (Ctrl/⌘+M) – vagy írd $…$ közé a szövegben"><span class="lbl">Képlet</span></button>
       <button class="tb" data-pop="popTable" data-icon="table" title="Táblázat beszúrása (önálló objektumként)"></button>
       <button class="tb" data-cmd="image" data-icon="image" title="Kép beszúrása"></button>
+      <button class="tb" data-cmd="video" data-icon="video" title="Videó beszúrása (MP4)"></button>
       <button class="tb" data-cmd="rect" data-icon="rect" title="Téglalap (R)"></button>
       <button class="tb" data-cmd="ellipse" data-icon="ellipse" title="Ellipszis (E)"></button>
       <button class="tb" data-cmd="triangle" data-icon="triangle" title="Háromszög"></button>
@@ -82,6 +83,24 @@
       <button class="tb" data-cmd="delete" data-k="any" data-icon="trash" title="Törlés (Delete)"></button>
     </div>
 
+  </div>
+  <div class="ctxbar" id="lineBar" hidden>
+    <span class="ctxlabel">Vonal</span>
+    <label class="ctxf">Kezdete <select id="headStart"><option value="none">Nincs</option><option value="arrow">Nyíl</option><option value="triangle">Háromszög</option><option value="circle">Kör</option><option value="diamond">Rombusz</option></select></label>
+    <label class="ctxf">Vége <select id="headEnd"><option value="none">Nincs</option><option value="arrow">Nyíl</option><option value="triangle">Háromszög</option><option value="circle">Kör</option><option value="diamond">Rombusz</option></select></label>
+    <button class="tb wide" id="lineSwap" title="A két vég felcserélése"><span class="lbl">⇄ Csere</span></button>
+  </div>
+  <div class="ctxbar" id="vidBar" hidden>
+    <span class="ctxlabel">Videó</span>
+    <label class="ctxf">Indítás <select id="vidStart"><option value="click">Kattintásra</option><option value="auto">Automatikusan</option></select></label>
+    <span class="ctxsep"></span>
+    <label class="ctxf">Eleje <input id="vidFrom" type="text" inputmode="decimal" title="Ettől a ponttól játssza (perc:mp vagy mp)"></label>
+    <label class="ctxf">Vége <input id="vidTo" type="text" inputmode="decimal" title="Eddig játssza (perc:mp vagy mp)"></label>
+    <span class="vidlen" id="vidLen"></span>
+    <button class="tb wide" id="vidPlay" title="Lejátszás a beállított szakaszon"><span class="lbl">▶ Próba</span></button>
+    <span class="ctxsep"></span>
+    <button class="tb wide" id="vidCrop" data-icon="crop" title="A videó képének körbevágása"><span class="lbl">Körbevágás</span></button>
+    <button class="tb wide" id="vidUncrop" data-icon="uncrop" title="A teljes kép visszaállítása"><span class="lbl">Eredeti kép</span></button>
   </div>
   <div class="ctxbar" id="imgBar" hidden>
     <span class="ctxlabel">Kép</span>
@@ -142,7 +161,6 @@
   <div class="prow"><input id="bulCustom" maxlength="3" placeholder="✱" aria-label="Saját szimbólum"><button class="btn" id="bulCustomBtn">Szimbólum használata</button></div>
   <div class="prow"><button class="btn" id="bulPicBtn">Kép mint felsorolásjel…</button><label class="mini-l">Méret <input type="number" id="bulPicSize" min="0.4" max="3" step="0.1" value="0.9"> em</label></div>
   <div class="psep"></div>
-  <button class="pitem" data-bul="">Hagyományos pötty</button>
   <button class="pitem" data-bul="none">Lista megszüntetése</button>
 </div>
 <div class="pop" id="popNum" hidden>
@@ -194,6 +212,13 @@
 <div class="pop" id="popStroke" hidden>
   <div class="ptitle">Körvonal színe</div><div class="swg" id="swStroke"></div>
   <div class="ptitle" style="margin-top:8px">Vastagság</div><div class="bwg" id="bwStroke"></div>
+  <div class="ptitle" style="margin-top:8px">Vonaltípus</div>
+  <div class="dashg" id="dashStroke">
+    <button class="pitem" data-dash="" title="Folytonos"><svg viewBox="0 0 60 8"><line x1="2" y1="4" x2="58" y2="4" stroke="currentColor" stroke-width="2.5"/></svg></button>
+    <button class="pitem" data-dash="dash" title="Szaggatott"><svg viewBox="0 0 60 8"><line x1="2" y1="4" x2="58" y2="4" stroke="currentColor" stroke-width="2.5" stroke-dasharray="8 5"/></svg></button>
+    <button class="pitem" data-dash="dot" title="Pontozott"><svg viewBox="0 0 60 8"><line x1="3" y1="4" x2="58" y2="4" stroke="currentColor" stroke-width="3" stroke-dasharray="0.01 6" stroke-linecap="round"/></svg></button>
+    <button class="pitem" data-dash="dashdot" title="Pont-vonal"><svg viewBox="0 0 60 8"><line x1="3" y1="4" x2="58" y2="4" stroke="currentColor" stroke-width="2.5" stroke-dasharray="8 4 0.01 4" stroke-linecap="round"/></svg></button>
+  </div>
 </div>
 <div class="pop" id="popFont" hidden>
   <button class="pitem fbase" data-fam="">Alap betűtípus (a sablonból)</button>
@@ -268,7 +293,7 @@
   <div class="home-card">
     <img class="home-logo-img" src="/app-icon.png" alt="" width="84" height="84">
     <h1>Matekos Prezi</h1>
-    <p class="home-sub home-ver">v1.0</p>
+    <p class="home-sub home-ver">v1.1</p>
     <div class="home-btns">
       <button class="hbtn primary" id="homeNew"><span class="hico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span>Új bemutató</button>
       <button class="hbtn" id="homeOpen"><span class="hico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 10h18"/></svg></span>Meglévő megnyitása</button>

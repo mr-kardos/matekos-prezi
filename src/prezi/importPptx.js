@@ -206,8 +206,11 @@ export async function importPptx(buf, {onProgress} = {}) {
     const c = own ? colorOf(own, ctx) : ref && refIdx(ref) > 0 ? colorOf(ref, ctx) : null;
     if (!c) return null;
     const w = ln?.getAttribute('w') != null ? num(ln.getAttribute('w')) : ref && refIdx(ref) > 0 ? (ctx.theme.lnW?.[refIdx(ref) - 1] ?? 12700) : 12700;
-    return {stroke: c, strokeWidth: Math.max(0.5, Math.round(px(w) * 10) / 10), alpha: own ? alphaOf(own) : 1,
-      head: !!(ln && (ch(ln, 'headEnd')?.getAttribute('type') || 'none') !== 'none'), tail: !!(ln && (ch(ln, 'tailEnd')?.getAttribute('type') || 'none') !== 'none')};
+    const HEAD = {triangle: 'triangle', stealth: 'triangle', arrow: 'arrow', oval: 'circle', diamond: 'diamond'};
+    const pd = ln && ch(ln, 'prstDash')?.getAttribute('val');
+    const dash = !pd || pd === 'solid' ? undefined : /dot$/i.test(pd) && !/dash/i.test(pd) ? 'dot' : /dashdot/i.test(pd) ? 'dashdot' : 'dash';
+    return {stroke: c, strokeWidth: Math.max(0.5, Math.round(px(w) * 10) / 10), alpha: own ? alphaOf(own) : 1, dash,
+      headStart: HEAD[ln && ch(ln, 'headEnd')?.getAttribute('type')], headEnd: HEAD[ln && ch(ln, 'tailEnd')?.getAttribute('type')]};
   };
   const fillProp = (spPr, styleEl, ctx) => {
     if (!spPr) return undefined;
@@ -321,7 +324,7 @@ export async function importPptx(buf, {onProgress} = {}) {
     else if ((fill || line) && !ph) {
       const shape = {rect: 'rect', roundRect: 'rect', round2SameRect: 'rect', flowChartProcess: 'rect', flowChartAlternateProcess: 'rect', ellipse: 'ellipse', flowChartConnector: 'ellipse',
         triangle: 'triangle', rightArrow: 'arrow', leftArrow: 'arrow', upArrow: 'arrow', downArrow: 'arrow', line: 'line', straightConnector1: 'line'}[prst];
-      const base = {fill: fill || null, stroke: line?.stroke || null, strokeWidth: line?.strokeWidth || 0};
+      const base = {fill: fill || null, stroke: line?.stroke || null, strokeWidth: line?.strokeWidth || 0, ...(line?.dash ? {dash: line.dash} : {})};
       const fa = fill ? fillAlpha(spPr) : 1, la = line ? line.alpha : 1;      // transparency of the fill / of the outline only
       if (fa < 0.999) base.fillOpacity = Math.round(fa * 1000) / 1000;
       if (la < 0.999) base.strokeOpacity = Math.round(la * 1000) / 1000;
@@ -364,17 +367,18 @@ export async function importPptx(buf, {onProgress} = {}) {
     const [ax, ay, bx, by] = [t.flipH ? x2 : x1, t.flipV ? y2 : y1, t.flipH ? x1 : x2, t.flipV ? y1 : y2];
     const len = Math.hypot(bx - ax, by - ay); if (len < 1) return;
     const line = lineProps(ch(el, 'spPr'), ch(el, 'style'), ctx) || {stroke: '#000000', strokeWidth: 1, alpha: 1};
-    if (line.head || line.tail) report.skipped.push({slide: ctx.slideNo, what: 'vonal nyílhegye (vonalként)'});
     const ang = Math.atan2(by - ay, bx - ax) * 180 / Math.PI, cx = (ax + bx) / 2, cy = (ay + by) / 2, hh = Math.max(8, line.strokeWidth + 6);
-    const {alpha, head, tail, ...ln} = line;
+    const {alpha, ...ln} = line; for (const k in ln) if (ln[k] === undefined) delete ln[k];
     out.push({id: uid(), type: 'shape', shape: 'line', name: 'Vonal', x: cx - len / 2, y: cy - hh / 2, w: len, h: hh, rot: ((ang % 360) + 360) % 360, fill: null, ...ln, ...(alpha < 0.999 ? {opacity: alpha} : {}), spid: spidOf(el)});
   }
   async function readPic(pic, ctx, out, tf) {
     const r = xfrmOf(pic); if (!r) return;
-    const blip = desc(pic, 'blip'), t = blip && ctx.rels[rid(blip)]?.target;
-    const key = t && await mediaKey(t);
-    if (!key) { report.skipped.push({slide: ctx.slideNo, what: 'kép (EMF/WMF vagy hiányzó formátum)'}); return; }
+    const blip = desc(pic, 'blip'), svgBlip = desc(pic, 'svgBlip');
+    const t = (svgBlip && ctx.rels[rid(svgBlip)]?.target) || (blip && ctx.rels[rid(blip)]?.target);
+    let key = t && await mediaKey(t);
+    if (!key && svgBlip && blip) { const t2 = ctx.rels[rid(blip)]?.target; key = t2 && await mediaKey(t2); }
     const g = geom(tf(r));
+    if (!key) { report.skipped.push({slide: ctx.slideNo, what: 'kép EMF/WMF formátumban (helyőrzővel)'}); out.push(placeholderBox(g, 'Kép – illeszd be újra', spidOf(pic))); return; }
     const crop = desc(pic, 'srcRect'), o = {id: uid(), type: 'image', name: 'Kép', media: key, ...g, spid: spidOf(pic)};
     if (crop && ['l', 't', 'r', 'b'].some(a => num(crop.getAttribute(a)))) o.crop = Object.fromEntries(['l', 't', 'r', 'b'].map(a => [a, Math.max(0, num(crop.getAttribute(a)) / 100000)]));
     const am = desc(blip, 'alphaModFix'); if (am) o.opacity = num(am.getAttribute('amt'), 100000) / 100000;
@@ -388,6 +392,13 @@ export async function importPptx(buf, {onProgress} = {}) {
       c.getContext('2d').drawImage(img, -w * l, -h * t);
       const nk = 'img' + uid(); media[nk] = c.toDataURL('image/png'); return nk;
     } catch (e) { return key; }
+  }
+  /** Dashed box of the original size / position / rotation, with a note to insert the object again as a picture. */
+  function placeholderBox(g, label, spid) {
+    return {id: uid(), type: 'group', name: label.split(' –')[0] + ' helye', spid, x: 0, y: 0, w: 1, h: 1, rot: 0, children: [
+      {id: uid(), type: 'shape', shape: 'rect', name: 'Helyőrző', ...g, fill: '#f1f1f1', stroke: '#9aa3ad', strokeWidth: 1.5, dash: 'dash'},
+      {id: uid(), type: 'text', name: 'Felirat', x: g.x, y: g.y + g.h / 2 - 20, w: g.w, h: 40, rot: g.rot || 0, _boxH: 40,
+        _text: {paras: [{align: 'center', lvl: 1, bullet: null, runs: [{text: label, size: 18.67, color: '#6b7785'}]}], insets: {l: 8, t: 4, r: 8, b: 4}, anchor: 't'}}]};
   }
   async function readFrame(fr, ctx, out, tf) {
     const rr = xfrmOf(fr);
@@ -413,7 +424,9 @@ export async function importPptx(buf, {onProgress} = {}) {
       return;
     }
     if (/\/table$/.test(uri)) { out.push(readTable(desc(data, 'tbl'), ctx, g, spidOf(fr))); return; }
-    report.skipped.push({slide: ctx.slideNo, what: /chart/.test(uri) ? 'diagram' : /diagram/.test(uri) ? 'SmartArt' : 'egyéb objektum'});
+    const what = /chart/.test(uri) ? 'Diagram' : /diagram/.test(uri) ? 'SmartArt' : 'Objektum';
+    report.skipped.push({slide: ctx.slideNo, what: what.toLowerCase() + ' (helyőrzővel)'});
+    out.push(placeholderBox(g, `${what} – illeszd be újra képként`, spidOf(fr)));
   }
   function readTable(tbl, ctx, g, spid) {
     const cols = descs(desc(tbl, 'tblGrid'), 'gridCol').map(c => px(num(c.getAttribute('w'))));

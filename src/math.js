@@ -60,11 +60,17 @@ function hun(tex, display, bold) {
 
 const cache = new Map();   // key -> Promise<{html,error} | null>
 const done = new Map();    // key -> finished result, used synchronously so re-created views never flicker
-const keyOf = (tex, display, bold) => (display ? 'D' : 'I') + (bold ? 'B' : '') + (opts.hunTrig ? 1 : 0) + (opts.decComma ? 1 : 0) + (opts.displayInline ? 1 : 0) + '|' + tex;
-export function renderSVG(tex, display, bold) {
-  const key = keyOf(tex, display, bold);
+const keyOf = (tex, display, bold, wrap) => (display ? 'D' : 'I') + (bold ? 'B' : '') + (wrap ? 'W' : '') + (opts.hunTrig ? 1 : 0) + (opts.decComma ? 1 : 0) + (opts.displayInline ? 1 : 0) + '|' + tex;
+let queue = Promise.resolve();
+/** wrap: the formula may break into lines (after =, +, −, relations…) at the edge of its text box. */
+export function renderSVG(tex, display, bold, wrap) {
+  const key = keyOf(tex, display, bold, wrap);
   if (cache.has(key)) return cache.get(key);
-  const p = mathReady.then(() => window.MathJax.tex2svgPromise(hun(tex, display, bold), { display: !!display }))
+  // one formula at a time, so the line-break setting belongs to the right formula
+  const p = (queue = queue.then(() => mathReady).then(() => {
+    const lb = window.MathJax.startup.output?.options?.linebreaks; if (lb) lb.inline = !!wrap && !display;
+    return window.MathJax.tex2svgPromise(hun(tex, display, bold), { display: !!display });
+  }).catch(() => null))
     .then(node => {
       if (node.querySelector('[data-mjx-error], merror, [data-mml-node="merror"]')) return { html: node.outerHTML, error: true };
       return { html: node.outerHTML, error: false };
@@ -78,10 +84,10 @@ export function renderSVG(tex, display, bold) {
 export function clearMathCache() { cache.clear(); done.clear(); }
 
 /** Fill an element with the rendered formula (keeps the old picture until the new one is ready). */
-export function renderInto(el, tex, display, onDone, bold) {
+export function renderInto(el, tex, display, onDone, bold, wrap) {
   const tok = el._mj = (el._mj || 0) + 1;
   if (!tex) { el.innerHTML = '<span class="mpending">∅</span>'; return; }
-  const key = keyOf(tex, display, bold);
+  const key = keyOf(tex, display, bold, wrap);
   if (done.has(key)) {
     const r = done.get(key);
     if (r) { if (el._html !== r.html) { el.innerHTML = r.html; el._html = r.html; } }
@@ -90,7 +96,7 @@ export function renderInto(el, tex, display, onDone, bold) {
     return;
   }
   if (!el.firstChild) { const c = document.createElement('span'); c.className = 'mpending'; c.textContent = tex; el.appendChild(c); }
-  renderSVG(tex, display, bold).then(r => {
+  renderSVG(tex, display, bold, wrap).then(r => {
     if (el._mj !== tok) return;
     if (!r) { el.innerHTML = ''; const c = document.createElement('span'); c.className = 'mpending merr'; c.textContent = tex; el.appendChild(c); }
     else { el.innerHTML = r.html; el._html = r.html; }

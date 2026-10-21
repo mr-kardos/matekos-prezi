@@ -15,6 +15,7 @@ export const Anim = (() => {
     disappear: {cls: 'exit', label: 'Eltűnés',               id: 1,  sub: 0, dur: 0,    instant: true},
     fadeOut:   {cls: 'exit', label: 'Elhalványulás',         id: 10, sub: 0, dur: 500},
     flyOut:    {cls: 'exit', label: 'Kiúszás',               id: 2,  sub: 4, dur: 500,  dirs: 'fly'},
+    play:      {cls: 'mediacall', label: 'Videó lejátszása', id: 1, sub: 0, dur: 0, internal: true},
     floatOut:  {cls: 'exit', label: 'Kilebegés',             id: 42, sub: 0, dur: 1000, dirs: 'float'},
     wipeOut:   {cls: 'exit', label: 'Törlés balra',          id: 22, sub: 8, dur: 500},
   };
@@ -34,7 +35,7 @@ export const Anim = (() => {
     return {id: E.id, sub: E.sub};
   };
   const CLASSES = {entr: 'Belépő', emph: 'Kiemelés', exit: 'Kilépő'};
-  const DEFAULT = {entr: 'fade', emph: 'pulse', exit: 'fadeOut'};
+  const DEFAULT = {entr: 'appear', emph: 'pulse', exit: 'disappear'};
   const TRIGGERS = {click: 'Kattintásra', with: 'Az előzővel', after: 'Az előző után'};
   const durOf = a => EFFECTS[a.effect].instant ? 0 : (a.dur ?? EFFECTS[a.effect].dur);
   const delayOf = a => a.delay ?? 0;

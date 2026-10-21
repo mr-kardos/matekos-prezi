@@ -301,12 +301,13 @@ export const MathNode = Node.create({
   addAttributes() {
     return {
       tex: { default: '', parseHTML: el => el.getAttribute('data-tex') || '' },
-      display: { default: false, parseHTML: el => el.getAttribute('data-display') === '1' || el.classList.contains('disp') }
+      display: { default: false, parseHTML: el => el.getAttribute('data-display') === '1' || el.classList.contains('disp') },
+      wrap: { default: false, parseHTML: el => el.getAttribute('data-wrap') === '1' }
     };
   },
   parseHTML() { return [{ tag: 'span[data-tex]' }]; },
   renderHTML({ node }) {
-    return ['span', { class: 'math' + (node.attrs.display ? ' disp' : ''), 'data-tex': node.attrs.tex, 'data-display': node.attrs.display ? '1' : '0' }];
+    return ['span', { class: 'math' + (node.attrs.display ? ' disp' : '') + (node.attrs.wrap ? ' wrap' : ''), 'data-tex': node.attrs.tex, 'data-display': node.attrs.display ? '1' : '0', ...(node.attrs.wrap ? { 'data-wrap': '1' } : {}) }];
   },
   renderText({ node }) { return node.attrs.display ? `$$${node.attrs.tex}$$` : `$${node.attrs.tex}$`; },
   addNodeView() {
@@ -316,9 +317,9 @@ export const MathNode = Node.create({
       const dom = document.createElement('span');
       dom.contentEditable = 'false';
       const paint = () => {
-        dom.className = 'math' + (cur.attrs.display ? ' disp' : '') + (dom._sel ? ' ProseMirror-selectednode' : '');
+        dom.className = 'math' + (cur.attrs.display ? ' disp' : '') + (cur.attrs.wrap ? ' wrap' : '') + (dom._sel ? ' ProseMirror-selectednode' : '');
         dom.setAttribute('data-tex', cur.attrs.tex);
-        renderInto(dom, cur.attrs.tex, cur.attrs.display, () => ext.options.onRendered && ext.options.onRendered(), isBold(cur));
+        renderInto(dom, cur.attrs.tex, cur.attrs.display, () => ext.options.onRendered && ext.options.onRendered(), isBold(cur), cur.attrs.wrap);
       };
       paint();
       // Mouse: click = select the formula; click on its left/right edge = cursor before/after it;

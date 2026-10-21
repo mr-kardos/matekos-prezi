@@ -14,7 +14,7 @@ import { W, H, uid, clone, emptyDoc, textDoc, tableDoc, T, M, isEmptyText, block
   defaultMaster, defaultTemplates, newSlide as makeSlide, syncPlaceholders as syncPh, migrate,
   flatObjects, findObject, parentGroup, bounds, fitGroup, moveObject, scaleFrom } from './model.js';
 import { renderStatic, pieceEls, mountEditor, setTextHooks, mathPending } from './textview.js';
-import { buildPptx, buildPdf, slideCanvas } from './export.js';
+import { buildPptx, buildPdf, slideCanvas, setMediaLookup } from './export.js';
 import { PRESETS, PRESET_ORDER, presetFile } from './presets.js';
 import { MATEKOS_BULLET } from './bullets.js';
 
@@ -184,24 +184,57 @@ const undo = () => { if (editing) return ed.commands.undo(); if (hIdx > 0) resto
 const redo = () => { if (editing) return ed.commands.redo(); if (hIdx < history.length - 1) restore(hIdx + 1); };
 
 /* ================================================================== rendering */
+/** A polygon with rounded corners (radius r, limited by the edges). */
+function roundPoly(pts, r) {
+  if (!r) return 'M' + pts.map(p => p.map(r1).join(' ')).join(' L') + ' Z';
+  const n = pts.length; let d = '';
+  for (let i = 0; i < n; i++) {
+    const p = pts[i], a = pts[(i - 1 + n) % n], b = pts[(i + 1) % n];
+    const la = Math.hypot(a[0] - p[0], a[1] - p[1]), lb = Math.hypot(b[0] - p[0], b[1] - p[1]), rr = Math.min(r, la / 2, lb / 2);
+    const s1 = [p[0] + (a[0] - p[0]) * rr / la, p[1] + (a[1] - p[1]) * rr / la], s2 = [p[0] + (b[0] - p[0]) * rr / lb, p[1] + (b[1] - p[1]) * rr / lb];
+    d += (i ? ' L' : 'M') + s1.map(r1).join(' ') + ' Q' + p.map(r1).join(' ') + ' ' + s2.map(r1).join(' ');
+  }
+  return d + ' Z';
+}
+const DASH = {dash: k => `${r1(k * 3.2)} ${r1(k * 2.2)}`, dot: k => `0.01 ${r1(k * 2)}`, dashdot: k => `${r1(k * 3.2)} ${r1(k * 1.8)} 0.01 ${r1(k * 1.8)}`};
+/** Arrow head at (x, y) pointing in direction (ux, uy): returns [svg, how far the line must stop before (x, y)]. */
+function head(kind, x, y, ux, uy, sw, color) {
+  if (!kind || kind === 'none') return ['', 0];
+  const L = Math.max(7, sw * 3.6), Wd = Math.max(6, sw * 3), nx = -uy, ny = ux, bx = x - ux * L, by = y - uy * L;
+  const p = (a, b) => `${r1(a)},${r1(b)}`;
+  if (kind === 'triangle') return [`<polygon points="${p(x, y)} ${p(bx + nx * Wd / 2, by + ny * Wd / 2)} ${p(bx - nx * Wd / 2, by - ny * Wd / 2)}" fill="${color}"/>`, L * 0.9];
+  if (kind === 'arrow') return [`<polyline points="${p(bx + nx * Wd / 2, by + ny * Wd / 2)} ${p(x, y)} ${p(bx - nx * Wd / 2, by - ny * Wd / 2)}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`, sw * 0.5];
+  if (kind === 'circle') { const rr = Math.max(3.5, sw * 1.8); return [`<circle cx="${r1(x - ux * rr)}" cy="${r1(y - uy * rr)}" r="${r1(rr)}" fill="${color}"/>`, rr]; }
+  if (kind === 'diamond') { const rr = Math.max(4.5, sw * 2.2), cx = x - ux * rr, cy = y - uy * rr;
+    return [`<polygon points="${p(cx + ux * rr, cy + uy * rr)} ${p(cx + nx * rr * .7, cy + ny * rr * .7)} ${p(cx - ux * rr, cy - uy * rr)} ${p(cx - nx * rr * .7, cy - ny * rr * .7)}" fill="${color}"/>`, rr]; }
+  return ['', 0];
+}
 function shapeSVG(o) {
   const line = o.shape === 'line';
   const sw = o.stroke ? (o.strokeWidth ?? 3) : 0, h2 = sw / 2, {w, h} = o;
+  const dash = o.dash && DASH[o.dash] && sw ? ` stroke-dasharray="${DASH[o.dash](sw)}"` : '';
+  const cap = line || o.dash === 'dot' || o.dash === 'dashdot' ? ' stroke-linecap="round"' : '';
   const fill = (o.fill || 'none') + (o.fill && o.fillOpacity != null ? `" fill-opacity="${o.fillOpacity}` : ''),
-    st = o.stroke ? ` stroke="${o.stroke}" stroke-width="${sw}" stroke-linejoin="round"${line ? ' stroke-linecap="round"' : ''}${o.strokeOpacity != null ? ` stroke-opacity="${o.strokeOpacity}"` : ''}` : '';
+    st = o.stroke ? ` stroke="${o.stroke}" stroke-width="${sw}" stroke-linejoin="round"${cap}${dash}${o.strokeOpacity != null ? ` stroke-opacity="${o.strokeOpacity}"` : ''}` : '';
+  const R = Math.max(0, o.radius || 0);
   let body;
-  if (o.shape === 'rect') body = `<rect x="${h2}" y="${h2}" width="${Math.max(0, w - sw)}" height="${Math.max(0, h - sw)}" rx="${o.radius ?? 0}" fill="${fill}"${st}/>`;
+  if (o.shape === 'rect') body = `<rect x="${h2}" y="${h2}" width="${Math.max(0, w - sw)}" height="${Math.max(0, h - sw)}" rx="${R}" fill="${fill}"${st}/>`;
   else if (o.shape === 'ellipse') body = `<ellipse cx="${w / 2}" cy="${h / 2}" rx="${Math.max(0, w / 2 - h2)}" ry="${Math.max(0, h / 2 - h2)}" fill="${fill}"${st}/>`;
-  else if (o.shape === 'triangle') body = `<polygon points="${r1(w / 2)},${r1(h2 * 1.2)} ${r1(w - h2 * 1.2)},${r1(h - h2)} ${r1(h2 * 1.2)},${r1(h - h2)}" fill="${fill}"${st}/>`;
+  else if (o.shape === 'triangle') body = `<path d="${roundPoly([[w / 2, h2 * 1.2], [w - h2 * 1.2, h - h2], [h2 * 1.2, h - h2]], R)}" fill="${fill}"${st}/>`;
   else if (o.shape === 'path' && Array.isArray(o.path)) {
-    const d = o.path.map(([c, ...v]) => c + v.map((n, i) => r1(i % 2 ? n * h : n * w)).join(' ')).join(' ');
-    body = `<path d="${d}" fill="${fill}"${st}/>`;
+    const straight = o.path.every(([c]) => c === 'M' || c === 'L' || c === 'Z') && o.path.filter(([c]) => c === 'M').length === 1;
+    if (R && straight) body = `<path d="${roundPoly(o.path.filter(([c]) => c !== 'Z').map(([, x, y]) => [x * w, y * h]), R)}" fill="${fill}"${st}/>`;
+    else body = `<path d="${o.path.map(([c, ...v]) => c + v.map((n, i) => r1(i % 2 ? n * h : n * w)).join(' ')).join(' ')}" fill="${fill}"${st}/>`;
   }
-  else if (line) body = `<line x1="${r1(Math.min(h2, w / 2))}" y1="${h / 2}" x2="${r1(Math.max(w / 2, w - h2))}" y2="${h / 2}" fill="none"${st}/>`;
+  else if (line) {
+    const y = h / 2, x1 = Math.min(h2, w / 2), x2 = Math.max(w / 2, w - h2), c = o.stroke || '#000';
+    const [hs, cut1] = head(o.headStart, x1, y, -1, 0, sw, c), [he, cut2] = head(o.headEnd, x2, y, 1, 0, sw, c);
+    body = `<line x1="${r1(x1 + cut1)}" y1="${y}" x2="${r1(x2 - cut2)}" y2="${y}" fill="none"${st}/>${hs}${he}`;
+  }
   else {
     const hl = Math.min(h * 0.9, w * 0.45), t = h * 0.22, m = h / 2;
     const pts = [[h2, m - t], [w - hl, m - t], [w - hl, h2], [w - h2, m], [w - hl, h - h2], [w - hl, m + t], [h2, m + t]];
-    body = `<polygon points="${pts.map(p => p.map(r1).join(',')).join(' ')}" fill="${fill}"${st}/>`;
+    body = `<path d="${roundPoly(pts, R)}" fill="${fill}"${st}/>`;
   }
   return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${body}</svg>`;
 }
@@ -233,6 +266,7 @@ function objEl(o, rmode, tpl = false, ox = 0, oy = 0) {
   if (o.rot) r.style.transform = `rotate(${o.rot}deg)`;
   el.appendChild(r);
   if (o.opacity != null && o.opacity < 1) r.style.opacity = o.opacity;
+  if ((o.type === 'image' || o.type === 'video') && o.radius) { r.style.borderRadius = o.radius + 'px'; r.style.overflow = 'hidden'; }
   if (o.type === 'group') { for (const c of o.children) r.appendChild(objEl(c, rmode, tpl, o.x, o.y)); return el; }
   if (o.type === 'text' || o.type === 'table') {
     const empty = isEmptyText(o);
@@ -243,6 +277,13 @@ function objEl(o, rmode, tpl = false, ox = 0, oy = 0) {
     txtStyle(t, o); r.appendChild(t);
     renderStatic(t, o.doc, rmode === 'edit' ? onMathRendered : null, kindOf(o));
   } else if (o.type === 'shape') r.innerHTML = shapeSVG(o);
+  else if (o.type === 'video') {
+    const {l = 0, t = 0, r: rr = 0, b = 0} = o.crop || {}, fw = 1 / (1 - l - rr), fh = 1 / (1 - t - b);
+    const pos = `left:${-l * fw * 100}%;top:${-t * fh * 100}%;width:${fw * 100}%;height:${fh * 100}%`;
+    r.innerHTML = rmode === 'show'
+      ? `<div class="cropbox"><video src="${media[o.media] ?? ''}" preload="auto" playsinline style="${pos}"></video></div>`
+      : `<div class="cropbox"><img src="${media[o.poster] ?? ''}" alt="" draggable="false" style="${pos}"></div>${rmode === 'edit' ? '<span class="vidbadge">▶</span>' : ''}`;
+  }
   else if (o.type === 'image') {
     if (o.crop) { const {l = 0, t = 0, r: rr = 0, b = 0} = o.crop, fw = 1 / (1 - l - rr), fh = 1 / (1 - t - b);
       r.innerHTML = `<div class="cropbox"><img src="${media[o.media] ?? ''}" alt="" draggable="false" style="left:${-l * fw * 100}%;top:${-t * fh * 100}%;width:${fw * 100}%;height:${fh * 100}%"></div>`; }
@@ -625,7 +666,7 @@ function fullRect(o) {
   return {x: o.x - l * fw, y: o.y - t * fh, w: fw, h: fh};
 }
 function startCrop() {
-  const o = selObj(); if (o?.type !== 'image' || o.locked) return;
+  const o = selObj(); if ((o?.type !== 'image' && o?.type !== 'video') || o.locked) return;
   if (o.rot) { toast('Elforgatott kép nem vágható körbe – előbb állítsd 0°-ra.'); return; }
   cropping = o.id; drawSelection(); updateImgBar();
 }
@@ -635,9 +676,82 @@ function drawCropGhost() {
   const o = cropping && objById(cropping); if (!o) return;
   const F = fullRect(o), g = document.createElement('div'); g.className = 'cropghost';
   Object.assign(g.style, {left: F.x + 'px', top: F.y + 'px', width: F.w + 'px', height: F.h + 'px'});
-  g.innerHTML = `<img src="${media[o.media]}" alt="">`; stage.insertBefore(g, stage.firstChild.nextSibling);
+  g.innerHTML = `<img src="${media[o.type === 'video' ? o.poster : o.media]}" alt="">`; stage.insertBefore(g, stage.firstChild.nextSibling);
 }
+/* ---------- videos ---------- */
+const fmtT = t => { t = Math.max(0, t || 0); const m = Math.floor(t / 60), sec = t - m * 60; return m + ':' + (sec < 10 ? '0' : '') + sec.toFixed(1).replace('.', ','); };
+const parseT = v => { v = String(v).trim().replace(',', '.'); if (!v) return NaN; const p = v.split(':').map(Number); return p.length === 2 ? p[0] * 60 + p[1] : p[0]; };
+function videoInfo(url, at = 0.1) {
+  return new Promise((res, rej) => {
+    const v = document.createElement('video'); v.muted = true; v.preload = 'auto'; v.src = url;
+    v.onerror = () => rej(new Error('Ezt a videót a program nem tudja lejátszani (MP4 / WebM ajánlott).'));
+    v.onloadedmetadata = () => { v.currentTime = Math.min(at, (v.duration || 1) / 2); };
+    v.onseeked = () => {
+      const c = document.createElement('canvas'); c.width = v.videoWidth || 640; c.height = v.videoHeight || 360;
+      try { c.getContext('2d').drawImage(v, 0, 0, c.width, c.height); } catch (e) { /* no picture */ }
+      res({w: c.width, h: c.height, duration: v.duration || 0, poster: c.toDataURL('image/jpeg', 0.85)});
+    };
+  });
+}
+async function insertVideo(given) {
+  const f = given || await pickFile('Videó', ['mp4', 'm4v', 'webm', 'mov']); if (!f) return;
+  busy('Videó betöltése…');
+  try {
+    const ext = f.name.split('.').pop().toLowerCase(), mime = {mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime'}[ext] || 'video/mp4';
+    const url = await new Promise(res => { const rd = new FileReader(); rd.onload = () => res(rd.result.replace(/^data:[^;]*;/, `data:${mime};`)); rd.readAsDataURL(new Blob([f.data])); });
+    const info = await videoInfo(url);
+    if (editing) exitEdit();
+    const vk = 'vid' + uid(), pk = 'img' + uid(); media[vk] = url; media[pk] = info.poster;
+    const k = Math.min(1, 800 / info.w, 450 / info.h);
+    addObject({type: 'video', name: nextName('Videó'), media: vk, poster: pk, w: Math.round(info.w * k), h: Math.round(info.h * k), start: 'click', duration: info.duration, trim: {from: 0, to: info.duration}});
+    commit();
+    if (f.data.byteLength > 80e6) toast('Nagy videó: a bemutató fájlja is ekkora lesz.');
+  } catch (e) { toast(e.message || 'A videó nem tölthető be.'); }
+  busy('');
+}
+function updateVidBar() {
+  const o = selObj(), show = o?.type === 'video' && !o.locked && !editing;
+  $('#vidBar').hidden = !show; if (!show) return;
+  $('#vidStart').value = o.start || 'click';
+  for (const [id, v] of [['#vidFrom', o.trim?.from || 0], ['#vidTo', o.trim?.to ?? o.duration]]) if (document.activeElement !== $(id)) $(id).value = fmtT(v);
+  $('#vidLen').textContent = `hossz: ${fmtT((o.trim?.to ?? o.duration) - (o.trim?.from || 0))} / ${fmtT(o.duration)}`;
+  $('#vidCrop').classList.toggle('on', cropping === o.id); $('#vidUncrop').disabled = !o.crop;
+}
+$('#vidBar').addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
+$('#vidStart').onchange = e => { const o = selObj(); if (o?.type !== 'video') return; o.start = e.target.value; commit(); };
+for (const id of ['#vidFrom', '#vidTo']) $(id).addEventListener('change', async () => {
+  const o = selObj(); if (o?.type !== 'video') return;
+  let from = parseT($('#vidFrom').value), to = parseT($('#vidTo').value), d = o.duration || 0;
+  if (!isFinite(from)) from = o.trim?.from || 0; if (!isFinite(to)) to = o.trim?.to ?? d;
+  from = Math.max(0, Math.min(from, d - 0.2)); to = Math.max(from + 0.2, Math.min(to, d));
+  o.trim = {from, to};
+  try { const info = await videoInfo(media[o.media], from + 0.05); const pk = 'img' + uid(); media[pk] = info.poster; o.poster = pk; } catch (e) { /* keep the old picture */ }
+  commit();
+});
+$('#vidPlay').onclick = () => {
+  const o = selObj(); if (o?.type !== 'video') return;
+  const el = stage.querySelector(`.obj[data-id="${o.id}"] .cropbox`); if (!el) return;
+  const img = el.querySelector('img'), v = document.createElement('video');
+  v.src = media[o.media]; v.style.cssText = img.style.cssText; v.className = 'vidprev'; v.playsInline = true;
+  img.replaceWith(v); const from = o.trim?.from || 0, to = o.trim?.to ?? o.duration;
+  const stop = () => { v.pause(); v.replaceWith(img); };
+  v.onloadedmetadata = () => { v.currentTime = from; v.play().catch(stop); };
+  v.ontimeupdate = () => { if (v.currentTime >= to) stop(); };
+  v.onclick = stop;
+};
+$('#vidCrop').onclick = () => cropping ? endCrop() : startCrop();
+$('#vidUncrop').onclick = () => { const o = selObj(); if (!o?.crop) return; Object.assign(o, fullRect(o)); delete o.crop; cropping = null; commit(); };
+/* ---------- lines: arrow heads ---------- */
+function updateLineBar() {
+  const o = selObj(), show = o?.shape === 'line' && !o.locked;
+  $('#lineBar').hidden = !show; if (!show) return;
+  $('#headStart').value = o.headStart || 'none'; $('#headEnd').value = o.headEnd || 'none';
+}
+$('#lineBar').addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
+for (const id of ['headStart', 'headEnd']) $('#' + id).onchange = e => { const o = selObj(); if (o?.shape !== 'line') return; o[id] = e.target.value === 'none' ? undefined : e.target.value; commit(); };
+$('#lineSwap').onclick = () => { const o = selObj(); if (o?.shape !== 'line') return; [o.headStart, o.headEnd] = [o.headEnd, o.headStart]; if (!o.headStart) delete o.headStart; if (!o.headEnd) delete o.headEnd; commit(); };
 function updateImgBar() {
+  updateVidBar(); updateLineBar();
   const o = selObj(), show = o?.type === 'image' && !o.locked && !editing;
   $('#imgBar').hidden = !show; if (!show) { if (cropping && (!o || o.id !== cropping)) { cropping = null; stage.querySelectorAll('.cropghost').forEach(x => x.remove()); } return; }
   $('#imgCrop').classList.toggle('on', cropping === o.id);
@@ -646,7 +760,15 @@ function updateImgBar() {
 $('#imgBar').addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
 $('#imgCrop').onclick = () => cropping ? endCrop() : startCrop();
 $('#imgUncrop').onclick = () => { const o = selObj(); if (!o?.crop) return; Object.assign(o, fullRect(o)); delete o.crop; cropping = null; commit(); };
-$('#imgReplace').onclick = () => { const o = selObj(); if (o?.type !== 'image') return; pickImage(key => { o.media = key; commit(); }); };
+/** The new picture fills the frame without distortion: the extra part is cropped off (can be undone with Eredeti kép). */
+function coverCrop(o, iw, ih) {
+  const A = o.w / o.h, B = iw / ih;
+  if (Math.abs(A - B) < 0.005) { delete o.crop; return; }
+  const c = B > A ? {l: (1 - A / B) / 2, t: 0, r: (1 - A / B) / 2, b: 0} : {l: 0, t: (1 - B / A) / 2, r: 0, b: (1 - B / A) / 2};
+  for (const k in c) c[k] = Math.round(c[k] * 10000) / 10000;
+  o.crop = c;
+}
+$('#imgReplace').onclick = () => { const o = selObj(); if (o?.type !== 'image') return; pickImage((key, img) => { o.media = key; coverCrop(o, img.naturalWidth || img.width, img.naturalHeight || img.height); commit(); }); };
 /** Resize in the object's rotated frame, keeping the opposite handle fixed. Groups scale uniformly. */
 function doResize(o, p, keepRatio) {
   if (cropping === o.id) {                                       // crop: the frame moves over the fixed picture
@@ -666,7 +788,7 @@ function doResize(o, p, keepRatio) {
   const sx = h.includes('e') ? 1 : h.includes('w') ? -1 : 0, sy = h.includes('s') ? 1 : h.includes('n') ? -1 : 0;
   let w = Math.max(16, o0.w + sx * lx), hh = Math.max(16, o0.h + sy * ly);
   if (isText(o) || o.shape === 'line') hh = o0.h;
-  else if ((keepRatio || o.type === 'group' || (o.type === 'image' && !o.crop)) && sx && sy) { const k = Math.max(w / o0.w, hh / o0.h); w = o0.w * k; hh = o0.h * k; }
+  else if ((keepRatio || o.type === 'group' || o.type === 'image' || o.type === 'video') && sx && sy) { const k = Math.max(w / o0.w, hh / o0.h); w = o0.w * k; hh = o0.h * k; }
   else if (o.type === 'group') { const k = sx ? w / o0.w : hh / o0.h; w = o0.w * k; hh = o0.h * k; }
   const cx0 = o0.x + o0.w / 2, cy0 = o0.y + o0.h / 2, ax = -sx * o0.w / 2, ay = -sy * o0.h / 2;
   const Ax = cx0 + ax * c - ay * s, Ay = cy0 + ax * s + ay * c, nx = sx * w / 2, ny = sy * hh / 2;
@@ -773,20 +895,20 @@ function openMath(pos, node) {
   const editor = ed;
   const finish = () => { if (editor && !editor.isDestroyed && !editor.view.hasFocus()) editor.view.dom.focus({preventScroll: true}); };
   openMathEditor({
-    tex, editing: !!node, top: $('#app').getBoundingClientRect().bottom + 10,
-    onApply: t => {
+    tex, editing: !!node, top: $('#app').getBoundingClientRect().bottom + 10, wrap: !!node?.attrs.wrap,
+    onApply: (t, wrap) => {
       if (!editor || editor.isDestroyed) return;
       if (t == null) return finish();
       if (editPos != null) {
         const n = editor.state.doc.nodeAt(editPos);
         if (n && n.type.name === 'math') {
           const tr = editor.state.tr;
-          if (!t) tr.delete(editPos, editPos + n.nodeSize); else tr.setNodeMarkup(editPos, undefined, {...n.attrs, tex: t}, n.marks);
+          if (!t) tr.delete(editPos, editPos + n.nodeSize); else tr.setNodeMarkup(editPos, undefined, {...n.attrs, tex: t, wrap: !!wrap}, n.marks);
           editor.view.dispatch(tr);
         }
         return finish();
       }
-      if (t) editor.chain().focus().insertContent({type: 'math', attrs: {tex: t, display: false}}).run(); else finish();
+      if (t) editor.chain().focus().insertContent({type: 'math', attrs: {tex: t, display: false, wrap: !!wrap}}).run(); else finish();
     },
     onDelete: () => {
       const n = editPos != null && editor.state.doc.nodeAt(editPos);
@@ -1087,6 +1209,9 @@ const section = (key, title, body) => `<section class="psec${secState[key] ? ' c
 const TYPE_LABEL = {text: 'Szöveg', table: 'Táblázat', image: 'Kép', group: 'Csoport'};
 const typeIcon = o => o.type === 'shape' ? o.shape : o.type === 'group' ? 'group' : o.type === 'table' ? 'table' : o.type === 'image' ? 'image' : 'textbox';
 
+/** Objects whose corners can be rounded: rectangles, polygons, pictures, videos. */
+const canRound = o => o.type === 'image' || o.type === 'video' || (o.type === 'shape' && (['rect', 'triangle', 'arrow'].includes(o.shape) ||
+  (o.shape === 'path' && o.path?.every(([c]) => c === 'M' || c === 'L' || c === 'Z') && o.path.filter(([c]) => c === 'M').length === 1)));
 function alignBar(n) {
   const b = (k, ic, t, dis) => `<button class="tb" data-align="${k}" title="${t}" ${dis ? 'disabled' : ''}>${svgIcon(ic)}</button>`;
   return `<div class="alignbar"><span class="albl">${n > 1 ? 'Igazítás egymáshoz' : 'Igazítás a diához'}</span>
@@ -1115,7 +1240,7 @@ function positionBody() {
     ${slider('pH', 'Magasság', round(o.h), 16, H, 1, isTextLike(o) || o.shape === 'line' ? 'disabled title="A magasság a tartalomhoz igazodik"' : lk)}
     ${slider('pR', 'Elforgatás (°)', round(rot), -180, 180, 1, o.type === 'group' ? 'disabled title="Csoport nem forgatható – a tagjai igen"' : lk)}
     ${o.type === 'shape' ? slider('pSW', o.shape === 'line' ? 'Vastagság (px)' : 'Körvonal (px)', o.stroke ? (o.strokeWidth || 0) : 0, o.shape === 'line' ? 1 : 0, 30, 1, lk) : ''}
-    ${o.shape === 'rect' ? slider('pRad', 'Lekerekítés', o.radius || 0, 0, Math.round(Math.min(o.w, o.h) / 2), 1, lk) : ''}
+    ${canRound(o) ? slider('pRad', 'Lekerekítés', o.radius || 0, 0, Math.round(Math.min(o.w, o.h) / 2), 1, lk) : ''}
     ${slider('pOp', 'Átlátszatlanság (%)', round((o.opacity ?? 1) * 100), 5, 100, 1, lk)}
     ${o.placeholder && mode === 'template' ? fld('Helykitöltő mintaszövege (csak szerkesztés közben látszik)', `<input type="text" id="pPrompt" value="${esc(o.prompt ?? '')}">`, true) : ''}
     ${o.placeholder && mode === 'slides' ? `<div class="phint">${esc(phName(o.placeholder))} helykitöltő – helye és formája az elrendezést követi, amíg itt nem módosítod.</div>` : ''}`;
@@ -1416,7 +1541,7 @@ const COMMANDS = {
   bulletList: () => listCmd('bulletList'), orderedList: () => listCmd('orderedList'),
   indent: () => withEditor(c => ed.isActive('listItem') ? c.sinkListItem('listItem').run() : c.shiftIndent(1).run()),
   outdent: () => withEditor(c => ed.isActive('listItem') ? c.liftListItem('listItem').run() : c.shiftIndent(-1).run()),
-  text: addText, math: () => openMath(null, null), image: () => pickImage(null),
+  text: addText, math: () => openMath(null, null), image: () => pickImage(null), video: () => insertVideo(),
   rect: () => addShape('rect'), ellipse: () => addShape('ellipse'), triangle: () => addShape('triangle'), arrow: () => addShape('arrow'), line: () => addShape('line'),
   painter: () => {
     if (painter) { painter = null; document.body.classList.remove('painting'); updateRibbon(); return; }
@@ -1622,7 +1747,9 @@ swatches($('#swFill'), ['#d6eaf8', '#dbe9ee', '#eaf4e4', '#fdf3d7', '#f9e1e1', '
 swatches($('#swStroke'), TEXT_COLORS, c => { const o = selObj(); if (!isShape(o)) return; o.stroke = c === 'none' ? (o.shape === 'line' ? o.stroke : null) : c; if (o.stroke && !o.strokeWidth) o.strokeWidth = 3; commit(); }, 'Nincs körvonal');
 $('#bwStroke').innerHTML = [1, 2, 3, 4, 6, 8].map(w => `<button class="pitem" data-w="${w}">${w} px</button>`).join('');
 $('#bwStroke').onclick = e => { const b = e.target.closest('button'), o = selObj(); if (!b || !isShape(o)) return; o.strokeWidth = +b.dataset.w; if (!o.stroke) o.stroke = '#2f5d8a'; closePops(); commit(); };
-$('#popStroke').onopen = () => { const o = selObj(); for (const b of $('#bwStroke').children) b.classList.toggle('on', isShape(o) && !!o.stroke && +b.dataset.w === o.strokeWidth); };
+$('#dashStroke').onclick = e => { const b = e.target.closest('[data-dash]'), o = selObj(); if (!b || !isShape(o)) return; o.dash = b.dataset.dash || undefined; if (!o.stroke) { o.stroke = '#2f5d8a'; o.strokeWidth ||= 3; } closePops(); commit(); };
+$('#popStroke').onopen = () => {
+  const o_ = selObj(); for (const b of $$('#dashStroke [data-dash]')) b.classList.toggle('on', isShape(o_) && (o_.dash || '') === b.dataset.dash); const o = selObj(); for (const b of $('#bwStroke').children) b.classList.toggle('on', isShape(o) && !!o.stroke && +b.dataset.w === o.strokeWidth); };
 /* font size list, letter spacing */
 const SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 96];
 $('#sizeGrid').innerHTML = SIZES.map(v => `<button class="pitem" data-size="${v}">${v}</button>`).join('');
@@ -1734,7 +1861,7 @@ function startShow(i) {
   show.classList.add('on'); show.requestFullscreen?.().catch(() => {});
   sh = {i, step: 0, busy: null}; loadShowSlide(i, 0, true);
 }
-function stopShow() { show.classList.remove('on'); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); show.querySelector('.slide')?.remove(); sh = null; }
+function stopShow() { show.querySelectorAll('video').forEach(v => v.pause()); show.classList.remove('on'); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); show.querySelector('.slide')?.remove(); sh = null; }
 function showScale(el) { const k = Math.min(innerWidth / W, innerHeight / H); Object.assign(el.style, {transform: `scale(${k})`, left: (innerWidth - W * k) / 2 + 'px', top: (innerHeight - H * k) / 2 + 'px'}); }
 function keyEl(root, key) {
   const [id, part] = key.split('#');
@@ -1760,6 +1887,16 @@ function loadShowSlide(i, step, animateAuto, withTransition) {
   if (offset) { if (animateAuto && step === 0) setTimeout(() => sh && sh.el === el && playGroup(el, groups[0]), wait); else instant(groups[0]); g = 1; }
   for (; g < step + offset; g++) instant(groups[g]);
   info();
+  // videos of the slide
+  const sl = doc.slides[i], vids = [...el.querySelectorAll('.obj.video video')].map(v => ({v, o: flatObjects(sl.objects).find(q => q.id === v.closest('.obj').dataset.id)})).filter(x => x.o);
+  sh.videos = vids;
+  for (const x of vids) {
+    const from = x.o.trim?.from || 0, to = x.o.trim?.to || x.o.duration || 1e9;
+    x.v.addEventListener('loadedmetadata', () => { x.v.currentTime = from; }, {once: true});
+    x.v.addEventListener('timeupdate', () => { if (x.v.currentTime >= to) x.v.pause(); });
+    x.v.addEventListener('click', e => { e.stopPropagation(); x.played = true; x.v.paused ? x.v.play() : x.v.pause(); });
+    if (x.o.start === 'auto' && animateAuto !== false) { x.played = true; setTimeout(() => { if (sh && sh.el === el) x.v.play().catch(() => {}); }, wait + 50); }
+  }
 }
 /** Slide transition in the preview (PowerPoint plays the same effect from the exported file). Returns its duration. */
 function playTransition(old, el, t) {
@@ -1824,6 +1961,8 @@ function playEffect(root, a, running) {
 }
 function showNext() {
   if (sh.busy) { sh.busy.running.forEach(a => a.finish()); return; }
+  const pv = sh.videos?.find(x => !x.played && x.o.start !== 'auto');   // "on click" videos play first, like in PowerPoint
+  if (pv) { pv.played = true; pv.v.currentTime = pv.o.trim?.from || 0; pv.v.play().catch(() => {}); return; }
   const gi = sh.step + sh.offset;
   if (gi < sh.groups.length) { sh.step++; info(); playGroup(sh.el, sh.groups[gi]); return; }
   if (sh.i < doc.slides.length - 1) loadShowSlide(sh.i + 1, 0, true, true); else stopShow();
@@ -1836,12 +1975,12 @@ show.addEventListener('click', () => sh && showNext());
 addEventListener('resize', () => { fitStage(); if (sh) showScale(sh.el); closePops(); });
 
 /* ================================================================== files */
-const EXT = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/svg+xml': 'svg'};
+const EXT = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/svg+xml': 'svg', 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov', 'video/x-m4v': 'm4v'};
 function usedMedia() {
   const keys = new Set();
   if (doc.master.background) keys.add(doc.master.background);
   for (const t of Object.values(doc.templates)) if (t.background) keys.add(t.background);
-  for (const g of [doc.master, ...Object.values(doc.templates), ...doc.slides]) for (const o of g.objects) if (o.media) keys.add(o.media);
+  for (const g of [doc.master, ...Object.values(doc.templates), ...doc.slides]) for (const o of flatObjects(g.objects)) { if (o.media) keys.add(o.media); if (o.poster) keys.add(o.poster); }
   return [...keys];
 }
 async function packMprezi() {
@@ -2037,7 +2176,8 @@ function pasteData(d, at) {
   objs.forEach(o => { reid(o, map); delete o.placeholder; delete o.locked; });
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const o of objs) { const b = bounds(o); x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
-  const dx = at ? at.x - (x0 + x1) / 2 : (d.win === WIN && d.slide === (tgt().id ?? tcur) ? 20 : 0), dy = at ? at.y - (y0 + y1) / 2 : dx;
+  const taken = objs.some(o => tgt().objects.some(q => Math.abs(q.x - o.x) < 1 && Math.abs(q.y - o.y) < 1 && q.type === o.type));
+  const dx = at ? at.x - (x0 + x1) / 2 : (taken ? 20 : 0), dy = at ? at.y - (y0 + y1) / 2 : dx;
   for (const o of objs) { moveObject(o, dx, dy); tgt().objects.push(o); }
   if (mode === 'slides') tgt().anims.push(...(d.anims || []).filter(a => map.has(a.target)).map(a => ({...a, id: uid(), target: map.get(a.target)})));
   setSel(objs.map(o => o.id)); curAnim = null; commit();
@@ -2063,6 +2203,22 @@ function addTextBox(text, at) {
   if (at) { o.x = Math.round(at.x - 310); o.y = Math.round(at.y - 20); }
   commit();
 }
+/** One editable text box per PowerPoint text box (their order kept, placed under each other). */
+async function pastePowerPointText(html, text) {
+  if (editing) exitEdit();
+  const dom = new DOMParser().parseFromString(html, 'text/html');
+  let parts = [...dom.body.querySelectorAll('div, td')].filter(el => !el.querySelector('div, td') && el.textContent.trim());
+  // PowerPoint puts each text box in its own block; fall back to the whole text
+  const blocks = parts.length ? [...new Set(parts.map(el => el.closest('[style*="position"], v\\:shape, div[class]') || el))] : [];
+  const htmls = blocks.length ? blocks.map(b => b.outerHTML) : [html];
+  const ids = [];
+  for (const [i, h] of htmls.entries()) {
+    addTextBox('');
+    const o = selObj(); o.y += i * 70; ids.push(o.id);
+    renderAll(); enterEdit(o.id); ed.view.pasteHTML(h); exitEdit();
+  }
+  setSel(ids.filter(id => objById(id))); drawSelection(); renderProps(); updateRibbon();
+}
 const clipTarget = e => !sh && $('#home').hidden && $('#cfm').hidden && !isMathEditorOpen() && !e.target.closest?.('input, textarea, select, math-field');
 document.addEventListener('copy', e => {
   if (!clipTarget(e) || editing) return;
@@ -2087,6 +2243,11 @@ document.addEventListener('paste', async e => {
   const cd = e.clipboardData, text = cd.getData('text/plain'), d = readClip(text);
   const files = [...cd.files].filter(f => f.type.startsWith('image/'));
   if (d) { e.preventDefault(); e.stopPropagation(); pasteData(d); return; }
+  // text boxes copied in PowerPoint arrive as text + a picture of them: they become editable text boxes
+  const html = cd.getData('text/html');
+  if (html && /PowerPoint|office:powerpoint|urn:schemas-microsoft-com/i.test(html) && text.trim()) {
+    e.preventDefault(); e.stopPropagation(); pastePowerPointText(html, text); return;
+  }
   if (files.length) { e.preventDefault(); e.stopPropagation(); for (const f of files) addImageFromDataURL(await fileToURL(f)); return; }
   if (editing) return;                                           // the text editor pastes text itself
   if (text && text.trim()) {
@@ -2240,6 +2401,7 @@ addEventListener('beforeunload', e => { if (dirty && !isTauri()) e.preventDefaul
 })();
 
 // hooks for automated tests
-window.mprezi = {dbgRender: (o, cb) => renderForImport(o, cb), importBuffer: (data, name) => importPowerPoint({data, name}), snapshotTest: async () => { const c = await slideCanvas(doc, tgt(), renderSlide, layoutOf); return [...c.getContext('2d').getImageData(640, 5, 1, 1).data]; }, get doc() { return doc; }, get media() { return media; }, get editor() { return ed; }, get sel() { return sel; }, set sel(v) { select(v); }, get selIds() { return selIds; }, setSel: ids => { setSel(ids); drawSelection(); renderProps(); updateRibbon(); }, groupSelected, ungroupSelected, addShape, addTable, toggleLock,
+setMediaLookup(k => media[k]);
+window.mprezi = {insertVideo: (data, name) => insertVideo({data, name}), dbgRender: (o, cb) => renderForImport(o, cb), importBuffer: (data, name) => importPowerPoint({data, name}), snapshotTest: async () => { const c = await slideCanvas(doc, tgt(), renderSlide, layoutOf); return [...c.getContext('2d').getImageData(640, 5, 1, 1).data]; }, get doc() { return doc; }, get media() { return media; }, get editor() { return ed; }, get sel() { return sel; }, set sel(v) { select(v); }, get selIds() { return selIds; }, setSel: ids => { setSel(ids); drawSelection(); renderProps(); updateRibbon(); }, groupSelected, ungroupSelected, addShape, addTable, toggleLock,
   gotoSlide, enterEdit, exitEdit, commit, renderAll, buildPptx: () => buildPptx(doc, renderSlide, layoutOf, () => {}),
   buildPdf: m => buildPdf(doc, renderSlide, layoutOf, m, () => {}), renderSlide, packMprezi, unpackMprezi, loadDocument, Anim};
