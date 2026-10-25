@@ -1,6 +1,6 @@
 // Built-in templates. "Üres" is the default of every new presentation (white slides, no decoration).
-// Elearning comes from src/presets/elearning.mprezi (the final design). Maraton and Elmélet are not finished yet:
-// they are shown locked. A file dropped into src/presets/<key>.mprezi overrides the built-in definition below
+// Elearning and Maraton come from src/presets/<key>.mprezi (the final designs). Elmélet is not finished yet:
+// it is shown locked. A file dropped into src/presets/<key>.mprezi overrides the built-in definition below
 // (its master, slide types, text styles and font set are used).
 import { uid, ph, textDoc, T, TITLE_PROMPT } from './model.js';
 
@@ -42,7 +42,7 @@ export const PRESETS = {
     }
   },
   maraton: {
-    label: 'Maraton', note: 'Hamarosan elérhető.', locked: true, swatch: ['#f3f3f3', '#da291c'],
+    label: 'Maraton', note: 'Studium Generale Matematika Maraton sablon: címdia, tartalmi dia, záró dia.', swatch: ['#ffffff', '#da291c'],
     build: () => {
       const c = {title: '#ffffff', subtitle: '#3b3b3b', body: '#1a1a1a', coverTitle: '#da291c'};
       const t = layouts(c, {titleY: 22, bodyY: 150});

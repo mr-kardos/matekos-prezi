@@ -1288,7 +1288,7 @@ function renderProps() {
       <div class="pbgrid">${PRESET_ORDER.map(k => { const P = PRESETS[k], sw = P.swatch || ['#ffffff', '#d8d8d8'];
         if (P.locked) return `<button class="pbcard locked" disabled title="${esc(P.note)}"><i style="--a:${sw[0]};--b:${sw[1]}"></i><span>${svgIcon('lock')}${P.label}</span><small>Hamarosan</small></button>`;
         return `<button class="pbcard${(doc.templateName || '') === P.label ? ' on' : ''}" data-preset="${k}" title="${esc(P.note)}"><i style="--a:${sw[0]};--b:${sw[1]}"></i><span>${P.label}${k === 'ures' ? ' (új, üres)' : ''}</span></button>`; }).join('')}</div>
-      <div class="pbnote">Válassz kész sablont, és szabd tovább lent és a dián – a módosítások ebbe a fájlba mentődnek. Új bemutató mindig az Üres sablonnal indul. A Maraton és az Elmélet sablon hamarosan érkezik.</div></section>`;
+      <div class="pbnote">Válassz kész sablont, és szabd tovább lent és a dián – a módosítások ebbe a fájlba mentődnek. Új bemutató mindig az Üres sablonnal indul. Az Elmélet sablon hamarosan érkezik.</div></section>`;
     const isM = tcur === 'master', L = tgt();
     h += `<section><div class="fgrid">
       ${isM ? '' : fld('Név', `<input type="text" id="pName" value="${esc(L.name)}">`, true)}
