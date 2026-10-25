@@ -547,3 +547,14 @@ body.painting #stage, body.painting #stage *{ cursor:copy !important; }
 .dashg{ display:grid; grid-template-columns:1fr 1fr; gap:2px; }
 .dashg .pitem{ justify-content:center; padding:6px 8px; }
 .dashg svg{ width:60px; height:8px; }
+/* ---------- 1.2 ---------- */
+/* video crop: the cut-off part is hidden like for pictures */
+.obj .cropbox{ position:absolute; inset:0; overflow:hidden; }
+#show .obj.video video{ position:absolute; max-width:none; }
+/* video timeline */
+.vtl{ display:inline-flex; align-items:center; width:220px; height:28px; margin:0 6px; }
+.vtl-track{ position:relative; width:100%; height:8px; border-radius:4px; background:var(--line); }
+.vtl-sel{ position:absolute; top:0; bottom:0; background:var(--accent); border-radius:4px; }
+.vtl-ph{ position:absolute; top:-5px; width:2px; height:18px; background:var(--ink); margin-left:-1px; pointer-events:none; }
+.vtl-h{ position:absolute; top:50%; width:12px; height:20px; margin:-10px 0 0 -6px; border-radius:3px; background:#fff; border:2px solid var(--accent); cursor:ew-resize; box-shadow:0 1px 3px rgba(0,0,0,.25); touch-action:none; }
+.vtl-h:hover{ background:var(--accent-soft); }

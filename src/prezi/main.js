@@ -171,7 +171,7 @@ function commit() {
   syncEditor();
   history = history.slice(0, hIdx + 1); history.push(snapshot());
   if (history.length > 150) history.shift();
-  hIdx = history.length - 1; dirty = true; setStatus(); saveSoon();
+  hIdx = history.length - 1; dirty = true; editedNow = true; setStatus(); saveSoon();
   renderAll();
 }
 function restore(i) {
@@ -693,7 +693,7 @@ function videoInfo(url, at = 0.1) {
     };
   });
 }
-async function insertVideo(given) {
+async function insertVideo(given, at) {
   const f = given || await pickFile('Videó', ['mp4', 'm4v', 'webm', 'mov']); if (!f) return;
   busy('Videó betöltése…');
   try {
@@ -703,7 +703,8 @@ async function insertVideo(given) {
     if (editing) exitEdit();
     const vk = 'vid' + uid(), pk = 'img' + uid(); media[vk] = url; media[pk] = info.poster;
     const k = Math.min(1, 800 / info.w, 450 / info.h);
-    addObject({type: 'video', name: nextName('Videó'), media: vk, poster: pk, w: Math.round(info.w * k), h: Math.round(info.h * k), start: 'click', duration: info.duration, trim: {from: 0, to: info.duration}});
+    const o = addObject({type: 'video', name: nextName('Videó'), media: vk, poster: pk, w: Math.round(info.w * k), h: Math.round(info.h * k), start: 'click', duration: info.duration, trim: {from: 0, to: info.duration}});
+    if (at) { o.x = Math.round(Math.max(0, Math.min(W - o.w, at.x - o.w / 2))); o.y = Math.round(Math.max(0, Math.min(H - o.h, at.y - o.h / 2))); }
     commit();
     if (f.data.byteLength > 80e6) toast('Nagy videó: a bemutató fájlja is ekkora lesz.');
   } catch (e) { toast(e.message || 'A videó nem tölthető be.'); }
@@ -711,33 +712,55 @@ async function insertVideo(given) {
 }
 function updateVidBar() {
   const o = selObj(), show = o?.type === 'video' && !o.locked && !editing;
-  $('#vidBar').hidden = !show; if (!show) return;
+  $('#vidBar').hidden = !show; if (!show) { stopVidPreview(); return; }
   $('#vidStart').value = o.start || 'click';
-  for (const [id, v] of [['#vidFrom', o.trim?.from || 0], ['#vidTo', o.trim?.to ?? o.duration]]) if (document.activeElement !== $(id)) $(id).value = fmtT(v);
-  $('#vidLen').textContent = `hossz: ${fmtT((o.trim?.to ?? o.duration) - (o.trim?.from || 0))} / ${fmtT(o.duration)}`;
+  drawTimeline(o);
   $('#vidCrop').classList.toggle('on', cropping === o.id); $('#vidUncrop').disabled = !o.crop;
 }
-$('#vidBar').addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
-$('#vidStart').onchange = e => { const o = selObj(); if (o?.type !== 'video') return; o.start = e.target.value; commit(); };
-for (const id of ['#vidFrom', '#vidTo']) $(id).addEventListener('change', async () => {
+/** Simple timeline: the whole video, the kept part in red, two handles for its start and end. */
+function drawTimeline(o, cur) {
+  const d = o.duration || 1, from = o.trim?.from || 0, to = o.trim?.to ?? d;
+  $('#vtlSel').style.left = from / d * 100 + '%'; $('#vtlSel').style.width = (to - from) / d * 100 + '%';
+  $('#vtlA').style.left = from / d * 100 + '%'; $('#vtlB').style.left = to / d * 100 + '%';
+  $('#vtlA').title = 'Eleje: ' + fmtT(from); $('#vtlB').title = 'Vége: ' + fmtT(to);
+  $('#vtlPh').hidden = cur == null; if (cur != null) $('#vtlPh').style.left = cur / d * 100 + '%';
+  $('#vidLen').textContent = `${fmtT(from)} – ${fmtT(to)}  (${fmtT(to - from)})`;
+}
+let tlDrag = null;
+for (const hEl of ['#vtlA', '#vtlB']) $(hEl).addEventListener('pointerdown', e => {
   const o = selObj(); if (o?.type !== 'video') return;
-  let from = parseT($('#vidFrom').value), to = parseT($('#vidTo').value), d = o.duration || 0;
-  if (!isFinite(from)) from = o.trim?.from || 0; if (!isFinite(to)) to = o.trim?.to ?? d;
-  from = Math.max(0, Math.min(from, d - 0.2)); to = Math.max(from + 0.2, Math.min(to, d));
-  o.trim = {from, to};
-  try { const info = await videoInfo(media[o.media], from + 0.05); const pk = 'img' + uid(); media[pk] = info.poster; o.poster = pk; } catch (e) { /* keep the old picture */ }
+  e.preventDefault(); e.stopPropagation(); stopVidPreview(); e.target.setPointerCapture(e.pointerId);
+  tlDrag = {end: e.target.dataset.end, o, rect: $('#vidTl .vtl-track').getBoundingClientRect()};
+});
+document.addEventListener('pointermove', e => {
+  if (!tlDrag) return;
+  const {o, rect, end} = tlDrag, d = o.duration || 1, t = Math.max(0, Math.min(d, (e.clientX - rect.left) / rect.width * d));
+  const tr = {from: o.trim?.from || 0, to: o.trim?.to ?? d};
+  if (end === 'from') tr.from = Math.min(t, tr.to - 0.2); else tr.to = Math.max(t, tr.from + 0.2);
+  tr.from = Math.max(0, Math.round(tr.from * 10) / 10); tr.to = Math.min(d, Math.round(tr.to * 10) / 10);
+  o.trim = tr; drawTimeline(o, end === 'from' ? tr.from : tr.to);
+});
+document.addEventListener('pointerup', async () => {
+  if (!tlDrag) return; const {o} = tlDrag; tlDrag = null;
+  try { const info = await videoInfo(media[o.media], (o.trim?.from || 0) + 0.05); const pk = 'img' + uid(); media[pk] = info.poster; o.poster = pk; } catch (e) { /* keep the picture */ }
   commit();
 });
+let vidPrev = null;
+function stopVidPreview() {
+  if (!vidPrev) return; const {v, img} = vidPrev; vidPrev = null;
+  v.pause(); if (v.isConnected) v.replaceWith(img); $('#vidPlay .lbl').textContent = '▶ Előnézet';
+  const o = selObj(); if (o?.type === 'video') drawTimeline(o);
+}
 $('#vidPlay').onclick = () => {
+  if (vidPrev) { stopVidPreview(); return; }
   const o = selObj(); if (o?.type !== 'video') return;
-  const el = stage.querySelector(`.obj[data-id="${o.id}"] .cropbox`); if (!el) return;
-  const img = el.querySelector('img'), v = document.createElement('video');
+  const box = stage.querySelector(`.obj[data-id="${o.id}"] .cropbox`); if (!box) return;
+  const img = box.querySelector('img'), v = document.createElement('video');
   v.src = media[o.media]; v.style.cssText = img.style.cssText; v.className = 'vidprev'; v.playsInline = true;
-  img.replaceWith(v); const from = o.trim?.from || 0, to = o.trim?.to ?? o.duration;
-  const stop = () => { v.pause(); v.replaceWith(img); };
-  v.onloadedmetadata = () => { v.currentTime = from; v.play().catch(stop); };
-  v.ontimeupdate = () => { if (v.currentTime >= to) stop(); };
-  v.onclick = stop;
+  img.replaceWith(v); vidPrev = {v, img, o}; $('#vidPlay .lbl').textContent = '❚❚ Szünet';
+  const from = o.trim?.from || 0, to = o.trim?.to ?? o.duration;
+  v.onloadedmetadata = () => { v.currentTime = from; v.play().catch(stopVidPreview); };
+  v.ontimeupdate = () => { drawTimeline(o, v.currentTime); if (v.currentTime >= to) stopVidPreview(); };
 };
 $('#vidCrop').onclick = () => cropping ? endCrop() : startCrop();
 $('#vidUncrop').onclick = () => { const o = selObj(); if (!o?.crop) return; Object.assign(o, fullRect(o)); delete o.crop; cropping = null; commit(); };
@@ -2055,6 +2078,12 @@ $('#bZoom').onclick = e => showPop('popZoom', e.currentTarget);
 $('#popZoom').onopen = () => { for (const b of $$('#popZoom [data-zoom]')) b.classList.toggle('on', b.dataset.zoom === String(zoom)); };
 $('#popZoom').addEventListener('click', e => { const b = e.target.closest('[data-zoom]'); if (!b) return; closePops(); zoom = b.dataset.zoom === 'auto' ? 'auto' : +b.dataset.zoom; $('#zoomLabel').textContent = zoom === 'auto' ? '' : zoom + '%'; fitStage(); });
 $('#bExport').onclick = e => showPop('popExport', e.currentTarget);
+$('#docTitle').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return; e.preventDefault();
+  doc.title = e.target.value.trim() || 'Névtelen bemutató';
+  e.target.blur();
+  if (!currentFileName()) doSave(false);          // a new presentation: ask where to save it now
+});
 $('#docTitle').onchange = e => { doc.title = e.target.value.trim() || 'Névtelen bemutató'; dirty = true; setStatus(); saveSoon(); };
 /* ---------- PowerPoint import ---------- */
 let impHost = null;
@@ -2118,10 +2147,22 @@ async function importPowerPoint(given) {
     showReport('PowerPoint importálása kész', lines);
   } catch (e) { console.error(e); busy(''); toast('Az importálás nem sikerült: ' + (e.message || e)); }
 }
+let editedNow = false;                 // changes made since the app started (a restored draft alone does not count)
+/** Unsaved changes when the window is closed: save / quit without saving / stay. */
+function quitBox() {
+  return new Promise(res => {
+    const box = $('#cfm'), extra = document.createElement('button');
+    extra.className = 'btn'; extra.textContent = 'Mentés és kilépés';
+    $('#cfmMsg').textContent = 'A bemutatóban nem mentett módosítások vannak. Kilépsz mentés nélkül?';
+    $('#cfmYes').textContent = 'Kilépés mentés nélkül'; $('#cfmNo').after(extra); box.hidden = false;
+    const done = v => { box.hidden = true; extra.remove(); $('#cfmYes').onclick = $('#cfmNo').onclick = null; res(v); };
+    $('#cfmYes').onclick = () => done('quit'); $('#cfmNo').onclick = () => done('stay'); extra.onclick = () => done('save');
+  });
+}
 async function newPresentation() {
-  if (dirty && !await confirmBox(dirty ? 'Új bemutatót kezdesz. A mostani nem mentett módosításai elvesznek. Folytatod?' : 'Új, üres bemutatót kezdesz. Folytatod?', 'Új bemutató')) return false;
+  if (dirty && editedNow && !await confirmBox(dirty ? 'Új bemutatót kezdesz. A mostani nem mentett módosításai elvesznek. Folytatod?' : 'Új, üres bemutatót kezdesz. Folytatod?', 'Új bemutató')) return false;
   if (editing) stopEditor();
-  blankDoc(); doc.slides.push(newSlide('cimdia')); loadDocument(doc, media, null, null); saveSoon(); sessionOpen = true; showHome(false); return true;
+  blankDoc(); doc.slides.push(newSlide('cimdia')); loadDocument(doc, media, null, null); saveSoon(); sessionOpen = true; editedNow = false; showHome(false); return true;
 }
 /* home screen (as in Matekos Doksi) */
 function showHome(show) {
@@ -2189,7 +2230,7 @@ function addImageFromDataURL(url, at) {
     const key = 'img' + uid(); media[key] = url;
     const k = Math.min(1, 800 / img.width, 500 / img.height), w = Math.round(img.width * k), h = Math.round(img.height * k);
     const o = addObject({type: 'image', name: nextName('Kép'), media: key, w, h});
-    if (at) { o.x = Math.round(at.x - w / 2); o.y = Math.round(at.y - h / 2); }
+    if (at) { o.x = Math.round(Math.max(0, Math.min(W - w, at.x - w / 2))); o.y = Math.round(Math.max(0, Math.min(H - h, at.y - h / 2))); }
     commit();
   };
   img.src = url;
@@ -2242,7 +2283,9 @@ document.addEventListener('paste', async e => {
   if (!clipTarget(e)) return;
   const cd = e.clipboardData, text = cd.getData('text/plain'), d = readClip(text);
   const files = [...cd.files].filter(f => f.type.startsWith('image/'));
+  const vids = [...cd.files].filter(f => f.type.startsWith('video/') || /\.(mp4|m4v|webm|mov)$/i.test(f.name));
   if (d) { e.preventDefault(); e.stopPropagation(); pasteData(d); return; }
+  if (vids.length) { e.preventDefault(); e.stopPropagation(); for (const f of vids) await insertVideo({data: await f.arrayBuffer(), name: f.name}); return; }
   // text boxes copied in PowerPoint arrive as text + a picture of them: they become editable text boxes
   const html = cd.getData('text/html');
   if (html && /PowerPoint|office:powerpoint|urn:schemas-microsoft-com/i.test(html) && text.trim()) {
@@ -2261,8 +2304,10 @@ work.addEventListener('dragover', e => { if ([...e.dataTransfer.types].some(t =>
 work.addEventListener('drop', async e => {
   const dt = e.dataTransfer, text = dt.getData('text/plain'), d = readClip(text), at = dropPoint(e);
   const files = [...dt.files].filter(f => f.type.startsWith('image/'));
-  if (!d && !files.length && !text) return;
+  const vids = [...dt.files].filter(f => f.type.startsWith('video/') || /\.(mp4|m4v|webm|mov)$/i.test(f.name));
+  if (!d && !files.length && !vids.length && !text) return;
   e.preventDefault();
+  if (vids.length) { for (const f of vids) await insertVideo({data: await f.arrayBuffer(), name: f.name}, at); return; }
   if (d) { if (d.win === WIN && d.kind === 'objects' && d.slide === (tgt().id ?? tcur)) return; pasteData(d, d.kind === 'objects' ? at : null); return; }
   if (files.length) { for (const f of files) addImageFromDataURL(await fileToURL(f), at); return; }
   if (text.trim()) addTextBox(text, at);
@@ -2395,6 +2440,17 @@ addEventListener('beforeunload', e => { if (dirty && !isTauri()) e.preventDefaul
   fontLoad.then(() => { measureTexts(); drawSelection(); drawBadges(); renderThumbs(); });
   mathReady.then(() => setTimeout(() => { measureTexts(); drawSelection(); drawBadges(); }, 100));
   if (isTauri()) {
+    try {
+      const {getCurrentWindow} = await import('@tauri-apps/api/window'), win = getCurrentWindow();
+      win.onCloseRequested(async ev => {
+        if (!dirty) return;
+        ev.preventDefault();
+        const r = await quitBox();
+        if (r === 'stay') return;
+        if (r === 'save') { await doSave(false); if (dirty) return; }
+        clearTimeout(autoT); await autosave({...autoValue(), dirty: false}); await win.destroy();
+      });
+    } catch (e) { /* not available */ }
     try { const p = await watchOpenedFiles(async path => openResult(await openPathFile(path))); if (p) openResult(await openPathFile(p)); }
     catch (e) { /* not available */ }
   }

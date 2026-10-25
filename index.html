@@ -57,8 +57,6 @@
       <button class="tb mini" data-pop="popBullet" data-k="text" data-icon="chev" title="Felsorolásjel: szimbólum vagy kép"></button>
       <button class="tb" data-cmd="orderedList" data-k="text" data-icon="num" title="Számozott lista"></button>
       <button class="tb mini" data-pop="popNum" data-k="text" data-icon="chev" title="Számozás stílusa"></button>
-      <button class="tb" data-cmd="outdent" data-k="text" data-icon="outdent" title="Behúzás csökkentése (listában Shift+Tab)"></button>
-      <button class="tb" data-cmd="indent" data-k="text" data-icon="indent" title="Behúzás növelése (listában Tab)"></button>
       <button class="tb" data-pop="popLine" data-k="text" data-icon="lineH" title="Sorköz"></button>
       <button class="tb" data-pop="popPara" data-k="text" data-icon="para" title="Bekezdés: behúzások és bekezdésköz"></button>
       <button class="tb" data-pop="popSpacing" data-k="text" data-icon="spacing" title="Betűköz"></button>
@@ -67,8 +65,8 @@
       <button class="tb" data-cmd="text" data-icon="textbox" title="Szövegdoboz (T)"><span class="lbl">Szövegdoboz</span></button>
       <button class="tb" data-cmd="math" data-icon="sigma" title="Képlet (Ctrl/⌘+M) – vagy írd $…$ közé a szövegben"><span class="lbl">Képlet</span></button>
       <button class="tb" data-pop="popTable" data-icon="table" title="Táblázat beszúrása (önálló objektumként)"></button>
-      <button class="tb" data-cmd="image" data-icon="image" title="Kép beszúrása"></button>
-      <button class="tb" data-cmd="video" data-icon="video" title="Videó beszúrása (MP4)"></button>
+      <button class="tb" data-cmd="image" data-icon="image" title="Kép beszúrása – PNG, JPG, GIF, WebP, SVG (beillesztés és behúzás is működik)"></button>
+      <button class="tb" data-cmd="video" data-icon="video" title="Videó beszúrása – MP4 (ajánlott), M4V, MOV, WebM (beillesztés és behúzás is működik)"></button>
       <button class="tb" data-cmd="rect" data-icon="rect" title="Téglalap (R)"></button>
       <button class="tb" data-cmd="ellipse" data-icon="ellipse" title="Ellipszis (E)"></button>
       <button class="tb" data-cmd="triangle" data-icon="triangle" title="Háromszög"></button>
@@ -94,10 +92,12 @@
     <span class="ctxlabel">Videó</span>
     <label class="ctxf">Indítás <select id="vidStart"><option value="click">Kattintásra</option><option value="auto">Automatikusan</option></select></label>
     <span class="ctxsep"></span>
-    <label class="ctxf">Eleje <input id="vidFrom" type="text" inputmode="decimal" title="Ettől a ponttól játssza (perc:mp vagy mp)"></label>
-    <label class="ctxf">Vége <input id="vidTo" type="text" inputmode="decimal" title="Eddig játssza (perc:mp vagy mp)"></label>
+    <div class="vtl" id="vidTl" title="Húzd a két végét a videó elejének és végének kijelöléséhez">
+      <div class="vtl-track"><div class="vtl-sel" id="vtlSel"></div><div class="vtl-ph" id="vtlPh"></div>
+        <div class="vtl-h" id="vtlA" data-end="from"></div><div class="vtl-h" id="vtlB" data-end="to"></div></div>
+    </div>
     <span class="vidlen" id="vidLen"></span>
-    <button class="tb wide" id="vidPlay" title="Lejátszás a beállított szakaszon"><span class="lbl">▶ Próba</span></button>
+    <button class="tb wide" id="vidPlay" title="A kijelölt szakasz lejátszása / megállítása"><span class="lbl">▶ Előnézet</span></button>
     <span class="ctxsep"></span>
     <button class="tb wide" id="vidCrop" data-icon="crop" title="A videó képének körbevágása"><span class="lbl">Körbevágás</span></button>
     <button class="tb wide" id="vidUncrop" data-icon="uncrop" title="A teljes kép visszaállítása"><span class="lbl">Eredeti kép</span></button>
@@ -293,7 +293,7 @@
   <div class="home-card">
     <img class="home-logo-img" src="/app-icon.png" alt="" width="84" height="84">
     <h1>Matekos Prezi</h1>
-    <p class="home-sub home-ver">v1.1</p>
+    <p class="home-sub home-ver">v1.2.1</p>
     <div class="home-btns">
       <button class="hbtn primary" id="homeNew"><span class="hico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span>Új bemutató</button>
       <button class="hbtn" id="homeOpen"><span class="hico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 10h18"/></svg></span>Meglévő megnyitása</button>
