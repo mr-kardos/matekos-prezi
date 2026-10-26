@@ -53,6 +53,26 @@ export async function savePresentation(blob, title, saveAs) {
   return download(safeName(title) + '.mprezi', blob);
 }
 
+/** Rename the presentation's own file (title box). Returns the new file name, or null when not possible. */
+export async function renameCurrentFile(newTitle) {
+  const name = safeName(newTitle) + '.mprezi';
+  if (isTauri() && currentPath) {
+    if (baseName(currentPath) === name) return name;
+    const {rename, exists} = await import('@tauri-apps/plugin-fs');
+    const sep = currentPath.includes('\\') && !currentPath.includes('/') ? '\\' : '/';
+    const target = currentPath.slice(0, currentPath.length - baseName(currentPath).length) + name;
+    if (await exists(target)) throw new Error(`Ebben a mappában már van „${name}” nevű fájl.`);
+    await rename(currentPath, target);
+    currentPath = target; return name;
+  }
+  if (currentHandle && currentHandle.move) { if (currentHandle.name !== name) await currentHandle.move(name); return currentHandle.name; }
+  return null;
+}
+/** Does the presentation's file still exist where it was (it may have been renamed or moved outside the app)? */
+export async function currentFileExists() {
+  if (isTauri() && currentPath) { try { const {exists} = await import('@tauri-apps/plugin-fs'); return await exists(currentPath); } catch (e) { return true; } }
+  return true;
+}
 /** Export files (.pptx, .pdf). */
 export async function saveExport(blob, title, ext, label) {
   if (isTauri()) {

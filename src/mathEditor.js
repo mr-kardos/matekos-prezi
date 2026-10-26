@@ -103,7 +103,14 @@ const CATS = [
   ]]
 ];
 /* ---- the dialog ---- */
-let dlg, mf, texBox, prev, onApply = null, onDelete = null, cats, palette, curCat = 0, dragging = null;
+let dlg, mf, texBox, prev, onApply = null, onDelete = null, cats, palette, curCat = 'fav', dragging = null;
+/* favourites: chosen palette buttons, kept by the app (for every presentation); first start: the old quick buttons */
+const FAV_KEY = 'matekosprezi.mathFav';
+let favMode = false;
+const ALL_ITEMS = () => [...CATS.flatMap(c => c[1]), ...FREQUENT];
+function favList() { try { const v = JSON.parse(localStorage.getItem(FAV_KEY)); if (Array.isArray(v)) return v; } catch (e) { /* none yet */ } return FREQUENT.map(it => it[1]); }
+function saveFav(list) { try { localStorage.setItem(FAV_KEY, JSON.stringify(list)); } catch (e) { /* storage full / off */ } }
+const favItems = () => favList().map(t => ALL_ITEMS().find(it => it[1] === t)).filter(Boolean);
 
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function btn(item, i, group) {
@@ -144,7 +151,8 @@ function build() {
   dlg = document.getElementById('mathDlg');
   dlg.innerHTML = `
     <div class="md-head" id="mdHead"><b>Képletszerkesztő</b><span class="phint">Építsd fel gombokkal vagy gépeléssel · Enter vagy Ctrl+M: kész · Esc: bezár · Ctrl+H: kitevő · Ctrl+L: index</span><button class="md-x" id="mdX" aria-label="Bezárás">×</button></div>
-    <div class="mk-tabs" id="mkTabs">${CATS.map((c, i) => `<button data-c="${i}" class="${i === 0 ? 'on' : ''}">${c[0]}</button>`).join('')}</div>
+    <div class="mk-tabs" id="mkTabs"><button data-c="fav" class="on fav">★ Kedvencek</button>${CATS.map((c, i) => `<button data-c="${i}">${c[0]}</button>`).join('')}</div>
+    <div class="mk-favbar" id="mkFavBar" hidden><span>Kattints a gombokra (bármelyik lapon), amelyeket a Kedvencek közé szeretnél – a pirosak lesznek ott. Újra kattintva kikerülnek.</span><button class="btn primary" id="mkFavDone">Kész</button></div>
     <div class="mk-row mk-pal" id="mkPal"></div>
     <div class="md-fwrap" id="mdFwrap"><div class="md-fscroll" id="mdFscroll"><math-field id="mdField" math-virtual-keyboard-policy="manual"></math-field></div><div class="md-fgrip" id="mdFgrip" title="Húzd a mező (és a betűk) nagyításához"></div></div>
     <details class="md-tex"><summary>TeX-kód</summary><textarea id="mdTex" spellcheck="false" rows="2"></textarea></details>
@@ -196,13 +204,20 @@ function build() {
   texBox.addEventListener('input', () => { mf.value = texBox.value; markPlaceholders(); syncFromField(); });
   texBox.addEventListener('keydown', e => { if ((e.key === 'Enter' && !e.shiftKey) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'm')) { e.preventDefault(); apply(); } else if (e.key === 'Escape') close(); });
   const pick = e => {
+    if (e.target.closest('#mkFavAdd')) { setFavMode(true); return; }
     const b = e.target.closest('.mk'); if (!b) return;
-    const list = b.dataset.g === 'f' ? FREQUENT : CATS[curCat][1];
-    insert(list[+b.dataset.i][1]);
+    const list = b.dataset.g === 'v' ? favItems() : CATS[curCat][1], it = list[+b.dataset.i]; if (!it) return;
+    if (favMode) {                                              // choosing favourites: toggle, no inserting
+      const f = favList(), k = f.indexOf(it[1]);
+      if (k >= 0) f.splice(k, 1); else f.push(it[1]);
+      saveFav(f); showCat(curCat); return;
+    }
+    insert(it[1]);
   };
+  dlg.querySelector('#mkFavDone').addEventListener('click', () => { setFavMode(false); showCat('fav'); });
   for (const id of ['#mkPal']) { const el = dlg.querySelector(id); el.addEventListener('mousedown', e => e.preventDefault()); el.addEventListener('click', pick); }
   cats.addEventListener('mousedown', e => e.preventDefault());
-  cats.addEventListener('click', e => { const b = e.target.closest('[data-c]'); if (b) showCat(+b.dataset.c); });
+  cats.addEventListener('click', e => { const b = e.target.closest('[data-c]'); if (b) showCat(b.dataset.c === 'fav' ? 'fav' : +b.dataset.c); });
   dlg.querySelector('#mdX').addEventListener('click', close);
   dlg.querySelector('#mdCancel').addEventListener('click', close);
   dlg.querySelector('#mdOk').addEventListener('click', apply);
@@ -243,7 +258,11 @@ function build() {
       h.addEventListener('pointermove', mv); h.addEventListener('pointerup', up);
     });
   }
-  showCat(0);
+  showCat('fav');
+}
+function setFavMode(on) {
+  favMode = on; dlg.querySelector('#mkFavBar').hidden = !on; dlg.classList.toggle('favmode', on);
+  if (on && curCat === 'fav') showCat(0); else showCat(curCat);
 }
 /** TeX shown on a palette button: the template with sample letters and empty boxes. */
 function labelTex(tpl) {
@@ -252,11 +271,15 @@ function labelTex(tpl) {
 }
 function showCat(i) {
   curCat = i;
-  for (const b of cats.children) b.classList.toggle('on', +b.dataset.c === i);
-  palette.innerHTML = CATS[i][1].map((it, k) => btn(it, k, 'c')).join('');
-  CATS[i][1].forEach((it, k) => {
+  for (const b of cats.children) b.classList.toggle('on', b.dataset.c === String(i));
+  const fav = i === 'fav', items = fav ? favItems() : CATS[i][1], favs = new Set(favList());
+  palette.innerHTML = items.map((it, k) => btn(it, k, fav ? 'v' : 'c')).join('')
+    + (fav && !favMode ? `<button class="mk mk-addfav" id="mkFavAdd" title="Gombok hozzáadása a kedvencekhez (és eltávolítása)">＋ Kedvencek szerkesztése</button>` : '')
+    + (fav && !items.length ? '<span class="mk-empty">Még nincs kedvenc.</span>' : '');
+  if (favMode) palette.querySelectorAll('.mk[data-i]').forEach(b => b.classList.toggle('isfav', favs.has(items[+b.dataset.i][1])));
+  items.forEach((it, k) => {
     const t = labelTex(it[1]); if (!t) return;
-    const b = palette.querySelector(`.mk[data-i="${k}"]`), keep = b.innerHTML;
+    const b = palette.querySelector(`.mk[data-i="${k}"]`); if (!b) return; const keep = b.innerHTML;
     const span = document.createElement('span'); span.className = 'mkm';
     renderInto(span, t, true, () => {
       const err = span.querySelector('[data-mjx-error], .merr');
@@ -265,7 +288,7 @@ function showCat(i) {
     });
   });
 }
-function hide() { dlg.hidden = true; onApply = onDelete = null; }
+function hide() { dlg.hidden = true; onApply = onDelete = null; if (favMode) setFavMode(false); }
 function close() { const a = onApply; hide(); a && a(null); }
 function apply() { const a = onApply, t = cleanTex(), w = dlg.querySelector('#mdWrap').checked; hide(); a && a(t, w); }
 

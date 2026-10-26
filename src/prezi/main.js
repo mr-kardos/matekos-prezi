@@ -8,7 +8,7 @@ import { FONT_SETS, DEFAULT_FONT, applyTextFont, loadTextFamily, allFamilies, fa
 import { openMathEditor, isMathEditorOpen, applyMathEditor } from '../mathEditor.js';
 import { tableContext } from '../editor/extensions.js';
 import { svg as svgIcon } from '../icons.js';
-import { pickFile, isTauri, savePresentation, saveExport, openPresentation, openPathFile, watchOpenedFiles, setCurrentPath, getCurrentPath, getCurrentHandle, setCurrentHandle, currentFileName, autosave, loadAutosave } from '../files.js';
+import { renameCurrentFile, currentFileExists, pickFile, isTauri, savePresentation, saveExport, openPresentation, openPathFile, watchOpenedFiles, setCurrentPath, getCurrentPath, getCurrentHandle, setCurrentHandle, currentFileName, autosave, loadAutosave } from '../files.js';
 import { Anim } from './anim.js';
 import { W, H, uid, clone, emptyDoc, textDoc, tableDoc, T, M, isEmptyText, blockCount, makeBackground, phName, ph, TITLE_PROMPT,
   defaultMaster, defaultTemplates, newSlide as makeSlide, syncPlaceholders as syncPh, migrate,
@@ -2026,14 +2026,29 @@ async function unpackMprezi(buf) {
   delete m.media; delete m.app;
   return {doc: migrate(m), media: md};
 }
+/** The title box always shows the presentation's file name (after Save as, opening, renaming). */
+function titleFromFile() {
+  const f = currentFileName(); if (!f) return;
+  doc.title = f.replace(/\.mprezi$/i, ''); $('#docTitle').value = doc.title;
+}
+/** Title box changed: a saved presentation's file is renamed to match. */
+async function renameFromTitle(v) {
+  const t = v.trim() || 'Névtelen bemutató';
+  if (!currentFileName()) { doc.title = t; saveSoon(); return; }
+  try {
+    const n = await renameCurrentFile(t);
+    if (n) { doc.title = n.replace(/\.mprezi$/i, ''); $('#docTitle').value = doc.title; toast('Átnevezve: ' + n); saveSoon(); }
+    else { doc.title = t; saveSoon(); }
+  } catch (e) { toast('Az átnevezés nem sikerült: ' + (e?.message || e)); titleFromFile(); }
+}
 async function doSave(saveAs) {
   if (editing) exitEdit(); closePops();
-  try { const msg = await savePresentation(await packMprezi(), doc.title, saveAs); if (msg === 'Mentve') { dirty = false; saveSoon(); setStatus(); } else { setStatus(msg); toast(msg); setTimeout(() => setStatus(), 2500); } }
+  try { const msg = await savePresentation(await packMprezi(), doc.title, saveAs); if (msg === 'Mentve') { titleFromFile(); dirty = false; saveSoon(); setStatus(); } else { setStatus(msg); toast(msg); setTimeout(() => setStatus(), 2500); } }
   catch (e) { setStatus('A mentés nem sikerült: ' + (e?.message || e)); }
 }
 function loadDocument(d, m, name, path, handle) {
   setCurrentHandle(handle ?? null);
-  doc = d; media = m; if (name) doc.title = doc.title || name.replace(/\.mprezi$/i, '');
+  doc = d; media = m; if (name) doc.title = name.replace(/\.(mprezi|pptx)$/i, '');   // the file's own name
   doc.font = FONT_SETS[doc.font] ? doc.font : DEFAULT_FONT;
   if (doc.font !== activeMathFont()) { setCurrentPath(path ?? null); resetHistory(); restartWithFont(doc.font); return; }
   mode = 'slides'; cur = 0; setSel([]); curAnim = null; setCurrentPath(path ?? null);
@@ -2078,13 +2093,16 @@ $('#bZoom').onclick = e => showPop('popZoom', e.currentTarget);
 $('#popZoom').onopen = () => { for (const b of $$('#popZoom [data-zoom]')) b.classList.toggle('on', b.dataset.zoom === String(zoom)); };
 $('#popZoom').addEventListener('click', e => { const b = e.target.closest('[data-zoom]'); if (!b) return; closePops(); zoom = b.dataset.zoom === 'auto' ? 'auto' : +b.dataset.zoom; $('#zoomLabel').textContent = zoom === 'auto' ? '' : zoom + '%'; fitStage(); });
 $('#bExport').onclick = e => showPop('popExport', e.currentTarget);
-$('#docTitle').addEventListener('keydown', e => {
+let titleBusy = false;
+$('#docTitle').addEventListener('keydown', async e => {
+  if (e.key === 'Escape') { e.target.value = doc.title; e.target.blur(); return; }
   if (e.key !== 'Enter') return; e.preventDefault();
-  doc.title = e.target.value.trim() || 'Névtelen bemutató';
-  e.target.blur();
-  if (!currentFileName()) doSave(false);          // a new presentation: ask where to save it now
+  titleBusy = true; const v = e.target.value; e.target.blur();
+  if (!currentFileName()) { doc.title = v.trim() || 'Névtelen bemutató'; await doSave(false); }   // a new presentation: ask where to save it now
+  else await renameFromTitle(v);
+  titleBusy = false;
 });
-$('#docTitle').onchange = e => { doc.title = e.target.value.trim() || 'Névtelen bemutató'; dirty = true; setStatus(); saveSoon(); };
+$('#docTitle').onchange = e => { if (!titleBusy && e.target.value.trim() !== doc.title) renameFromTitle(e.target.value); };
 /* ---------- PowerPoint import ---------- */
 let impHost = null;
 async function waitMath(el) {
@@ -2431,7 +2449,12 @@ addEventListener('beforeunload', e => { if (dirty && !isTauri()) e.preventDefaul
   else demoDoc();
   doc.font = fontKey;
   resetHistory();
-  if (saved?.path) setCurrentPath(saved.path);
+  if (saved?.path) {
+    setCurrentPath(saved.path);
+    // renamed or moved outside the app since the last session: the old place is no longer used
+    if (!await currentFileExists()) { toast(`A(z) „${saved.path.split(/[\\/]/).pop()}” fájl már nincs a korábbi helyén – mentéskor új helyet kérdez.`); setCurrentPath(null); }
+    else titleFromFile();
+  }
   if (saved?.handle) setCurrentHandle(saved.handle);
   if (saved?.dirty) { dirty = true; setStatus(); }
   fitStage(); renderAll();

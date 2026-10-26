@@ -1,4 +1,4 @@
-# Matekos Prezi 1.2.2
+# Matekos Prezi 1.3
 
 Presentation editor with live inline TeX, the twin of **Matekos Doksi**. Built with **TipTap**
 (text editor), **MathJax 4** (formulas), **MathLive** (visual formula editor) and **Tauri 2**
@@ -70,6 +70,9 @@ Browser test version: `npm run build:web` → one self-contained `dist-web/index
   pictures, text, layer rows and slide thumbnails can be dragged into another window.
 * Pictures: crop (undoable), replace; every object has an opacity setting (also imported / exported).
 * Find and replace (Ctrl/⌘+F) across all slides.
+* Formula editor: "Kedvencek" tab with the user's favourite buttons (kept by the app for every presentation).
+* The title box always shows the file name: Save as, renaming in the title box (renames the file) and files
+  renamed outside the app stay in step.
 * Videos (MP4 recommended): start on click / automatically, trimming, crop, rounded corners; played in the
   slideshow and exported to PowerPoint (video file, trim, play command in the timing).
 * Lines: arrow heads at both ends; solid / dashed / dotted / dash-dot outlines; rounded corners for polygons
