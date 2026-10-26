@@ -43,21 +43,27 @@ export function startMathJax(key = 'bonum') {
   document.head.appendChild(s);
 }
 /* Formulas next to a text in another math-capable font use that font's math letters. MathJax picks its math
-   font at start-up, so each further font gets its own MathJax in a hidden frame (started when first needed). */
-const frames = new Map();
-function frameFor(key) {
-  if (frames.has(key)) return frames.get(key);
-  const p = new Promise((res, rej) => {
-    const f = document.createElement('iframe');
-    f.setAttribute('aria-hidden', 'true'); f.tabIndex = -1;
-    f.style.cssText = 'position:fixed;left:-9999px;top:0;width:10px;height:10px;border:0;visibility:hidden';
-    document.body.appendChild(f);
-    const w = f.contentWindow, local = LOCAL();
-    w.MathJax = mjConfig(key, local, () => { w.MathJax.startup.defaultReady(); w.MathJax.startup.promise.then(() => res(w), rej); });
-    const sc = w.document.createElement('script'); sc.src = MJ_SRC(); w.document.head.appendChild(sc);
-    setTimeout(() => rej(new Error('math font timeout')), 30000);
+   font at start-up, so every further font gets its own small MathJax document (same TeX settings, its own SVG
+   output with that font), loaded the first time it is needed – in this same page, without blocking the others. */
+const extra = new Map();     // font key -> Promise<{doc, out, queue}>
+function docFor(key) {
+  if (extra.has(key)) return extra.get(key);
+  const p = mathReady.then(async () => {
+    const MJ = window.MathJax, name = 'mathjax-' + key;
+    MJ.config.loader.paths[name] = WEB ? `https://cdn.jsdelivr.net/npm/@mathjax/${name}-font@4.1.3` : LOCAL() + `fonts/${name}-font`;
+    if (!MJ._.output.fonts?.[name]) await MJ.loader.load(`[${name}]/svg`);
+    const FontClass = Object.values(MJ._.output.fonts[name].svg_ts)[0];
+    const out = new MJ._.output.svg_ts.SVG({fontData: FontClass, fontCache: 'none', linebreaks: {inline: false}, dynamicPrefix: `[${name}]/svg/dynamic`});
+    const input = new MJ._.input.tex_ts.TeX({...MJ.config.tex});
+    const doc = MJ._.mathjax.mathjax.document(document, {InputJax: input, OutputJax: out});
+    return {doc, out, queue: Promise.resolve()};
   });
-  frames.set(key, p); return p;
+  extra.set(key, p); return p;
+}
+async function convertIn(key, tex, display, wrap) {
+  const d = await docFor(key);
+  const run = () => { d.out.options.linebreaks.inline = !!wrap && !display; return d.doc.convertPromise(tex, {display: !!display, em: 16, ex: 8, containerWidth: 1280}); };
+  const r = d.queue.then(run, run); d.queue = r.catch(() => null); return r;
 }
 /** Text family (from a CSS font-family like "MP pagella") -> its math font, or null (= the presentation's). */
 const MATH_OF = {bonum: 'bonum', pagella: 'pagella', termes: 'termes', schola: 'schola', lmodern: 'modern', newcm: 'newcm', stix2: 'stix2', fira: 'fira', dejavu: 'dejavu'};
@@ -97,13 +103,17 @@ export function renderSVG(tex, display, bold, wrap, font) {
   const key = keyOf(tex, display, bold, wrap, font);
   if (cache.has(key)) return cache.get(key);
   // one formula at a time, so the line-break setting belongs to the right formula
-  const p = (queue = queue.then(() => mathReady).then(async () => {
-    const other = font && font !== activeFont;
-    const MJ = other ? (await frameFor(font).catch(() => null))?.MathJax || window.MathJax : window.MathJax;
-    const lb = MJ.startup.output?.options?.linebreaks; if (lb) lb.inline = !!wrap && !display;
-    return MJ.tex2svgPromise(hun(tex, display, bold), { display: !!display });
-  }).catch(() => null))
+  const other = font && font !== activeFont;
+  const p = (other
+    // another font: its own document and queue; if it cannot be loaded, the presentation's font is used
+    ? convertIn(font, hun(tex, display, bold), display, wrap).catch(e => { console.warn('math font', font, e); return renderSVG(tex, display, bold, wrap, null); })
+      .then(r => r && r.html !== undefined ? r : r)
+    : (queue = queue.then(() => mathReady).then(() => {
+        const lb = window.MathJax.startup.output?.options?.linebreaks; if (lb) lb.inline = !!wrap && !display;
+        return window.MathJax.tex2svgPromise(hun(tex, display, bold), { display: !!display });
+      }).catch(() => null)))
     .then(node => {
+      if (node && node.html !== undefined) return node;      // came back already finished (fallback above)
       if (node.querySelector('[data-mjx-error], merror, [data-mml-node="merror"]')) return { html: node.outerHTML, error: true };
       return { html: node.outerHTML, error: false };
     })
