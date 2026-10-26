@@ -24,7 +24,7 @@
     <div class="b1right">
       <button class="btn tplbtn" id="bTpl" title="Sablonszerkesztő: kész sablonok, mester és diatípusok"><span class="tpll">Sablon:</span> <b id="tplName">Üres</b></button>
       <button class="btn" id="bPlay" title="Lejátszás az aktuális diától (F5)">Lejátszás</button>
-<button class="btn menubtn zoombtn" data-pop="popZoom" id="bZoom" title="Nagyítás – Illesztés: a dia kitölti a munkaterületet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/></svg><span id="zoomLabel"></span><svg class="ddi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+<button class="btn menubtn zoombtn" data-pop="popZoom" id="bZoom" title="Nagyítás"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/></svg><span id="zoomLabel"></span><svg class="ddi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
     </div>
   </div>
   <div class="ribbon" id="ribbon">
@@ -65,8 +65,8 @@
       <button class="tb" data-cmd="text" data-icon="textbox" title="Szövegdoboz (T)"><span class="lbl">Szövegdoboz</span></button>
       <button class="tb" data-cmd="math" data-icon="sigma" title="Képlet (Ctrl/⌘+M) – vagy írd $…$ közé a szövegben"><span class="lbl">Képlet</span></button>
       <button class="tb" data-pop="popTable" data-icon="table" title="Táblázat beszúrása (önálló objektumként)"></button>
-      <button class="tb" data-cmd="image" data-icon="image" title="Kép beszúrása – PNG, JPG, GIF, WebP, SVG (beillesztés és behúzás is működik)"></button>
-      <button class="tb" data-cmd="video" data-icon="video" title="Videó beszúrása – MP4 (ajánlott), M4V, MOV, WebM (beillesztés és behúzás is működik)"></button>
+      <button class="tb" data-cmd="image" data-icon="image" title="Kép beszúrása – PNG, JPG, GIF, WebP, SVG"></button>
+      <button class="tb" data-cmd="video" data-icon="video" title="Videó beszúrása – MP4, M4V, MOV, WebM"></button>
       <button class="tb" data-cmd="rect" data-icon="rect" title="Téglalap (R)"></button>
       <button class="tb" data-cmd="ellipse" data-icon="ellipse" title="Ellipszis (E)"></button>
       <button class="tb" data-cmd="triangle" data-icon="triangle" title="Háromszög"></button>
@@ -186,12 +186,10 @@
     <label>Jobb behúzás (cm)<input type="number" step="0.25" data-pf="indentRight"></label>
     <label>Első sor<select id="pfFirstKind"><option value="none">Nincs</option><option value="first">Első sor beljebb</option><option value="hang">Függő</option></select></label>
     <label>Mértéke (cm)<input type="number" step="0.25" min="0" id="pfFirstVal"></label>
-    <label>Sorköz<input type="number" step="0.05" min="0.8" data-pf="lineHeight"></label>
     <label>Térköz előtte (pt)<input type="number" step="1" min="0" data-pf="spaceBefore"></label>
     <label>Térköz utána (pt)<input type="number" step="1" min="0" data-pf="spaceAfter"></label>
   </div>
   <label class="chk" style="margin-top:8px"><input type="checkbox" data-pf="keepNext"> Együtt a következő bekezdéssel</label>
-  <div class="phint">Függő behúzás listában: a felsorolásjel helyben marad, utána nagyobb lesz a hely.</div>
 </div>
 <div class="pop" id="popTblIns" hidden>
   <button class="pitem" data-tbl="addRowBefore">Sor fölé</button>
@@ -211,7 +209,7 @@
 <div class="pop" id="popFill" hidden><div class="ptitle">Kitöltés</div><div class="swg" id="swFill"></div></div>
 <div class="pop" id="popStroke" hidden>
   <div class="ptitle">Körvonal színe</div><div class="swg" id="swStroke"></div>
-  <div class="ptitle" style="margin-top:8px">Vastagság</div><div class="bwg" id="bwStroke"></div>
+  <div class="ptitle" style="margin-top:8px">Vastagság</div><div class="sprow" id="bwRow"><input type="range" id="bwR" min="0.5" max="20" step="0.5" value="3"><input type="number" id="bwIn" min="0.5" max="20" step="0.5" value="3"><span>px</span></div>
   <div class="ptitle" style="margin-top:8px">Vonaltípus</div>
   <div class="dashg" id="dashStroke">
     <button class="pitem" data-dash="" title="Folytonos"><svg viewBox="0 0 60 8"><line x1="2" y1="4" x2="58" y2="4" stroke="currentColor" stroke-width="2.5"/></svg></button>
@@ -221,10 +219,10 @@
   </div>
 </div>
 <div class="pop" id="popFont" hidden>
-  <button class="pitem fbase" data-fam="">Alap betűtípus (a sablonból)</button>
+  <button class="pitem fbase" data-fam="">Alap betűtípus</button>
   <div class="ptitle">Képletbarát betűtípusok</div><div id="fontMath"></div>
   <div class="psep"></div>
-  <div class="ptitle">Egyéb betűtípusok <span class="phint">(a képletek az alapbetűtípus matematikai betűit használják)</span></div><div id="fontOther"></div>
+  <div class="ptitle">Egyéb betűtípusok</div><div id="fontOther"></div>
 </div>
 <div class="pop" id="popFind" hidden>
   <div class="ptitle">Keresés és csere</div>
@@ -232,13 +230,12 @@
   <div class="frow"><input id="replIn" type="text" placeholder="Csere erre" spellcheck="false"></div>
   <label class="chk"><input type="checkbox" id="findCase"> Kis- és nagybetű számít</label>
   <div class="frow fbtns"><button class="btn" id="findNext">Következő</button><button class="btn" id="findRepl">Csere</button><button class="btn primary" id="findAll">Mindet</button></div>
-  <div class="phint" id="findInfo">Az összes dia szövegében és táblázataiban keres.</div>
+  <div class="phint" id="findInfo"></div>
 </div>
 <div class="pop" id="popSize" hidden><div class="ptitle">Betűméret (pt)</div><div class="sizegrid" id="sizeGrid"></div></div>
 <div class="pop" id="popSpacing" hidden>
   <div class="ptitle">Betűköz</div>
   <div class="sprow"><input type="range" id="spacingR" min="-3" max="10" step="0.1" value="0"><input type="number" id="spacingIn" min="-3" max="10" step="0.1" value="0"><span>pt</span></div>
-  <div class="phint">Szerkesztés közben a kijelölt szövegre, egyébként az egész dobozra.</div>
 </div>
 <div class="pop" id="popPh" hidden>
   <div class="ptitle">Helykitöltő hozzáadása</div>
@@ -266,15 +263,13 @@
   <button class="pitem" id="expPptx2">PowerPoint-bemutató (.pptx) – animációkkal</button>
   <button class="pitem" id="expPdf2">PDF – diánként egy oldal</button>
   <button class="pitem" id="expPdfSteps2">PDF – lépésenként egy oldal</button>
-  <div class="phint" style="margin:4px 8px">A szövegek és képletek pontosan úgy jelennek meg, ahogy itt látszanak, betűtípus telepítése nélkül.</div>
 </div>
 <div class="pop" id="popZoom" hidden>
-  <button class="pitem" data-zoom="auto">Illesztés (kitölti a munkaterületet)</button>
+  <button class="pitem" data-zoom="auto">Illesztés</button>
   <button class="pitem" data-zoom="50">50%</button><button class="pitem" data-zoom="75">75%</button><button class="pitem" data-zoom="100">100%</button><button class="pitem" data-zoom="125">125%</button><button class="pitem" data-zoom="150">150%</button>
 </div>
 <div class="pop" id="popSave" hidden>
-  <button class="pitem" id="fSaveAs">Mentés másként… <span class="phint">(Ctrl/⌘+Shift+S)</span></button>
-  <div class="phint" style="margin:4px 8px">Új fájlba ment; a korábban mentett fájl változatlan marad.</div>
+  <button class="pitem" id="fSaveAs">Mentés másként…</button>
 </div>
 <div class="pop" id="popTrans" hidden>
   <div class="ptitle">Diaváltás erre a diára</div>
@@ -293,7 +288,7 @@
   <div class="home-card">
     <img class="home-logo-img" src="/app-icon.png" alt="" width="84" height="84">
     <h1>Matekos Prezi</h1>
-    <p class="home-sub home-ver">v1.3.2</p>
+    <p class="home-sub home-ver">v1.3.4</p>
     <div class="home-btns">
       <button class="hbtn primary" id="homeNew"><span class="hico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span>Új bemutató</button>
       <button class="hbtn" id="homeOpen"><span class="hico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 10h18"/></svg></span>Meglévő megnyitása</button>

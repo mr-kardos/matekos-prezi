@@ -440,7 +440,7 @@ export const MathNode = Node.create({
         });
         if (!hits.length) return null;
         const tr = state.tr;
-        for (const h of hits.reverse()) tr.replaceWith(h.from, h.to, type.create({ tex: h.tex, display: h.display }, null, h.marks));
+        for (const h of hits.reverse()) tr.replaceWith(h.from, h.to, type.create({ tex: h.tex, display: h.display, wrap: true }, null, h.marks));
         return tr;
       },
       props: {
@@ -458,7 +458,7 @@ export const MathNode = Node.create({
             display = false; start = from - (m[1].length + 1);
           }
           const tex = display ? m[1].trim() : m[1];
-          const tr = view.state.tr.replaceWith(start, to, type.create({ tex, display }));
+          const tr = view.state.tr.replaceWith(start, to, type.create({ tex, display, wrap: true }));
           tr.setSelection(TextSelection.create(tr.doc, start + 1));
           view.dispatch(tr.scrollIntoView());
           return true;

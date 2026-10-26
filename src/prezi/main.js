@@ -273,7 +273,7 @@ function objEl(o, rmode, tpl = false, ox = 0, oy = 0) {
     if (o.placeholder && mode === 'template' && !tpl) { el.classList.add('phbox'); el.dataset.label = phName(o.placeholder); }
     if (!empty) el.classList.add('filled');
     if (empty && rmode !== 'edit') el.style.visibility = 'hidden';
-    const t = document.createElement('div'); t.className = 'txt' + (empty && rmode === 'edit' && o.prompt ? ' empty' : ''); t.dataset.prompt = o.prompt ?? '';
+    const t = document.createElement('div'); t.className = 'txt' + (empty && rmode === 'edit' && o.prompt ? ' empty' : ''); t.dataset.prompt = (o.prompt === 'Kattints duplán a cím beírásához' ? 'Cím' : o.prompt) ?? '';
     txtStyle(t, o); r.appendChild(t);
     renderStatic(t, o.doc, rmode === 'edit' ? onMathRendered : null, kindOf(o));
   } else if (o.type === 'shape') r.innerHTML = shapeSVG(o);
@@ -462,9 +462,16 @@ function renderSlideList() {
     if (s.transition) t.querySelector('.no').insertAdjacentHTML('beforeend', `<span class="trmark" title="Diaváltás: ${esc(TRANSITIONS[s.transition.type]?.label ?? '')}">★</span>`);
     t.onclick = () => { gotoSlide(i); slideFocus = true; };
     t.ondragstart = e => e.dataTransfer.setData('text/slide', WIN + ':' + i);
-    t.ondragover = e => { e.preventDefault(); t.classList.add('dragover'); };
-    t.ondragleave = () => t.classList.remove('dragover');
-    t.ondrop = e => { const from = e.dataTransfer.getData('text/slide'); if (!from.startsWith(WIN + ':')) return; e.preventDefault(); e.stopPropagation(); moveSlide(+from.split(':')[1], i); };
+    t.ondragover = e => { e.preventDefault(); const r = t.getBoundingClientRect(), below = e.clientY > r.top + r.height / 2;
+      list.querySelectorAll('.thumb.above, .thumb.below').forEach(x => x !== t && x.classList.remove('above', 'below'));
+      t.classList.toggle('above', !below); t.classList.toggle('below', below); };
+    t.ondragleave = () => t.classList.remove('above', 'below');
+    t.ondragend = () => list.querySelectorAll('.thumb.above, .thumb.below').forEach(x => x.classList.remove('above', 'below'));
+    t.ondrop = e => {
+      const from = e.dataTransfer.getData('text/slide'), below = t.classList.contains('below'); t.classList.remove('above', 'below');
+      if (!from.startsWith(WIN + ':')) return; e.preventDefault(); e.stopPropagation();
+      const f = +from.split(':')[1]; let to = i + (below ? 1 : 0); if (f < to) to--; moveSlide(f, to);
+    };
     list.appendChild(t);
     if (i === cur) {
       const a = document.createElement('div'); a.className = 'slide-actions';
@@ -865,11 +872,21 @@ function enterEdit(id, ev) {
   if (editFlags.length) txtStyle(txt, o);
   txt.classList.remove('empty'); el.classList.add('editing');
   ed = mountEditor(txt, o.doc, {
-    onUpdate: () => { measureTexts(); drawSelection(); drawTableHandles(); },
+    onUpdate: () => {
+      if (isTable(o) && ed && !ed.state.doc.firstChild?.type.name.startsWith('table')) { setTimeout(() => { const id_ = editing; if (!id_) return; stopEditor(); setSel([id_]); deleteSelected(); }, 0); return; }
+      measureTexts(); drawSelection(); drawTableHandles();
+    },
     onSelection: () => { updateRibbon(); drawTableHandles(); drawMathCaret(); },
     onBlur: () => { drawMathCaret(); showPreview(null); }
   }, kindOf(o));
   ed.view.dom.addEventListener('keydown', ke => { if (ke.key === 'Escape' && !isMathEditorOpen()) { ke.preventDefault(); exitEdit(); } });
+  txt.addEventListener('keydown', ke => {                  // on the box, so it runs before the editor's own keys
+    // the whole table selected + Delete / Backspace: the table object itself goes (not just the cell contents)
+    if (isTable(o) && (ke.key === 'Delete' || ke.key === 'Backspace')) {
+      const sel_ = ed.state.selection, whole = sel_.constructor.name === 'AllSelection' || (typeof sel_.isRowSelection === 'function' && sel_.isRowSelection() && sel_.isColSelection());
+      if (whole) { ke.preventDefault(); ke.stopPropagation(); stopEditor(); setSel([id]); deleteSelected(); }
+    }
+  }, true);
   let pos = null;
   if (ev && ev.clientX != null) { const hit = ed.view.posAtCoords({left: ev.clientX, top: ev.clientY}); if (hit) pos = hit.pos; }
   if (pos != null) ed.chain().focus().setTextSelection(pos).run(); else ed.commands.focus('end');
@@ -929,7 +946,7 @@ function openMath(pos, node) {
   const editor = ed;
   const finish = () => { if (editor && !editor.isDestroyed && !editor.view.hasFocus()) editor.view.dom.focus({preventScroll: true}); };
   openMathEditor({
-    tex, editing: !!node, top: $('#app').getBoundingClientRect().bottom + 10, wrap: !!node?.attrs.wrap,
+    tex, editing: !!node, top: $('#app').getBoundingClientRect().bottom + 10, wrap: node ? !!node.attrs.wrap : true,
     onApply: (t, wrap) => {
       if (!editor || editor.isDestroyed) return;
       if (t == null) return finish();
@@ -1201,10 +1218,10 @@ $('#popTrans').addEventListener('click', e => {
   const s_ = tgt(), b = e.target.closest('[data-tr], [data-trdir]'); if (!b) return;
   if (b.dataset.tr) { if (b.dataset.tr === 'none') delete s_.transition; else s_.transition = {type: b.dataset.tr, dur: s_.transition?.dur ?? 700}; }
   else (s_.transition ||= {type: 'fade', dur: 700}).dir = b.dataset.trdir;
-  commit(); renderTransMenu();
+  commit(); renderTransMenu(); previewTransition();
 });
 $('#transDur').addEventListener('change', e => { const v = parseFloat(String(e.target.value).replace(',', '.')), s_ = tgt();
-  if (v > 0 && s_.transition) { s_.transition.dur = Math.round(Math.min(10, v) * 1000); commit(); } });
+  if (v > 0 && s_.transition) { s_.transition.dur = Math.round(Math.min(10, v) * 1000); commit(); previewTransition(); } });
 $('#transAll').onclick = async () => {
   closePops(); const s_ = tgt();
   if (!await confirmBox('Ez a diaváltás kerüljön minden diára?', 'Minden diára')) return;
@@ -1277,7 +1294,7 @@ function positionBody() {
     ${o.type === 'shape' ? slider('pSW', o.shape === 'line' ? 'Vastagság (px)' : 'Körvonal (px)', o.stroke ? (o.strokeWidth || 0) : 0, o.shape === 'line' ? 1 : 0, 30, 1, lk) : ''}
     ${canRound(o) ? slider('pRad', 'Lekerekítés', o.radius || 0, 0, Math.round(Math.min(o.w, o.h) / 2), 1, lk) : ''}
     ${slider('pOp', 'Átlátszatlanság (%)', round((o.opacity ?? 1) * 100), 5, 100, 1, lk)}
-    ${o.placeholder && mode === 'template' ? fld('Helykitöltő mintaszövege (csak szerkesztés közben látszik)', `<input type="text" id="pPrompt" value="${esc(o.prompt ?? '')}">`, true) : ''}
+    ${o.placeholder && mode === 'template' ? fld('Helykitöltő mintaszövege', `<input type="text" id="pPrompt" value="${esc(o.prompt ?? '')}">`, true) : ''}
     ${o.placeholder && mode === 'slides' ? `<div class="phint">${esc(phName(o.placeholder))} helykitöltő – helye és formája az elrendezést követi, amíg itt nem módosítod.</div>` : ''}`;
 }
 function layersBody() {
@@ -1309,7 +1326,7 @@ function renderProps() {
     if (isM || L.ownBg) h += `<div class="fgrid" style="margin-top:10px">
       <div class="fld">Háttérszín<button class="btn colbtn" id="pBgColor"><i class="dot fill" style="--c:${L.bgColor || '#ffffff'}"></i>${L.bgColor || '#ffffff'}</button></div>
       <div class="fld">Háttérkép<div class="imgpick">${L.background ? `<img src="${media[L.background]}" alt="">` : ''}<button class="btn" id="pBgPick">Kép…</button>${L.background ? '<button class="btn" id="pBgClear">Eltávolítás</button>' : ''}</div></div></div>`;
-    h += `<div class="phint">${isM ? 'Ami a mesterre kerül (logó, lábléc, díszítés), minden elrendezésen megjelenik.' : 'Helykitöltőt a menüszalag „Helykitöltő” gombjával adhatsz hozzá.'}</div></section>`;
+    h += `<div class="phint">${isM ? 'Ami a mesterre kerül, minden elrendezésen megjelenik.' : 'Helykitöltőt a menüszalag „Helykitöltő” gombjával adhatsz hozzá.'}</div></section>`;
     const st = stylesOf(), fams = allFamilies();
     const famSel = (k, v) => `<select class="stfont" data-st="${k}" title="Betűtípus"><option value="">Alap betűtípus</option>${[...fams.math, ...fams.other].map(([f, l]) => `<option value="${f}" ${f === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
     const row = (k, label, hint) => `<div class="strow"><div class="sthead"><b>${label}</b><span class="phint">${hint}</span></div>
@@ -1320,7 +1337,7 @@ function renderProps() {
     h += `<section><div class="fgrid">${fld('Alap betűtípus (szöveg és képletek)', `<select id="pBaseFont">${Object.entries(FONT_SETS).map(([k2, f]) => `<option value="${k2}" ${k2 === (doc.font || DEFAULT_FONT) ? 'selected' : ''}>${f.label}</option>`).join('')}</select>`, true)}</div>
       <div class="phint">Az új szövegdobozok és a képletek ezt használják. Csak képletbarát betűtípus lehet.</div></section>`;
     h += section('styles', 'Szövegstílusok', row('title', 'Címek', 'cím-helykitöltők') + row('subtitle', 'Alcímek', 'alcím-helykitöltők') + row('body', 'Szöveg', 'szöveg-helykitöltők, új szövegdobozok')
-      + '<div class="phint">A méretváltozás arányosan hat (a címdia nagyobb címe nagyobb marad). A diákon egyenként átformázott dobozok megtartják a saját formájukat.</div>');
+      + '<div class="phint">A méretváltozás arányosan hat. A diákon egyenként átformázott dobozok megtartják a saját formájukat.</div>');
   }
   h += section('pos', 'Megjelenés és elhelyezés', positionBody());
   h += section('layers', 'Rétegek', layersBody());
@@ -1432,6 +1449,33 @@ const effectOptions = c0 => Object.entries(Anim.CLASSES).map(([c, label]) => `<o
   .filter(([, e]) => e.cls === c).map(([k, e]) => `<option value="${k}" ${k === c0 ? 'selected' : ''}>${e.label}</option>`).join('')}</optgroup>`).join('');
 const secs = ms => String(Math.round(ms / 100) / 10).replace('.', ',');
 const rangeLabel = r => r ? (r[0] === r[1] ? r[0] : r[0] + '–' + r[1]) : '0';
+/** Play one animation (all its parts) on the slide being edited, then put the slide back as it was. */
+let previewing = null;
+async function previewAnim(id) {
+  if (mode !== 'slides' || editing || sh) return;
+  const s_ = tgt(), items = Anim.expand(s_).filter(x => x.src === id); if (!items.length) return;
+  const token = previewing = {}, running = [];
+  const E = Anim.EFFECTS[items[0].effect];
+  for (const it of items) { const el = keyEl(stage, it.key); if (el && E.cls === 'entr') el.style.visibility = 'hidden'; }
+  await new Promise(r => setTimeout(r, 120));
+  for (const it of items) { if (previewing !== token) return; await playEffect(stage, {...it, delay: 0}, running); }
+  await new Promise(r => setTimeout(r, E.cls === 'exit' ? 500 : 250));
+  if (previewing === token) { running.forEach(a => a.cancel?.()); renderStage(); previewing = null; }
+}
+/** Play the slide's transition over the slide being edited (from the previous slide, or from black). */
+function previewTransition() {
+  const t = tgt().transition; if (!t || mode !== 'slides' || sh) return;
+  if (editing) exitEdit();
+  stageWrap.querySelector('.trprev')?.remove();
+  const box = document.createElement('div'); box.className = 'trprev';
+  Object.assign(box.style, {width: W + 'px', height: H + 'px', transform: `scale(${scale})`});
+  const old = document.createElement('div'); old.className = 'slide';
+  if (cur > 0) renderSlide(doc.slides[cur - 1], old, 'show'); else old.style.background = '#000';
+  const el = document.createElement('div'); el.className = 'slide'; renderSlide(tgt(), el, 'show');
+  box.append(old, el); stageWrap.appendChild(box);
+  const d = playTransition(old, el, t, box);
+  setTimeout(() => box.remove(), d + 150);
+}
 function addAnimation(effect, byParagraph) {
   const o = selObj(); if (!o || mode !== 'slides') return;
   if (editing) syncEditor();
@@ -1439,6 +1483,7 @@ function addAnimation(effect, byParagraph) {
   if (byParagraph && isText(o) && blockCount(o) > 1 && !o.rot) a.byParagraph = true;
   if (groupOf(o.id)) return toast('Csoport tagja nem animálható külön – az egész csoportot animáld.');
   tgt().anims.push(a); curAnim = a.id; commit();
+  requestAnimationFrame(() => previewAnim(a.id));
 }
 function timelineHTML(list) {
   const tl = Anim.timeline(list); if (!tl.length) return '';
@@ -1477,7 +1522,7 @@ function animBody() {
   }).join('');
   const dis = o ? '' : 'disabled title="Előbb jelölj ki egy objektumot (vagy csoportot)"';
   return `${o ? `<div class="btnrow addrow"><button class="btn" data-add="entr" style="--c:${CLS_COLOR.entr}">+ Belépő</button><button class="btn" data-add="emph" style="--c:${CLS_COLOR.emph}">+ Kiemelés</button><button class="btn" data-add="exit" style="--c:${CLS_COLOR.exit}">+ Kilépő</button></div>`
-      : '<div class="phint" style="margin:0 0 8px">Animáció hozzáadásához jelölj ki egy objektumot (vagy csoportot).</div>'}
+      : '<div class="phint" style="margin:0 0 8px">Animáció hozzáadásához jelölj ki egy objektumot.</div>'}
     ${s.anims.length ? `<h4>Idővonal</h4>${timelineHTML(list)}` : ''}
     <div class="anim-list" id="animList">${rows || '<div class="phint" style="margin-top:0">Ezen a dián nincs animáció.</div>'}</div>
     <div class="btnrow"><button class="btn" id="aPlay">Lejátszás innen</button><label class="chk"><input type="checkbox" id="aBadges" ${showBadges ? 'checked' : ''}> Sorszámok a dián</label></div>`;
@@ -1512,6 +1557,7 @@ function bindAnims() {
     else if (k === 'effect') { a.effect = e.target.value; delete a.dur; delete a.dir; }
     else a[k] = e.target.value;
     curAnim = a.id; commit();
+    requestAnimationFrame(() => previewAnim(a.id));
   });
 }
 
@@ -1793,11 +1839,17 @@ swatches($('#swBorder'), ['#7d8590', '#111111', '#1f5f74', '#2e4a9e', '#c0392b',
 swatches($('#swFill'), ['#d6eaf8', '#dbe9ee', '#eaf4e4', '#fdf3d7', '#f9e1e1', '#ece6f5', '#eeeeee', '#f6d365', '#2f5d8a', '#1f5f74', '#1e8449', '#c0392b', '#d35400'],
   c => { const o = selObj(); if (isShape(o)) { o.fill = c === 'none' ? null : c; commit(); } }, 'Nincs kitöltés');
 swatches($('#swStroke'), TEXT_COLORS, c => { const o = selObj(); if (!isShape(o)) return; o.stroke = c === 'none' ? (o.shape === 'line' ? o.stroke : null) : c; if (o.stroke && !o.strokeWidth) o.strokeWidth = 3; commit(); }, 'Nincs körvonal');
-$('#bwStroke').innerHTML = [1, 2, 3, 4, 6, 8].map(w => `<button class="pitem" data-w="${w}">${w} px</button>`).join('');
-$('#bwStroke').onclick = e => { const b = e.target.closest('button'), o = selObj(); if (!b || !isShape(o)) return; o.strokeWidth = +b.dataset.w; if (!o.stroke) o.stroke = '#2f5d8a'; closePops(); commit(); };
+function setStrokeW(v, final) {
+  const o = selObj(); if (!isShape(o) || !(v > 0)) return;
+  o.strokeWidth = Math.round(v * 10) / 10; if (!o.stroke) o.stroke = '#da291c';
+  if (final) commit(); else updateObjLive(o);
+}
+$('#bwR').oninput = () => { $('#bwIn').value = $('#bwR').value; setStrokeW(+$('#bwR').value, false); };
+$('#bwR').onchange = () => setStrokeW(+$('#bwR').value, true);
+$('#bwIn').onchange = () => { const v = parseFloat(String($('#bwIn').value).replace(',', '.')); if (v > 0) { $('#bwR').value = v; setStrokeW(v, true); } };
 $('#dashStroke').onclick = e => { const b = e.target.closest('[data-dash]'), o = selObj(); if (!b || !isShape(o)) return; o.dash = b.dataset.dash || undefined; if (!o.stroke) { o.stroke = '#2f5d8a'; o.strokeWidth ||= 3; } closePops(); commit(); };
 $('#popStroke').onopen = () => {
-  const o_ = selObj(); for (const b of $$('#dashStroke [data-dash]')) b.classList.toggle('on', isShape(o_) && (o_.dash || '') === b.dataset.dash); const o = selObj(); for (const b of $('#bwStroke').children) b.classList.toggle('on', isShape(o) && !!o.stroke && +b.dataset.w === o.strokeWidth); };
+  const o_ = selObj(); for (const b of $$('#dashStroke [data-dash]')) b.classList.toggle('on', isShape(o_) && (o_.dash || '') === b.dataset.dash); const o = selObj(); $('#bwR').value = $('#bwIn').value = isShape(o) && o.stroke ? (o.strokeWidth ?? 3) : 3; };
 /* font size list, letter spacing */
 const SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 96];
 $('#sizeGrid').innerHTML = SIZES.map(v => `<button class="pitem" data-size="${v}">${v}</button>`).join('');
@@ -1902,13 +1954,14 @@ $('#popPh').addEventListener('click', e => {
 $('#bTpl').onclick = () => mode === 'template' ? closeTemplateBuilder() : openTemplateBuilder();
 
 /* ================================================================== slideshow preview */
-const show = $('#show');
+const show = $('#show'), SHOW = show;
 let sh = null;
 function startShow(i) {
   if (editing) exitEdit(); if (mode === 'template') closeTemplateBuilder();
   show.classList.add('on'); show.requestFullscreen?.().catch(() => {});
   sh = {i, step: 0, busy: null}; loadShowSlide(i, 0, true);
 }
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && sh) stopShow(); });
 function stopShow() { show.querySelectorAll('video').forEach(v => v.pause()); show.classList.remove('on'); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); show.querySelector('.slide')?.remove(); sh = null; }
 function showScale(el) { const k = Math.min(innerWidth / W, innerHeight / H); Object.assign(el.style, {transform: `scale(${k})`, left: (innerWidth - W * k) / 2 + 'px', top: (innerHeight - H * k) / 2 + 'px'}); }
 function keyEl(root, key) {
@@ -1947,8 +2000,9 @@ function loadShowSlide(i, step, animateAuto, withTransition) {
   }
 }
 /** Slide transition in the preview (PowerPoint plays the same effect from the exported file). Returns its duration. */
-function playTransition(old, el, t) {
-  const dur = Math.max(100, t.dur ?? 700), k = Math.min(innerWidth / W, innerHeight / H), sw = W * k, shh = H * k;
+function playTransition(old, el, t, box) {
+  const dur = Math.max(100, t.dur ?? 700), k = box ? 1 : Math.min(innerWidth / W, innerHeight / H), sw = W * k, shh = H * k;
+  const show = box || SHOW;
   const opt = {duration: dur, easing: 'ease-in-out', fill: 'both'};
   const from = {r: [sw, 0], l: [-sw, 0], b: [0, shh], t: [0, -shh]}[t.dir] ?? [sw, 0];
   const tr = ([x, y]) => `${x}px ${y}px`;
@@ -2116,7 +2170,7 @@ $('#bSave').onclick = () => doSave(false);
 $('#bPlay').onclick = () => startShow(cur);
 $('#bZoom').onclick = e => showPop('popZoom', e.currentTarget);
 $('#popZoom').onopen = () => { for (const b of $$('#popZoom [data-zoom]')) b.classList.toggle('on', b.dataset.zoom === String(zoom)); };
-$('#popZoom').addEventListener('click', e => { const b = e.target.closest('[data-zoom]'); if (!b) return; closePops(); zoom = b.dataset.zoom === 'auto' ? 'auto' : +b.dataset.zoom; $('#zoomLabel').textContent = zoom === 'auto' ? '' : zoom + '%'; fitStage(); });
+$('#popZoom').addEventListener('click', e => { const b = e.target.closest('[data-zoom]'); if (!b) return; closePops(); zoom = b.dataset.zoom === 'auto' ? 'auto' : +b.dataset.zoom; $('#zoomLabel').textContent = zoom === 'auto' ? '' : zoom + '%'; $('#bZoom').classList.toggle('pct', zoom !== 'auto'); fitStage(); });
 $('#bExport').onclick = e => showPop('popExport', e.currentTarget);
 let titleBusy = false;
 $('#docTitle').addEventListener('keydown', async e => {

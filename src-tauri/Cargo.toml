@@ -1,6 +1,6 @@
 [package]
 name = "matekos-prezi"
-version = "1.3.2"
+version = "1.3.4"
 description = "Matekos Prezi – presentation editor with live TeX, PowerPoint and PDF export"
 edition = "2021"
 rust-version = "1.77.2"

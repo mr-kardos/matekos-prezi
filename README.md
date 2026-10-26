@@ -1,4 +1,4 @@
-# Matekos Prezi 1.3.2
+# Matekos Prezi 1.3.4
 
 Presentation editor with live inline TeX, the twin of **Matekos Doksi**. Built with **TipTap**
 (text editor), **MathJax 4** (formulas), **MathLive** (visual formula editor) and **Tauri 2**

@@ -108,7 +108,7 @@ let dlg, mf, texBox, prev, onApply = null, onDelete = null, cats, palette, curCa
 const FAV_KEY = 'matekosprezi.mathFav';
 let favMode = false;
 const ALL_ITEMS = () => [...CATS.flatMap(c => c[1]), ...FREQUENT];
-function favList() { try { const v = JSON.parse(localStorage.getItem(FAV_KEY)); if (Array.isArray(v)) return v; } catch (e) { /* none yet */ } return FREQUENT.map(it => it[1]); }
+function favList() { try { const v = JSON.parse(localStorage.getItem(FAV_KEY)); if (Array.isArray(v)) return v; } catch (e) { /* none yet */ } return []; }
 function saveFav(list) { try { localStorage.setItem(FAV_KEY, JSON.stringify(list)); } catch (e) { /* storage full / off */ } }
 const favItems = () => favList().map(t => ALL_ITEMS().find(it => it[1] === t)).filter(Boolean);
 
@@ -260,6 +260,12 @@ function build() {
   }
   showCat('fav');
 }
+/** The edit button is as tall as the button before it (formula buttons differ in height). */
+function matchAddHeight() {
+  const add = palette.querySelector('#mkFavAdd'); if (!add) return;
+  const fit = () => { const prev = add.previousElementSibling; add.style.height = prev && prev.classList.contains('mk') ? prev.offsetHeight + 'px' : ''; };
+  fit(); setTimeout(fit, 150); setTimeout(fit, 600);
+}
 function setFavMode(on) {
   favMode = on; dlg.querySelector('#mkFavBar').hidden = !on; dlg.classList.toggle('favmode', on);
   if (on && curCat === 'fav') showCat(0); else showCat(curCat);
@@ -274,9 +280,9 @@ function showCat(i) {
   for (const b of cats.children) b.classList.toggle('on', b.dataset.c === String(i));
   const fav = i === 'fav', items = fav ? favItems() : CATS[i][1], favs = new Set(favList());
   palette.innerHTML = items.map((it, k) => btn(it, k, fav ? 'v' : 'c')).join('')
-    + (fav && !favMode ? `<button class="mk mk-addfav" id="mkFavAdd" title="Gombok hozzáadása a kedvencekhez (és eltávolítása)">＋ Kedvencek szerkesztése</button>` : '')
-    + (fav && !items.length ? '<span class="mk-empty">Még nincs kedvenc.</span>' : '');
+    + (fav && !favMode ? `<button class="mk mk-addfav" id="mkFavAdd" title="Kedvencek szerkesztése" aria-label="Kedvencek szerkesztése"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>` : '');
   if (favMode) palette.querySelectorAll('.mk[data-i]').forEach(b => b.classList.toggle('isfav', favs.has(items[+b.dataset.i][1])));
+  if (fav) matchAddHeight();
   items.forEach((it, k) => {
     const t = labelTex(it[1]); if (!t) return;
     const b = palette.querySelector(`.mk[data-i="${k}"]`); if (!b) return; const keep = b.innerHTML;
@@ -285,6 +291,7 @@ function showCat(i) {
       const err = span.querySelector('[data-mjx-error], .merr');
       if (err || !span.querySelector('svg')) { b.innerHTML = keep; return; }
       b.innerHTML = ''; b.appendChild(span); b.classList.add('typeset');
+      if (curCat === 'fav') matchAddHeight();
     });
   });
 }

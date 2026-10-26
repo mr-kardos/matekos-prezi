@@ -79,7 +79,7 @@ export function ph(key, x, y, w, pt, color, bold, align, prompt) {
   return {id: uid(), name: phName(key) + ' helykitöltő', type: 'text', placeholder: key, prompt, x, y, w, h: pt * 2, rot: 0,
     size: Math.round(pt / 0.75 * 100) / 100, color, bold, align, doc: emptyDoc()};
 }
-export const TITLE_PROMPT = 'Kattints duplán a cím beírásához';
+export const TITLE_PROMPT = 'Cím';
 export function defaultMaster(bgKey) {
   return {background: bgKey, bgColor: '#ffffff', objects: [
     {id: uid(), name: 'Lábléc', type: 'text', x: 60, y: 668, w: 600, h: 30, rot: 0, size: 16, color: '#6b7785', align: 'left', doc: textDoc([T('Matekos Prezi')])}]};

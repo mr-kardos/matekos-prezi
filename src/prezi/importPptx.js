@@ -474,7 +474,7 @@ export async function importPptx(buf, {onProgress} = {}) {
     const content = [];
     p.runs.forEach((r, ri) => {
       if (r.br) { content.push({type: 'hardBreak'}); return; }
-      if (r.math != null) { content.push({type: 'math', attrs: {tex: r.math, display: false}}); return; }
+      if (r.math != null) { content.push({type: 'math', attrs: {tex: r.math, display: false, wrap: true}}); return; }
       if (!r.text) return;
       const n = {type: 'text', text: r.text}; const m = box ? marksFor(r, box) : marksFor(r, {size: r.size, color: r.color});
       if (m.length) n.marks = m;
@@ -605,7 +605,7 @@ export async function importPptx(buf, {onProgress} = {}) {
         const st = txStyleFor(mst, t), l1 = st && ch(st, 'lvl1pPr'), d = l1 && ch(l1, 'defRPr');
         const size = ptToPx(num(d?.getAttribute('sz'), key2 === 'title' ? 4400 : 2400) / 100);
         phs.push({id: uid(), type: 'text', name: (kk.startsWith('title') ? 'Cím' : kk.startsWith('subtitle') ? 'Alcím' : 'Szöveg') + ' helykitöltő', placeholder: kk,
-          prompt: kk.startsWith('title') ? 'Kattints duplán a cím beírásához' : 'Szöveg', ...g, rot: 0, size, color: colorOf(ch(d, 'solidFill'), {...ctxBase, rels: layout.rels}) || '#000000',
+          prompt: kk.startsWith('title') ? 'Cím' : 'Szöveg', ...g, rot: 0, size, color: colorOf(ch(d, 'solidFill'), {...ctxBase, rels: layout.rels}) || '#000000',
           bold: undefined, align: {ctr: 'center', r: 'right'}[l1?.getAttribute('algn')] || (t === 'ctrTitle' || t === 'subTitle' ? 'center' : 'left'), doc: {type: 'doc', content: [{type: 'paragraph'}]}});
       }
       const showMaster = layout.xml.documentElement.getAttribute('showMasterSp') !== '0';
