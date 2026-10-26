@@ -4,7 +4,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { BulletList, OrderedList } from '@tiptap/extension-list';
 import { Table, TableRow, TableCell, TableHeader, TableView } from '@tiptap/extension-table';
 import { CellSelection, TableMap } from '@tiptap/pm/tables';
-import { renderInto, isReady, mathReady } from '../math.js';
+import { renderInto, isReady, mathReady, mathFontFromCSS } from '../math.js';
 
 const numOrNull = v => (v === '' || v === null || v === undefined || isNaN(+v)) ? null : +v;
 
@@ -282,6 +282,14 @@ export const LineShade = Mark.create({
 /* ------------------------------------------------------------------ */
 const mathKey = new PluginKey('mathTools');
 const isBold = n => n.marks.some(m => m.type.name === 'bold');   // bold formulas: \boldsymbol
+/** Font and boldness of a formula: its own marks first, then the text box it is in (Prezi box formatting). */
+function mathLook(n, editor) {
+  let host = null; try { host = editor?.options?.element || null; } catch (e) { /* not mounted yet */ }
+  const ts = n.marks.find(m => m.type.name === 'textStyle'), box = host?.closest?.('.txt') || null;
+  const font = mathFontFromCSS(ts?.attrs?.fontFamily || box?.style?.fontFamily || '');
+  const bw = box?.style?.fontWeight;
+  return {font, bold: isBold(n) || bw === 'bold' || +bw >= 600};
+}
 const DOLLAR_RE = /(\\?)\$\$([^$]+?)\$\$|(\\?)\$([^$\s](?:[^$]*?[^$\s\\])?)\$|\\\((.+?)\\\)|\\\[(.+?)\\\]/g;
 
 function cellPosAround(doc, pos) {
@@ -319,7 +327,8 @@ export const MathNode = Node.create({
       const paint = () => {
         dom.className = 'math' + (cur.attrs.display ? ' disp' : '') + (cur.attrs.wrap ? ' wrap' : '') + (dom._sel ? ' ProseMirror-selectednode' : '');
         dom.setAttribute('data-tex', cur.attrs.tex);
-        renderInto(dom, cur.attrs.tex, cur.attrs.display, () => ext.options.onRendered && ext.options.onRendered(), isBold(cur), cur.attrs.wrap);
+        const lk = mathLook(cur, editor); dom._lk = lk.font + '|' + lk.bold;
+        renderInto(dom, cur.attrs.tex, cur.attrs.display, () => ext.options.onRendered && ext.options.onRendered(), lk.bold, cur.attrs.wrap, lk.font);
       };
       paint();
       // Mouse: click = select the formula; click on its left/right edge = cursor before/after it;
@@ -374,7 +383,8 @@ export const MathNode = Node.create({
         dom,
         update(n) {
           if (n.type !== cur.type) return false;
-          const changed = n.attrs.tex !== cur.attrs.tex || n.attrs.display !== cur.attrs.display || isBold(n) !== isBold(cur);
+          const lk = mathLook(n, editor);
+          const changed = n.attrs.tex !== cur.attrs.tex || n.attrs.display !== cur.attrs.display || n.attrs.wrap !== cur.attrs.wrap || dom._lk !== lk.font + '|' + lk.bold;
           cur = n;
           if (changed) paint();
           return true;

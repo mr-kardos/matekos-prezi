@@ -8,10 +8,10 @@ export const opts = { hunTrig: true, decComma: true, displayInline: true };
 let activeFont = null;
 export const activeMathFont = () => activeFont;
 /** key: one of the MathJax 4 math fonts (bonum, pagella, termes, schola, modern, newcm, tex, stix2, fira, dejavu, asana). */
-export function startMathJax(key = 'bonum') {
-  activeFont = key;
-  const local = new URL('mathjax/', document.baseURI).href;
-  window.MathJax = {
+const LOCAL = () => new URL('mathjax/', document.baseURI).href;
+const MJ_SRC = () => WEB ? 'https://cdn.jsdelivr.net/npm/mathjax@4.1.3/startup.js' : LOCAL() + 'startup.js';
+function mjConfig(key, local, onReady) {
+  return {
     loader: {
       load: ['input/tex', 'output/svg'],
       ...(WEB ? {} : { paths: { fonts: local + 'fonts' } })
@@ -26,21 +26,51 @@ export function startMathJax(key = 'bonum') {
         R: '\\mathbb{R}', N: '\\mathbb{N}', Z: '\\mathbb{Z}', Q: '\\mathbb{Q}'
       }
     },
-    startup: {
-      typeset: false,
-      ready() {
-        window.MathJax.startup.defaultReady();
-        window.MathJax.startup.promise.then(() => {
-          try { document.head.appendChild(window.MathJax.svgStylesheet()); } catch (e) { /* optional */ }
-          ready = true; readyResolve();
-        });
-      }
-    }
+    startup: { typeset: false, ready: onReady }
   };
+}
+export function startMathJax(key = 'bonum') {
+  activeFont = key;
+  window.MathJax = mjConfig(key, LOCAL(), () => {
+    window.MathJax.startup.defaultReady();
+    window.MathJax.startup.promise.then(() => {
+      try { document.head.appendChild(window.MathJax.svgStylesheet()); } catch (e) { /* optional */ }
+      ready = true; readyResolve();
+    });
+  });
   const s = document.createElement('script');
-  s.src = WEB ? 'https://cdn.jsdelivr.net/npm/mathjax@4.1.3/startup.js' : local + 'startup.js';
-  s.async = true;
+  s.src = MJ_SRC(); s.async = true;
   document.head.appendChild(s);
+}
+/* Formulas next to a text in another math-capable font use that font's math letters. MathJax picks its math
+   font at start-up, so each further font gets its own MathJax in a hidden frame (started when first needed). */
+const frames = new Map();
+function frameFor(key) {
+  if (frames.has(key)) return frames.get(key);
+  const p = new Promise((res, rej) => {
+    const f = document.createElement('iframe');
+    f.setAttribute('aria-hidden', 'true'); f.tabIndex = -1;
+    f.style.cssText = 'position:fixed;left:-9999px;top:0;width:10px;height:10px;border:0;visibility:hidden';
+    document.body.appendChild(f);
+    const w = f.contentWindow, local = LOCAL();
+    w.MathJax = mjConfig(key, local, () => { w.MathJax.startup.defaultReady(); w.MathJax.startup.promise.then(() => res(w), rej); });
+    const sc = w.document.createElement('script'); sc.src = MJ_SRC(); w.document.head.appendChild(sc);
+    setTimeout(() => rej(new Error('math font timeout')), 30000);
+  });
+  frames.set(key, p); return p;
+}
+/** Text family (from a CSS font-family like "MP pagella") -> its math font, or null (= the presentation's). */
+const MATH_OF = {bonum: 'bonum', pagella: 'pagella', termes: 'termes', schola: 'schola', lmodern: 'modern', newcm: 'newcm', stix2: 'stix2', fira: 'fira', dejavu: 'dejavu'};
+export function mathFontFromCSS(css) { const m = String(css || '').match(/MP ([a-z0-9]+)/); return m ? (MATH_OF[m[1]] || null) : null; }
+/** Font + boldness a formula takes from the text around it (walks up from the element). */
+export function mathStyleOf(el, stop) {
+  let font = null, bold = false;
+  for (let e = el; e && e.nodeType === 1; e = e.parentElement) {
+    if (font === null && e.style && e.style.fontFamily && /MP [a-z0-9]+/.test(e.style.fontFamily)) font = mathFontFromCSS(e.style.fontFamily) || '';
+    if (!bold && (e.tagName === 'STRONG' || e.tagName === 'B' || (e.style && (e.style.fontWeight === 'bold' || +e.style.fontWeight >= 600)))) bold = true;
+    if (e === stop) break;
+  }
+  return {font: font || null, bold};
 }
 
 export function isReady() { return ready; }
@@ -60,16 +90,18 @@ function hun(tex, display, bold) {
 
 const cache = new Map();   // key -> Promise<{html,error} | null>
 const done = new Map();    // key -> finished result, used synchronously so re-created views never flicker
-const keyOf = (tex, display, bold, wrap) => (display ? 'D' : 'I') + (bold ? 'B' : '') + (wrap ? 'W' : '') + (opts.hunTrig ? 1 : 0) + (opts.decComma ? 1 : 0) + (opts.displayInline ? 1 : 0) + '|' + tex;
+const keyOf = (tex, display, bold, wrap, font) => (display ? 'D' : 'I') + (bold ? 'B' : '') + (wrap ? 'W' : '') + (font && font !== activeFont ? '@' + font : '') + (opts.hunTrig ? 1 : 0) + (opts.decComma ? 1 : 0) + (opts.displayInline ? 1 : 0) + '|' + tex;
 let queue = Promise.resolve();
 /** wrap: the formula may break into lines (after =, +, −, relations…) at the edge of its text box. */
-export function renderSVG(tex, display, bold, wrap) {
-  const key = keyOf(tex, display, bold, wrap);
+export function renderSVG(tex, display, bold, wrap, font) {
+  const key = keyOf(tex, display, bold, wrap, font);
   if (cache.has(key)) return cache.get(key);
   // one formula at a time, so the line-break setting belongs to the right formula
-  const p = (queue = queue.then(() => mathReady).then(() => {
-    const lb = window.MathJax.startup.output?.options?.linebreaks; if (lb) lb.inline = !!wrap && !display;
-    return window.MathJax.tex2svgPromise(hun(tex, display, bold), { display: !!display });
+  const p = (queue = queue.then(() => mathReady).then(async () => {
+    const other = font && font !== activeFont;
+    const MJ = other ? (await frameFor(font).catch(() => null))?.MathJax || window.MathJax : window.MathJax;
+    const lb = MJ.startup.output?.options?.linebreaks; if (lb) lb.inline = !!wrap && !display;
+    return MJ.tex2svgPromise(hun(tex, display, bold), { display: !!display });
   }).catch(() => null))
     .then(node => {
       if (node.querySelector('[data-mjx-error], merror, [data-mml-node="merror"]')) return { html: node.outerHTML, error: true };
@@ -84,10 +116,10 @@ export function renderSVG(tex, display, bold, wrap) {
 export function clearMathCache() { cache.clear(); done.clear(); }
 
 /** Fill an element with the rendered formula (keeps the old picture until the new one is ready). */
-export function renderInto(el, tex, display, onDone, bold, wrap) {
+export function renderInto(el, tex, display, onDone, bold, wrap, font) {
   const tok = el._mj = (el._mj || 0) + 1;
   if (!tex) { el.innerHTML = '<span class="mpending">∅</span>'; return; }
-  const key = keyOf(tex, display, bold, wrap);
+  const key = keyOf(tex, display, bold, wrap, font);
   if (done.has(key)) {
     const r = done.get(key);
     if (r) { if (el._html !== r.html) { el.innerHTML = r.html; el._html = r.html; } }
@@ -96,7 +128,7 @@ export function renderInto(el, tex, display, onDone, bold, wrap) {
     return;
   }
   if (!el.firstChild) { const c = document.createElement('span'); c.className = 'mpending'; c.textContent = tex; el.appendChild(c); }
-  renderSVG(tex, display, bold, wrap).then(r => {
+  renderSVG(tex, display, bold, wrap, font).then(r => {
     if (el._mj !== tok) return;
     if (!r) { el.innerHTML = ''; const c = document.createElement('span'); c.className = 'mpending merr'; c.textContent = tex; el.appendChild(c); }
     else { el.innerHTML = r.html; el._html = r.html; }

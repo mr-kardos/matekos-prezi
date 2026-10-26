@@ -855,7 +855,14 @@ function enterEdit(id, ev) {
   const o = objById(id); if (!isTextLike(o) || o.locked || o.field) return;
   if (sel !== id) { setSel([id]); curAnim = null; }
   editing = id;
+  editFlags = [];
+  let anyText = false; eachInline(o.doc, n => { if (n.type === 'math' || n.text.trim()) anyText = true; });
+  if (anyText) for (const [k, t] of Object.entries(FLAG_MARKS)) if (o[k]) {
+    eachInline(o.doc, n => { if (!hasMark(n, t)) (n.marks ||= []).push({type: t}); });
+    delete o[k]; editFlags.push(k);
+  }
   const el = stage.querySelector(`.obj[data-id="${id}"]`), txt = el.querySelector('.txt');
+  if (editFlags.length) txtStyle(txt, o);
   txt.classList.remove('empty'); el.classList.add('editing');
   ed = mountEditor(txt, o.doc, {
     onUpdate: () => { measureTexts(); drawSelection(); drawTableHandles(); },
@@ -876,12 +883,16 @@ function stopEditor() {
   $('#tableBar').hidden = true; $('#fcaret')?.remove();
   return {id, json};
 }
+let editFlags = [];
 function exitEdit() {
   const r = stopEditor(); if (!r) return;
   const o = objById(r.id);
   if (!o) { renderAll(); return; }
   const changed = JSON.stringify(r.json) !== JSON.stringify(o.doc);
   o.doc = r.json;
+  // formatting that still covers the whole text goes back to the box
+  for (const k of editFlags) if (allMarked(o.doc, FLAG_MARKS[k])) { stripMark(o.doc, FLAG_MARKS[k]); o[k] = true; }
+  editFlags = [];
   if (isText(o) && isEmptyText(o) && !o.placeholder) {
     const g = groupOf(o.id), list = g ? g.children : tgt().objects; list.splice(list.indexOf(o), 1); if (g) fitGroup(g);
     if (tgt().anims) tgt().anims = tgt().anims.filter(a => a.target !== o.id);
@@ -931,7 +942,8 @@ function openMath(pos, node) {
         }
         return finish();
       }
-      if (t) editor.chain().focus().insertContent({type: 'math', attrs: {tex: t, display: false, wrap: !!wrap}}).run(); else finish();
+      const marks = (editor.state.storedMarks || editor.state.selection.$from.marks()).map(m => m.toJSON());
+      if (t) editor.chain().focus().insertContent({type: 'math', attrs: {tex: t, display: false, wrap: !!wrap}, ...(marks.length ? {marks} : {})}).run(); else finish();
     },
     onDelete: () => {
       const n = editPos != null && editor.state.doc.nodeAt(editPos);
@@ -1508,10 +1520,22 @@ for (const b of $$('[data-icon]')) b.insertAdjacentHTML('afterbegin', svgIcon(b.
 const styled = o => { if (o.placeholder && mode === 'slides') o.phStyled = true; else if (!o.placeholder && o.styleRef) o.ownStyle = true; };
 const inEdit = () => { const o = selObj(); return isTextLike(o) && editing === o.id; };
 /** Bold, italic, …: while editing on the selection (marks), otherwise on the whole box. */
+/* box formatting vs. formatting of parts: B / I / U / S on a selected (not opened) box apply to all of its text and
+   formulas without exception; opening the box turns them into ordinary formatting of the text, so parts can differ */
+const FLAG_MARKS = {bold: 'bold', italic: 'italic', underline: 'underline', strike: 'strike'};
+function eachInline(json, fn) { (function w(n) { if (n.type === 'text' || n.type === 'math') fn(n); (n.content || []).forEach(w); })(json || {}); }
+const hasMark = (n, t) => (n.marks || []).some(m => m.type === t);
+function stripMark(json, t) { eachInline(json, n => { if (n.marks) { n.marks = n.marks.filter(m => m.type !== t); if (!n.marks.length) delete n.marks; } }); }
+function allMarked(json, t) {
+  let any = false, all = true;
+  eachInline(json, n => { if (n.type === 'text' && !n.text.trim()) return; any = true; if (!hasMark(n, t)) all = false; });
+  return any && all;
+}
 function boxOrMark(mark, boxKey) {
   const o = selObj(); if (!isTextLike(o)) return;
   if (inEdit()) { const fn = 'toggle' + mark[0].toUpperCase() + mark.slice(1); ed.chain().focus()[fn]().run(); return; }
-  o[boxKey] = !o[boxKey]; styled(o); commit();
+  const on = !(o[boxKey] || allMarked(o.doc, mark));          // all of it, or none of it
+  stripMark(o.doc, mark); o[boxKey] = on || undefined; styled(o); commit();
 }
 function setAlign(a) {
   const o = selObj(); if (!isTextLike(o)) return;
@@ -1758,6 +1782,7 @@ const TEXT_COLORS = ['#111111', '#5d6875', '#c0392b', '#d35400', '#b7950b', '#1e
 swatches($('#swText'), TEXT_COLORS, c => {
   const o = selObj(); if (!isTextLike(o)) return;
   if (inEdit() && !ed.state.selection.empty) { ed.chain().focus().setColor(c).run(); return; }
+  eachInline(o.doc, n => (n.marks || []).forEach(m => { if (m.type === 'textStyle' && m.attrs) m.attrs.color = null; }));
   o.color = c; styled(o); commit();
 });
 swatches($('#swAny'), TEXT_COLORS, c => { const cb = anyColorCb; anyColorCb = null; cb?.(c); });

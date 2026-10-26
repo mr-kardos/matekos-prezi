@@ -12,7 +12,7 @@ import Subscript from '@tiptap/extension-subscript';
 import Superscript from '@tiptap/extension-superscript';
 import { ListItem } from '@tiptap/extension-list';
 import { ParaFormat, KvBulletList, KvOrderedList, ListMarkers, KvTable, KvTableRow, KvTableCell, KvTableHeader, MathNode } from '../editor/extensions.js';
-import { renderInto } from '../math.js';
+import { renderInto, mathStyleOf } from '../math.js';
 import { emptyDoc } from './model.js';
 
 const hooks = {onEdit: null, onRendered: null, onPreview: null};
@@ -179,12 +179,13 @@ export function renderStatic(host, json, onRendered, kind = 'text') {
     const hasContent = [...b.childNodes].some(n => !(n.nodeType === 1 && n.classList.contains('lm')) && (n.nodeType !== 3 || n.data.length));
     if (!hasContent) b.appendChild(document.createElement('br'));
   }
+  host.innerHTML = ''; host.appendChild(pm);         // first in place, so each formula can see the text around it
   for (const sp of pm.querySelectorAll('span.math')) {
     sp.contentEditable = 'false';
     sp.classList.remove('disp');
-    renderInto(sp, sp.getAttribute('data-tex') || '', false, onRendered, !!sp.closest('strong,b'), sp.getAttribute('data-wrap') === '1');
+    const lk = mathStyleOf(sp, host);                 // the text's font and boldness (box or own formatting)
+    renderInto(sp, sp.getAttribute('data-tex') || '', false, onRendered, lk.bold, sp.getAttribute('data-wrap') === '1', lk.font);
   }
-  host.innerHTML = ''; host.appendChild(pm);
   return pm;
 }
 /** Animation pieces of a rendered text box, in order: top-level blocks, list items one by one. */
