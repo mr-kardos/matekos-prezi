@@ -1,13 +1,20 @@
 import { defineConfig } from 'vite';
-import { readFileSync } from 'node:fs';
-const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
+import { viteSingleFile } from 'vite-plugin-singlefile';
 
-// "npm run build" -> dist/ (loaded by the desktop app; MathJax and fonts served locally, works offline)
-export default defineConfig({
+// "npm run build"      -> dist/      (used by Tauri, MathJax served locally)
+// "npm run build:web"  -> dist-web/  (one self-contained HTML file for browser testing)
+export default defineConfig(({ mode }) => ({
   base: './',
-  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
   clearScreen: false,
   server: { port: 1420, strictPort: true },
   envPrefix: ['VITE_', 'TAURI_ENV_'],
-  build: { target: 'es2021', outDir: 'dist', emptyOutDir: true, chunkSizeWarningLimit: 5000 }
-});
+  publicDir: mode === 'web' ? false : 'public',
+  build: {
+    target: 'es2021',
+    outDir: mode === 'web' ? 'dist-web' : 'dist',
+    emptyOutDir: true,
+    chunkSizeWarningLimit: 5000,
+    assetsInlineLimit: mode === 'web' ? 100_000_000 : 4096
+  },
+  plugins: mode === 'web' ? [viteSingleFile()] : []
+}));

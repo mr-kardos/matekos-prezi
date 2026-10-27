@@ -1,11 +1,17 @@
-# Matekos Doksi 0.4
+# Matekos Prezi 1.3.4
 
-WYSIWYG editor for print-ready documents with live inline TeX, built with
-**TipTap** (editor), **MathJax 4** (formulas) and **Tauri 2** (Windows/macOS app).
+Presentation editor with live inline TeX, the twin of **Matekos Doksi**. Built with **TipTap**
+(text editor), **MathJax 4** (formulas), **MathLive** (visual formula editor) and **Tauri 2**
+(Windows/macOS app). The formula editor, `$…$` typing, pasted TeX, tables, lists and fonts are
+the same code as in Matekos Doksi.
 
-All document text is TeX Gyre Bonum, all math is TeX Gyre Bonum Math. Both fonts are
-built into the app and embedded in every PDF, so documents look identical on every
-computer and on paper.
+Each presentation uses one of 9 font sets (text font + matching MathJax 4 math font), chosen in the
+top bar: TeX Gyre Bonum (default), Pagella, Termes, Schola, Latin Modern, New Computer Modern, STIX Two,
+Fira Sans, DejaVu Serif. Every text font and math font was tested for the Hungarian letters ő ű Ő Ű (also
+inside formulas, `\text{…}`, bold and italic); Computer Modern (MathJax "tex") and Asana Math failed and
+are not offered. Switching the font set restarts the editor with the same presentation (MathJax picks its
+math font at start-up). Slides are 1280 × 720 px
+(16:9, exactly PowerPoint's slide size: 1 px = 9525 EMU = 0.75 pt).
 
 ## Installers without a terminal
 
@@ -13,79 +19,107 @@ See **HOW-TO-MAKE-INSTALLERS.md**: GitHub builds the Windows setup wizard and th
 
 ## Build the desktop app yourself
 
-You build on the system you are targeting: the Windows installer on Windows,
-the macOS app on a Mac.
-
-### One-time setup
-
-**Windows 10/11**
-1. Install [Node.js LTS](https://nodejs.org).
-2. Install [Rust](https://www.rust-lang.org/tools/install) (`rustup`, default options).
-3. Install "Microsoft C++ Build Tools" with the **Desktop development with C++** workload.
-4. WebView2 is already part of Windows 10/11.
-
-**macOS 11 or newer**
-1. `xcode-select --install`
-2. Install [Node.js LTS](https://nodejs.org) and [Rust](https://www.rust-lang.org/tools/install).
-
-### Build
+You build on the system you are targeting (Windows installer on Windows, Mac app on a Mac).
+One-time setup: Node.js LTS, Rust (`rustup`), and on Windows the "Microsoft C++ Build Tools"
+(Desktop development with C++); on macOS `xcode-select --install`.
 
 ```
 npm install
 npm run tauri build
 ```
 
-The installer ends up in `src-tauri/target/release/bundle/`
-(`msi/` and `nsis/` on Windows, `dmg/` and `macos/` on macOS).
+The installer ends up in `src-tauri/target/release/bundle/`. Development with hot reload: `npm run tauri dev`.
+Browser test version: `npm run build:web` → one self-contained `dist-web/index.html` (needs internet for MathJax).
 
-For development with hot reload: `npm run tauri dev`.
+## Features
 
-## How printing stays exact
+* Text boxes, pictures, rectangles, ellipses, arrows; move (also by the ✥ handle), resize, rotate
+  (right panel sliders), recolour, stacking order (buttons and drag-and-drop list).
+* Text: Doksi editor – bold/italic/underline/strike, super/subscript, colour, highlight, headings,
+  lists, line spacing, tables, formulas. `$…$` becomes a formula when the closing `$` is typed
+  (live preview under the cursor); pasted `$…$`, `$$…$$`, `\(…\)`, `\[…\]` become formulas automatically.
+* Templates (like PowerPoint's slide master): a master (background, logo, footer) and layouts with
+  placeholders. New slides are created from layouts.
+* Animations: entrance, emphasis and exit effects; on click / with previous / after previous;
+  duration and delay; whole text or paragraph by paragraph (both can be combined on one object).
+  Beúszás / Kiúszás (Fly In/Out) in 8 directions, Belebegés / Kilebegés (Float In/Out) up or down –
+  exported as PowerPoint's own presets (2 with subtypes, 42 / 47).
+* Slide transitions (Áttűnés, Áttűnés feketén át, Eltolás, Takarás, Felfedés, Törlés, Szétválás, Nagyítás)
+  with direction and exact duration – exported as PowerPoint transitions (`p14:dur`), previewed in the app.
+* Saving: "Mentés" writes the presentation's own file (asks only the first time), "Mentés másként" writes a new
+  file and leaves the previous one unchanged.
+  Coloured sequence numbers on the slide (can be hidden) and a timeline in the right panel.
+* Layers: show/hide (eye) and lock each object, drag to reorder, group / ungroup.
+* Colours: every colour picker has white, #D8D8D8, black and #DA291C, the colours saved in the presentation
+  (`doc.colors`, stored in the .mprezi file), a custom colour with OK / Mentés (save to this presentation)
+  and an eyedropper (the browser's own where available, otherwise picking from a picture of the slide).
+* Template builder: automatic slide number and date fields (master or layouts); text styles for headlines
+  and normal text (size, colour, bold, italic) that update the placeholders and new text boxes.
+* Home screen (new / open / continue), in-app confirmation before deleting a non-empty slide or starting a
+  new presentation, ↑/↓ to move between slides.
+* Built-in templates: Üres (default of every new file), Elearning and Maraton (`src/presets/*.mprezi`: opening,
+  content and closing slide types); Elmélet is shown locked until it is finished.
+  Applying a template keeps the slides' content.
+* PowerPoint import (Fájl → PowerPoint importálása): slides, layouts and backgrounds, text with fonts / colours /
+  sizes / lists, shapes, pictures, tables, groups, animations and transitions. MathType and Equation Editor 3.0
+  objects are decoded (MTEF, `src/prezi/mtef.js`) into editable TeX and put into the text where the old slide left
+  room for them (runs of spaces or tabs, a text box split in two, a formula at a line end); otherwise they become
+  formula boxes of the same size. A report lists what could not be converted.
+* Clipboard: objects and whole slides (select the slide in the left panel) can be copied / cut / pasted
+  between slides, presentations and Matekos Prezi windows; pictures and text paste from other programs;
+  pictures, text, layer rows and slide thumbnails can be dragged into another window.
+* Pictures: crop (undoable), replace; every object has an opacity setting (also imported / exported).
+* Find and replace (Ctrl/⌘+F) across all slides.
+* Formulas take the font of the text around them (math-capable fonts use their own math letters, each through
+  its own MathJax document in the page (loaded on first use, with its own queue); other fonts use the presentation's) and its boldness.
+* Formatting a selected, closed text box applies to all of its text and formulas; opening it turns the box
+  formatting into ordinary formatting of the text, so parts can then be changed one by one.
+* Formula editor: "Kedvencek" tab with the user's favourite buttons (kept by the app for every presentation).
+* The title box always shows the file name: Save as, renaming in the title box (renames the file) and files
+  renamed outside the app stay in step.
+* Videos (MP4 recommended): start on click / automatically, trimming, crop, rounded corners; played in the
+  slideshow and exported to PowerPoint (video file, trim, play command in the timing).
+* Lines: arrow heads at both ends; solid / dashed / dotted / dash-dot outlines; rounded corners for polygons
+  and pictures (PowerPoint: rounded-rectangle picture geometry).
+* Formulas may break into lines at the edge of their text box (per formula; MathJax inline line breaking).
+* PowerPoint import: charts, SmartArt and EMF/WMF pictures become marked boxes of the same size and position.
+* Slideshow preview inside the app.
 
-* **Pagination** (`src/editor/pagination.js`) measures the real layout after every change
-  and inserts invisible spacers, so every line, table row and picture sits inside a
-  page's text area. Paragraphs split across pages line by line, with orphan/widow
-  control and keep-with-next for headings.
-* **PDF export** (`src/pdf.js`) places every word, glyph, line, picture and formula at the
-  exact position the layout engine gave it on screen, using the same embedded font files.
-  Formulas are written as vector outlines.
-* **Print** in the desktop app opens that exact PDF in the system PDF viewer.
-  Print at **Actual size / 100 %**, not "Fit to page".
+## Export
 
-## Fonts
+* **PowerPoint (.pptx)** – every text box, formula and shape is placed on the slide as an SVG picture
+  (with a PNG copy for viewers without SVG support), drawn from the very same font files, so it looks
+  identical everywhere without installing fonts. Animations are PowerPoint's own preset effects in the
+  slide timing tree, so they play in PowerPoint's slideshow. Paragraph-by-paragraph text is exported as
+  one picture per paragraph. (Text is not editable in PowerPoint – by design.)
+* **PDF** – vector, one page per slide (final state) or one page per click step.
 
-* `src/fonts/bonum-*.ttf` – TeX Gyre Bonum (regular, bold, italic, bold italic), converted
-  to TrueType outlines for PDF embedding.
-* `fonts-official/texgyrebonum-math.otf` – the official TeX Gyre Bonum Math 1.005.
-  MathJax cannot read OpenType math fonts directly; it uses its own conversion of this
-  font (`@mathjax/mathjax-bonum-font`). `python3 tools/verify-math-font.py` checks that
-  the glyph outlines are identical to the official file.
-* Licence: GUST Font License (`fonts-official/GUST-FONT-LICENSE.txt`).
+Code: `src/prezi/export.js`. Text layout is taken from the rendered slide (every glyph at the position the
+browser placed it), so the export always matches the editor.
 
 ## File format
 
-`.mdoksi` files are JSON: `{ app, v, title, tpl, doc }` where `doc` is the TipTap
-document and `tpl` the page template. The app also opens `.kiadvany` files and `.html` files
-saved by earlier test versions.
+`.mprezi` is a zip: `manifest.json` (master, layouts, slides, animations; text as TipTap JSON) and
+`media/` (pictures). Older prototype files are converted when opened (`src/prezi/model.js`).
 
-## Project layout
+## Fonts
 
-```
-index.html            app shell (toolbar, dialogs, template panel)
-src/main.js           app logic: toolbar, dialogs, template, save/open/print
-src/editor/           TipTap extensions (math, images, lists, cells, pagination)
-src/pdf.js            exact PDF export
-src/pages.js          page sheets: header, footer, watermark
-src/template.js       page geometry, margins, gutter, odd/even pages
-src-tauri/            desktop app (Rust)
-tools/                font verification
-```
+Text fonts: `src/fonts/families/<name>/{r,b,i,bi}.(ttf|otf)`; math fonts: the `@mathjax/mathjax-<name>-font`
+packages (copied into `public/mathjax/fonts` at build time).
 
+| Set | Text font | Licence |
+|---|---|---|
+| bonum, pagella, termes, schola | TeX Gyre (GUST e-foundry) | GUST Font License |
+| modern | Latin Modern Roman | GUST Font License |
+| newcm | New Computer Modern | GUST Font License |
+| stix2 | STIX Two Text | SIL Open Font License |
+| fira | Fira Sans | SIL Open Font License |
+| dejavu | DejaVu Serif | Bitstream Vera / DejaVu licence (free) |
 
-## 0.5.0 – interface of Matekos Prezi
-- Home screen, top bar (Fájl ▾, Exportálás ▾, Mentés / Mentés másként, undo/redo, name + status, Sablon, zoom) and ribbon of Matekos Prezi.
-- The title box is the file name: Mentés writes the document's own file (asks only the first time), renaming the title renames the file.
-- Formula editor of Matekos Prezi (favourites, typeset buttons, Ctrl+M/H/L, line breaking per formula).
-- Paragraph settings (first line / hanging indent), line spacing with own value, letter spacing, all caps.
-- Template editor in the right panel (collapsible sections, text styles for normal text and headings).
-- Page list with live miniatures in the left panel.
+Other text fonts (no math version – formulas next to them use the base font's math): Liberation Sans/Mono
+(OFL), Carlito (OFL), Caladea (Apache 2.0), Roboto (Apache 2.0), Open Sans (OFL), Lato (OFL), Montserrat (OFL),
+Inter (OFL), Noto Sans/Serif (OFL), Linux Libertine (OFL/GPL), Ubuntu (Ubuntu Font Licence), Atkinson
+Hyperlegible (OFL), Comic Neue (OFL), JetBrains Mono (OFL). All four styles, Hungarian letters checked; the files
+are subset to Latin, Greek and common symbols.
+
+Licence texts: `fonts-official/`.
