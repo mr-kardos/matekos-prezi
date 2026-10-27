@@ -5,10 +5,10 @@ You only do this once per new version.
 
 ## 1. Put the project on GitHub
 1. Create a free account at https://github.com and sign in.
-2. Click **+** (top right) → **New repository**. Name it `matekos-prezi`.
+2. Click **+** (top right) → **New repository**. Name it `matekos-doksi`.
    Choose **Public** (then your peers can download without an account), and click **Create repository**.
 3. On the next page click **uploading an existing file**.
-4. Unzip `matekos-prezi-1.3.4-source.zip`, open the `matekos-prezi` folder, select **everything inside it**
+4. Unzip `matekos-doksi-0.2-source.zip`, open the `matekos-doksi` folder, select **everything inside it**
    and drag it into the browser window. Wait until all files are listed, then click **Commit changes**.
 
 ## 2. Add the build recipe
@@ -25,13 +25,13 @@ Folders starting with a dot are often hidden, so add this one by hand:
 
 ## 4. Share
 Open **Releases** (right side of the repository's main page). The newest release has:
-* `Matekos.Prezi_1.3.4_x64-setup.exe` – Windows installer wizard
-* `Matekos.Prezi_1.3.4_universal.dmg` – Mac (Apple Silicon and Intel)
+* `Matekos.Doksi_0.4.2_x64-setup.exe` – Windows installer wizard
+* `Matekos.Doksi_0.4.2_universal.dmg` – Mac (Apple Silicon and Intel)
 
 Send your peers the link to that Releases page. The installation steps are written there in Hungarian and English.
 
 ## New version later
-Change `"version"` in `src-tauri/tauri.conf.json` (e.g. to `0.1.1`), upload the changed files, and run step 3 again.
+Change `"version"` in `src-tauri/tauri.conf.json` (e.g. to `0.4.2`), upload the changed files, and run step 3 again.
 
 ## About the security warnings
 The app is not yet "signed", so Windows and macOS show a one-time warning on first launch.

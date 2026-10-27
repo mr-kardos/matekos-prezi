@@ -105,7 +105,7 @@ const CATS = [
 /* ---- the dialog ---- */
 let dlg, mf, texBox, prev, onApply = null, onDelete = null, cats, palette, curCat = 'fav', dragging = null;
 /* favourites: chosen palette buttons, kept by the app (for every presentation); first start: the old quick buttons */
-const FAV_KEY = 'matekosprezi.mathFav';
+const FAV_KEY = 'matekosdoksi.mathFav';
 let favMode = false;
 const ALL_ITEMS = () => [...CATS.flatMap(c => c[1]), ...FREQUENT];
 function favList() { try { const v = JSON.parse(localStorage.getItem(FAV_KEY)); if (Array.isArray(v)) return v; } catch (e) { /* none yet */ } return []; }
@@ -157,7 +157,7 @@ function build() {
     <div class="md-fwrap" id="mdFwrap"><div class="md-fscroll" id="mdFscroll"><math-field id="mdField" math-virtual-keyboard-policy="manual"></math-field></div><div class="md-fgrip" id="mdFgrip" title="Húzd a mező (és a betűk) nagyításához"></div></div>
     <details class="md-tex"><summary>TeX-kód</summary><textarea id="mdTex" spellcheck="false" rows="2"></textarea></details>
     <details class="md-prevd" open><summary>Végleges megjelenés</summary><div class="md-prev" id="mdPrev"></div></details>
-    <div class="md-foot"><label class="chk md-wrapchk" title="Hosszú képlet a szövegdoboz szélén új sorban folytatódik (egyenlőségjel, +, −, zárójel és hasonlók után)"><input type="checkbox" id="mdWrap"> Sortörés a doboz szélén</label><span class="sp"></span><button class="btn" id="mdDel" hidden>Képlet törlése</button><button class="btn" id="mdCancel">Mégse</button><button class="btn primary" id="mdOk">Beszúrás</button></div>`;
+    <div class="md-foot"><label class="chk md-wrapchk" title="Hosszú képlet a sor végén új sorban folytatódik (egyenlőségjel, +, −, zárójel és hasonlók után)"><input type="checkbox" id="mdWrap"> Sortörés a sor végén</label><span class="sp"></span><button class="btn" id="mdDel" hidden>Képlet törlése</button><button class="btn" id="mdCancel">Mégse</button><button class="btn primary" id="mdOk">Beszúrás</button></div>`;
   mf = dlg.querySelector('#mdField');
   texBox = dlg.querySelector('#mdTex');
   prev = dlg.querySelector('#mdPrev');
@@ -194,11 +194,11 @@ function build() {
   // the live field: drag its corner to make it (and its letters) bigger
   const fw = dlg.querySelector('#mdFwrap'), grip = dlg.querySelector('#mdFgrip');
   const setFH = h => { h = Math.max(56, Math.min(360, h)); fw.style.height = h + 'px'; fitField(); return h; };
-  setFH(+localStorage.getItem('matekosprezi.mdField') || 84);
+  setFH(+localStorage.getItem('matekosdoksi.mdField') || 84);
   grip.addEventListener('pointerdown', e => {
     e.preventDefault(); grip.setPointerCapture(e.pointerId); const y0 = e.clientY, h0 = fw.getBoundingClientRect().height;
     const mv = ev => setFH(h0 + ev.clientY - y0);
-    const up = ev => { grip.removeEventListener('pointermove', mv); grip.removeEventListener('pointerup', up); try { localStorage.setItem('matekosprezi.mdField', String(setFH(h0 + ev.clientY - y0))); } catch (_) {} };
+    const up = ev => { grip.removeEventListener('pointermove', mv); grip.removeEventListener('pointerup', up); try { localStorage.setItem('matekosdoksi.mdField', String(setFH(h0 + ev.clientY - y0))); } catch (_) {} };
     grip.addEventListener('pointermove', mv); grip.addEventListener('pointerup', up);
   });
   texBox.addEventListener('input', () => { mf.value = texBox.value; markPlaceholders(); syncFromField(); });

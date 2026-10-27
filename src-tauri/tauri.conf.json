@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Matekos Prezi",
-  "version": "1.3.4",
-  "identifier": "hu.matekosprezi.editor",
+  "productName": "Matekos Doksi",
+  "version": "0.5.0",
+  "identifier": "hu.matekosdoksi.editor",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Matekos Prezi",
+        "title": "Matekos Doksi",
         "width": 1440,
         "height": 900,
         "minWidth": 960,
@@ -38,12 +38,12 @@
     "fileAssociations": [
       {
         "ext": [
-          "mprezi"
+          "mdoksi"
         ],
-        "name": "Matekos Prezi bemutató",
-        "description": "Matekos Prezi bemutató",
+        "name": "Matekos Doksi dokumentum",
+        "description": "Matekos Doksi dokumentum",
         "role": "Editor",
-        "mimeType": "application/x-matekos-prezi"
+        "mimeType": "application/x-matekos-doksi"
       }
     ],
     "macOS": {
@@ -60,14 +60,14 @@
           "English"
         ],
         "displayLanguageSelector": true,
-        "startMenuFolder": "Matekos Prezi",
+        "startMenuFolder": "Matekos Doksi",
         "customLanguageFiles": {
           "Hungarian": "installer/hungarian.nsh"
         },
         "installerIcon": "icons/icon.ico"
       }
     },
-    "shortDescription": "Bemutatókészítő élő TeX-képletekkel, PowerPoint- és PDF-exporttal",
-    "publisher": "Matekos Prezi"
+    "shortDescription": "Nyomdakész dokumentumszerkesztő élő TeX-képletekkel",
+    "publisher": "Matekos Doksi"
   }
 }

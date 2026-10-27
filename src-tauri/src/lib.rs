@@ -2,7 +2,7 @@ use std::sync::Mutex;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use tauri::{Emitter, Manager};
 
-/// Files the app was asked to open (double-clicked .mprezi files), waiting for the window to pick them up.
+/// Files the app was asked to open (double-clicked .mdoksi files), waiting for the window to pick them up.
 struct OpenedFiles(Mutex<Vec<String>>);
 
 #[tauri::command]
@@ -25,7 +25,7 @@ pub fn run() {
         .manage(OpenedFiles(Mutex::new(files)))
         .invoke_handler(tauri::generate_handler![take_opened_files])
         .build(tauri::generate_context!())
-        .expect("error while running Matekos Prezi");
+        .expect("error while running Matekos Doksi");
 
     app.run(|handle, event| {
         // macOS: documents arrive as an "open files" event (also while the app is already running)

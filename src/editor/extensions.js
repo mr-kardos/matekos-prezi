@@ -4,7 +4,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { BulletList, OrderedList } from '@tiptap/extension-list';
 import { Table, TableRow, TableCell, TableHeader, TableView } from '@tiptap/extension-table';
 import { CellSelection, TableMap } from '@tiptap/pm/tables';
-import { renderInto, isReady, mathReady, mathFontFromCSS } from '../math.js';
+import { renderInto, isReady, mathReady } from '../math.js';
 
 const numOrNull = v => (v === '' || v === null || v === undefined || isNaN(+v)) ? null : +v;
 
@@ -282,14 +282,6 @@ export const LineShade = Mark.create({
 /* ------------------------------------------------------------------ */
 const mathKey = new PluginKey('mathTools');
 const isBold = n => n.marks.some(m => m.type.name === 'bold');   // bold formulas: \boldsymbol
-/** Font and boldness of a formula: its own marks first, then the text box it is in (Prezi box formatting). */
-function mathLook(n, editor) {
-  let host = null; try { host = editor?.options?.element || null; } catch (e) { /* not mounted yet */ }
-  const ts = n.marks.find(m => m.type.name === 'textStyle'), box = host?.closest?.('.txt') || null;
-  const font = mathFontFromCSS(ts?.attrs?.fontFamily || box?.style?.fontFamily || '');
-  const bw = box?.style?.fontWeight;
-  return {font, bold: isBold(n) || bw === 'bold' || +bw >= 600};
-}
 const DOLLAR_RE = /(\\?)\$\$([^$]+?)\$\$|(\\?)\$([^$\s](?:[^$]*?[^$\s\\])?)\$|\\\((.+?)\\\)|\\\[(.+?)\\\]/g;
 
 function cellPosAround(doc, pos) {
@@ -327,8 +319,8 @@ export const MathNode = Node.create({
       const paint = () => {
         dom.className = 'math' + (cur.attrs.display ? ' disp' : '') + (cur.attrs.wrap ? ' wrap' : '') + (dom._sel ? ' ProseMirror-selectednode' : '');
         dom.setAttribute('data-tex', cur.attrs.tex);
-        const lk = mathLook(cur, editor); dom._lk = lk.font + '|' + lk.bold;
-        renderInto(dom, cur.attrs.tex, cur.attrs.display, () => ext.options.onRendered && ext.options.onRendered(), lk.bold, cur.attrs.wrap, lk.font);
+        dom._lk = isBold(cur);
+        renderInto(dom, cur.attrs.tex, cur.attrs.display, () => ext.options.onRendered && ext.options.onRendered(), isBold(cur), cur.attrs.wrap);
       };
       paint();
       // Mouse: click = select the formula; click on its left/right edge = cursor before/after it;
@@ -383,8 +375,7 @@ export const MathNode = Node.create({
         dom,
         update(n) {
           if (n.type !== cur.type) return false;
-          const lk = mathLook(n, editor);
-          const changed = n.attrs.tex !== cur.attrs.tex || n.attrs.display !== cur.attrs.display || n.attrs.wrap !== cur.attrs.wrap || dom._lk !== lk.font + '|' + lk.bold;
+          const changed = n.attrs.tex !== cur.attrs.tex || n.attrs.display !== cur.attrs.display || n.attrs.wrap !== cur.attrs.wrap || isBold(n) !== dom._lk;
           cur = n;
           if (changed) paint();
           return true;
@@ -676,5 +667,54 @@ export const KvImage = Node.create({
   },
   addCommands() {
     return { insertImage: attrs => ({ commands }) => commands.insertContent({ type: this.name, attrs }) };
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* From Matekos Prezi: hanging indent in lists, letter spacing, caps   */
+/* ------------------------------------------------------------------ */
+/** Hanging indent inside lists: the whole paragraph moves right, the list symbol stays (more space after it). */
+export const ListHang = Extension.create({
+  name: 'listHang',
+  addGlobalAttributes() {
+    return [{ types: ['paragraph'], attributes: { hang: {
+      default: null,
+      parseHTML: el => { const v = parseFloat(el.getAttribute('data-hang')); return isFinite(v) ? v : null; },
+      renderHTML: a => a.hang ? { 'data-hang': a.hang, style: `--hang:${a.hang}cm;padding-left:${a.hang}cm` } : {}
+    } } }];
+  }
+});
+/** Letter spacing as a text style: <span style="letter-spacing:…">. */
+export const LetterSpacing = Extension.create({
+  name: 'letterSpacing',
+  addGlobalAttributes() {
+    return [{ types: ['textStyle'], attributes: { letterSpacing: {
+      default: null,
+      parseHTML: el => el.style.letterSpacing || null,
+      renderHTML: a => a.letterSpacing ? { style: `letter-spacing:${a.letterSpacing}` } : {}
+    } } }];
+  },
+  addCommands() {
+    return {
+      setLetterSpacing: v => ({ chain }) => chain().setMark('textStyle', { letterSpacing: v }).run(),
+      unsetLetterSpacing: () => ({ chain }) => chain().setMark('textStyle', { letterSpacing: null }).removeEmptyTextStyle().run()
+    };
+  }
+});
+/** All caps (only the look – the letters stay as typed). */
+export const TextCase = Extension.create({
+  name: 'textCase',
+  addGlobalAttributes() {
+    return [{ types: ['textStyle'], attributes: { textTransform: {
+      default: null,
+      parseHTML: el => el.style.textTransform === 'uppercase' ? 'uppercase' : null,
+      renderHTML: a => a.textTransform ? { style: `text-transform:${a.textTransform}` } : {}
+    } } }];
+  },
+  addCommands() {
+    return {
+      setUppercase: () => ({ chain }) => chain().setMark('textStyle', { textTransform: 'uppercase' }).run(),
+      unsetUppercase: () => ({ chain }) => chain().setMark('textStyle', { textTransform: null }).removeEmptyTextStyle().run()
+    };
   }
 });

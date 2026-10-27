@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    matekos_prezi_lib::run()
+    matekos_doksi_lib::run()
 }

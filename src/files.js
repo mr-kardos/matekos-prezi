@@ -1,145 +1,106 @@
-// Saving and opening – native dialogs in the desktop app, downloads / file picker in the browser.
+// Saving and opening (as in Matekos Prezi) with the desktop app's native dialogs.
 export const isTauri = () => typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__;
-export const safeName = t => (t || 'bemutato').replace(/[\\/:*?"<>|]+/g, '').trim().slice(0, 120) || 'bemutato';
+export const safeName = t => (t || 'dokumentum').replace(/[\\/:*?"<>|]+/g, '').trim().slice(0, 120) || 'dokumentum';
 const baseName = p => String(p).split(/[\\/]/).pop();
+const DOC_EXT = /\.(mdoksi|kiadvany|html?|json)$/i;
 
-let currentPath = null;      // desktop app: path of the presentation file
-let currentHandle = null;    // browser (Chrome/Edge): file handle, so "Mentés" can write the same file again
+let currentPath = null;      // desktop app: path of the document file
 export const getCurrentPath = () => currentPath;
-export const setCurrentPath = p => { currentPath = p; };
-export const getCurrentHandle = () => currentHandle;
-export const setCurrentHandle = h => { currentHandle = h || null; };
-/** Name of the file the presentation is saved to (or null). */
-export const currentFileName = () => currentPath ? baseName(currentPath) : currentHandle ? currentHandle.name : null;
-const MPREZI_TYPE = [{description: 'Matekos Prezi bemutató', accept: {'application/zip': ['.mprezi']}}];
+export const setCurrentPath = p => { currentPath = p || null; };
+/** Name of the file the document is saved to (or null). */
+export const currentFileName = () => currentPath ? baseName(currentPath) : null;
+/** The document's title as shown in the title box: the file name without its extension. */
+export const titleOfFile = name => String(name || '').replace(DOC_EXT, '');
 
-/** Browser download (or the claude.ai downloads capability when running as a published page). */
-async function download(filename, blob) {
-  let dl = null;
-  try { if (window.claude && window.claude.use) dl = await window.claude.use('downloads'); } catch (e) { dl = null; }
-  if (dl) {
-    try { await dl.save({filename, data: blob}); return 'Mentve'; }
-    catch (e) { return e && e.code === 'declined' ? 'Mentés megszakítva' : 'A fájl mentése nem sikerült' + (e && e.code ? ' (' + e.code + ')' : ''); }
+export function documentJSON(data) { return JSON.stringify({ app: 'matekos-doksi', v: 2, ...data }); }
+/** Reads .mdoksi (JSON) – and .html files saved by earlier browser test versions. */
+export function parseDocumentFile(text) {
+  if (/^\s*\{/.test(text)) return JSON.parse(text);
+  const d = new DOMParser().parseFromString(text, 'text/html');
+  const s = d.getElementById('mdoksi-data') || d.getElementById('kiadvany-data');
+  if (!s) throw new Error('nem Matekos Doksi dokumentum');
+  return JSON.parse(s.textContent);
+}
+
+/** Save the editable document: its own file (asks only the first time), or a new file (saveAs). */
+export async function saveDocument(data, saveAs) {
+  const json = documentJSON(data);
+  const { save } = await import('@tauri-apps/plugin-dialog');
+  const { writeTextFile } = await import('@tauri-apps/plugin-fs');
+  let path = !saveAs && currentPath && /\.mdoksi$/i.test(currentPath) ? currentPath : null;
+  if (!path) {
+    path = await save({ defaultPath: safeName(data.title) + '.mdoksi', filters: [{ name: 'Matekos Doksi dokumentum', extensions: ['mdoksi'] }] });
+    if (!path) return 'Mentés megszakítva';
   }
-  const url = URL.createObjectURL(blob), a = document.createElement('a');
-  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  await writeTextFile(path, json);
+  currentPath = path;
   return 'Mentve';
 }
 
-/** Save the editable presentation (.mprezi = zip). */
-export async function savePresentation(blob, title, saveAs) {
-  if (isTauri()) {
-    const {save} = await import('@tauri-apps/plugin-dialog');
-    const {writeFile} = await import('@tauri-apps/plugin-fs');
-    let path = !saveAs && currentPath;
-    if (!path) {
-      path = await save({defaultPath: safeName(title) + '.mprezi', filters: [{name: 'Matekos Prezi bemutató', extensions: ['mprezi']}]});
-      if (!path) return 'Mentés megszakítva';
-    }
-    await writeFile(path, new Uint8Array(await blob.arrayBuffer()));
-    currentPath = path;
-    return 'Mentve';
-  }
-  if (window.showSaveFilePicker) {                       // Chrome / Edge: real files, saved in place
-    try {
-      let h = !saveAs && currentHandle;
-      if (h && (await h.queryPermission?.({mode: 'readwrite'})) !== 'granted' && (await h.requestPermission?.({mode: 'readwrite'})) !== 'granted') h = null;
-      if (!h) h = await window.showSaveFilePicker({suggestedName: safeName(title) + '.mprezi', types: MPREZI_TYPE});
-      const w = await h.createWritable(); await w.write(blob); await w.close();
-      currentHandle = h; return 'Mentve';
-    } catch (e) { if (e && e.name === 'AbortError') return 'Mentés megszakítva'; }
-  }
-  return download(safeName(title) + '.mprezi', blob);
-}
-
-/** Rename the presentation's own file (title box). Returns the new file name, or null when not possible. */
+/** Rename the document's own file (title box). Returns the new file name, or null when not possible. */
 export async function renameCurrentFile(newTitle) {
-  const name = safeName(newTitle) + '.mprezi';
-  if (isTauri() && currentPath) {
+  const name = safeName(newTitle) + '.mdoksi';
+  if (currentPath) {
     if (baseName(currentPath) === name) return name;
-    const {rename, exists} = await import('@tauri-apps/plugin-fs');
-    const sep = currentPath.includes('\\') && !currentPath.includes('/') ? '\\' : '/';
+    const { rename, exists } = await import('@tauri-apps/plugin-fs');
     const target = currentPath.slice(0, currentPath.length - baseName(currentPath).length) + name;
     if (await exists(target)) throw new Error(`Ebben a mappában már van „${name}” nevű fájl.`);
     await rename(currentPath, target);
     currentPath = target; return name;
   }
-  if (currentHandle && currentHandle.move) { if (currentHandle.name !== name) await currentHandle.move(name); return currentHandle.name; }
   return null;
 }
-/** Does the presentation's file still exist where it was (it may have been renamed or moved outside the app)? */
+/** Does the document's file still exist where it was (it may have been renamed or moved outside the app)? */
 export async function currentFileExists() {
-  if (isTauri() && currentPath) { try { const {exists} = await import('@tauri-apps/plugin-fs'); return await exists(currentPath); } catch (e) { return true; } }
-  return true;
-}
-/** Export files (.pptx, .pdf). */
-export async function saveExport(blob, title, ext, label) {
-  if (isTauri()) {
-    const {save} = await import('@tauri-apps/plugin-dialog');
-    const {writeFile} = await import('@tauri-apps/plugin-fs');
-    const path = await save({defaultPath: safeName(title) + '.' + ext, filters: [{name: label, extensions: [ext]}]});
-    if (!path) return 'Mentés megszakítva';
-    await writeFile(path, new Uint8Array(await blob.arrayBuffer()));
-    return 'Mentve';
-  }
-  return download(safeName(title) + '.' + ext, blob);
+  if (!currentPath) return true;
+  try { const { exists } = await import('@tauri-apps/plugin-fs'); return await exists(currentPath); } catch (e) { return true; }
 }
 
-/** Pick a .mprezi file. Returns {data: ArrayBuffer, path, name} or null. */
-export async function openPresentation() {
-  if (isTauri()) {
-    const {open} = await import('@tauri-apps/plugin-dialog');
-    const path = await open({multiple: false, filters: [{name: 'Matekos Prezi bemutató', extensions: ['mprezi']}]});
-    if (!path) return null;
-    return openPathFile(path);
-  }
-  if (window.showOpenFilePicker) {
-    try {
-      const [h] = await window.showOpenFilePicker({types: MPREZI_TYPE, multiple: false});
-      const f = await h.getFile(); currentHandle = h;
-      return {data: await f.arrayBuffer(), path: null, name: f.name, handle: h};
-    } catch (e) { if (e && e.name === 'AbortError') return null; }
-  }
-  return new Promise(resolve => {
-    const inp = document.getElementById('openIn');
-    inp.onchange = async () => { const f = inp.files[0]; inp.value = ''; resolve(f ? {data: await f.arrayBuffer(), path: null, name: f.name} : null); };
-    inp.click();
-  });
+/** Pick a document. Returns {data, path, name} or null (or {error}). */
+export async function openDocumentFile() {
+  const { open } = await import('@tauri-apps/plugin-dialog');
+  const path = await open({ multiple: false, filters: [{ name: 'Matekos Doksi dokumentum', extensions: ['mdoksi', 'kiadvany', 'html', 'htm', 'json'] }] });
+  if (!path) return null;
+  return openPathFile(path);
 }
-/** Pick any file (e.g. a PowerPoint file to import). Returns {data: ArrayBuffer, name} or null. */
-export async function pickFile(label, exts) {
-  if (isTauri()) {
-    const {open} = await import('@tauri-apps/plugin-dialog');
-    const path = await open({multiple: false, filters: [{name: label, extensions: exts}]});
-    if (!path) return null;
-    const {readFile} = await import('@tauri-apps/plugin-fs');
-    const bytes = await readFile(path);
-    return {data: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), name: baseName(path)};
-  }
-  return new Promise(resolve => {
-    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = exts.map(e => '.' + e).join(',');
-    inp.onchange = async () => { const f = inp.files[0]; resolve(f ? {data: await f.arrayBuffer(), name: f.name} : null); };
-    inp.click();
-  });
-}
-/** Desktop: read a presentation from a path (e.g. a double-clicked .mprezi file). */
+/** Desktop: read a document from a path (e.g. a double-clicked .mdoksi file). */
 export async function openPathFile(path) {
-  const {readFile} = await import('@tauri-apps/plugin-fs');
-  const bytes = await readFile(path);
-  return {data: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), path, name: baseName(path)};
+  const { readTextFile } = await import('@tauri-apps/plugin-fs');
+  const text = await readTextFile(path);
+  try { return { data: parseDocumentFile(text), path, name: baseName(path) }; }
+  catch (e) { return { error: e }; }
 }
 /** Desktop: files the operating system asked us to open (double-click), plus later requests. */
 export async function watchOpenedFiles(onFile) {
-  const {invoke} = await import('@tauri-apps/api/core');
-  const {listen} = await import('@tauri-apps/api/event');
+  const { invoke } = await import('@tauri-apps/api/core');
+  const { listen } = await import('@tauri-apps/api/event');
   await listen('open-files', e => { const p = e.payload && e.payload[0]; if (p) onFile(p); });
   const first = await invoke('take_opened_files');
   return first && first.length ? first[0] : null;
 }
 
-/* ---------- autosave: the last state survives a crash or a closed window ---------- */
-const DB = 'matekos-prezi', STORE = 'autosave';
+/** PDF export. */
+export async function savePdfBlob(blob, title) {
+  const { save } = await import('@tauri-apps/plugin-dialog');
+  const { writeFile } = await import('@tauri-apps/plugin-fs');
+  const path = await save({ defaultPath: safeName(title) + '.pdf', filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+  if (!path) return 'Mentés megszakítva';
+  await writeFile(path, new Uint8Array(await blob.arrayBuffer()));
+  return 'PDF elmentve: ' + baseName(path);
+}
+/** Desktop printing: the exact PDF is opened in the system PDF viewer, which prints it at true size. */
+export async function printPdfBlob(blob, title) {
+  const { tempDir, join } = await import('@tauri-apps/api/path');
+  const { writeFile } = await import('@tauri-apps/plugin-fs');
+  const { openPath } = await import('@tauri-apps/plugin-opener');
+  const path = await join(await tempDir(), 'matekos-doksi-print-' + Date.now() + '-' + safeName(title) + '.pdf');
+  await writeFile(path, new Uint8Array(await blob.arrayBuffer()));
+  await openPath(path);
+  return 'Megnyitva a PDF-nézőben – nyomtasd „Tényleges méret” (100%) beállítással';
+}
+
+/* ---------- autosave: the last state survives a crash or a closed window (IndexedDB: room for pictures) ---------- */
+const DB = 'matekos-doksi', STORE = 'autosave';
 function idb() {
   return new Promise((ok, err) => {
     const r = indexedDB.open(DB, 1);
