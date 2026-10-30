@@ -2271,6 +2271,15 @@ $('#homeNew').onclick = newPresentation;
 $('#homeOpen').onclick = doOpen;
 $('#homeResume').onclick = () => { sessionOpen = true; showHome(false); };
 let sessionOpen = false;            // a presentation was opened / created / continued in this session
+/* colour theme: dark (default on every platform) or light; also the desktop window's own title bar */
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('matekosprezi.theme', t); } catch (e) { /* ignore */ }
+  $('#fTheme').textContent = t === 'dark' ? '☀  Világos mód' : '☾  Sötét mód';   // as in Matekos Doksi
+  if (isTauri()) import('@tauri-apps/api/window').then(m => m.getCurrentWindow().setTheme(t)).catch(() => {});
+}
+applyTheme(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+$('#fTheme').onclick = () => { closePops(); applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); };
 $('#fHome').onclick = () => { closePops(); sessionOpen = true; if (editing) exitEdit(); clearTimeout(autoT); autosave(autoValue()); showHome(true); };
 function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('on'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('on'), 2800); }
 

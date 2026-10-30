@@ -182,7 +182,7 @@ function build() {
     if (mod && !e.altKey && k === 'l') { stop(); mf.executeCommand('moveToSubscript'); return; }
     // the character the keyboard really produced (MathLive may guess the layout wrongly: on a Hungarian
     // keyboard Shift+7 is "=", which it took for "/" and turned into a fraction)
-    if (e.key.length === 1 && (altGr || (!mod && !e.altKey)) && !/[\p{L}\p{N}\s]/u.test(e.key)) {
+    if (e.key.length === 1 && (altGr || !mod) && !/[\p{L}\s]/u.test(e.key)) {   // Option (Mac) also types characters
       stop();
       if (e.key === '/') mf.executeCommand(['insert', '\\frac{#@}{#?}']);
       else if (e.key === '*') mf.executeCommand(['insert', '\\cdot']);
