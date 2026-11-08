@@ -96,7 +96,10 @@ function textBody(roots, stop, ox, oy) {
       for (const ch of nd.data) {
         const len = ch.length; range.setStart(nd, off); range.setEnd(nd, off + len); off += len;
         if (ch === '\u200b' || ch === '\n' || ch === '\ufeff') continue;
-        const rect = range.getClientRects()[0]; if (!rect || (!rect.width && ch.trim())) continue;
+        // the widest box of the character: Safari/WebKit (Mac) also reports an empty box at the end of the previous
+        // line for the first letter of a wrapped line – taking that one lost those letters in the export
+        let rect = null; for (const r of range.getClientRects()) if (!rect || r.width > rect.width) rect = r;
+        if (!rect || (!rect.width && ch.trim())) continue;
         const x = rect.left - ox, base = rect.top + asc - oy;
         if (ch.trim()) {
           const g = upper ? ch.toUpperCase() : ch;

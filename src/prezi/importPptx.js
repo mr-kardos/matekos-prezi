@@ -777,7 +777,7 @@ export async function placeContent(doc, {renderText, measureMath, onProgress, te
       for (let n = walker.nextNode(); n; n = walker.nextNode(), i++) {
         const [para, run] = nodes[i] || []; if (para == null) continue;
         for (let c = 0; c < n.data.length; c++) {
-          rg.setStart(n, c); rg.setEnd(n, c + 1); const rc = rg.getClientRects()[0]; if (!rc) continue;
+          rg.setStart(n, c); rg.setEnd(n, c + 1); let rc = null; for (const r of rg.getClientRects()) if (!rc || r.width > rc.width) rc = r; if (!rc) continue;
           chars.push({ch: n.data[c], x: rc.left - ox, r: rc.right - ox, top: rc.top - oy, bottom: rc.bottom - oy, pos: {para, run, start: c, node: i}});
         }
       }

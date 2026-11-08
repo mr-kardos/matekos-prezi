@@ -172,9 +172,11 @@ function build() {
   const st = document.createElement('style');
   st.textContent = '.kv-ph{color:#2f9a46!important}';
   mf.shadowRoot.appendChild(st);
+  mf.addEventListener('pointerdown', () => { lbuf = ''; });
   mf.addEventListener('keydown', e => {
     const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase(), altGr = e.getModifierState && e.getModifierState('AltGraph');
     const stop = () => { e.preventDefault(); e.stopPropagation(); };
+    if (e.key.length !== 1) { if (e.key === 'Backspace') lbuf = lbuf.slice(0, -1); else if (!['Shift', 'Alt', 'Control', 'Meta', 'AltGraph', 'CapsLock'].includes(e.key)) lbuf = ''; }
     if (e.key === 'Enter' && !e.shiftKey) { stop(); apply(); return; }
     if (e.key === 'Escape') { stop(); close(); return; }
     if (mod && !e.altKey && k === 'm') { stop(); apply(); return; }
@@ -182,9 +184,13 @@ function build() {
     if (mod && !e.altKey && k === 'l') { stop(); mf.executeCommand('moveToSubscript'); return; }
     // the character the keyboard really produced (MathLive may guess the layout wrongly: on a Hungarian
     // keyboard Shift+7 is "=", which it took for "/" and turned into a fraction)
-    if (e.key.length === 1 && (altGr || !mod) && !/[\p{L}\s]/u.test(e.key)) {   // Option (Mac) also types characters
+    // every character exactly as the keyboard typed it (letters too: on a Hungarian Mac keyboard MathLive took the
+    // ű key for "/"); letters keep MathLive's typing shortcuts (sin, sqrt, alpha…)
+    if (e.key.length === 1 && (altGr || !mod) && e.key !== ' ') {   // Option (Mac) also types characters
       stop();
-      if (e.key === '/') mf.executeCommand(['insert', '\\frac{#@}{#?}']);
+      if (/\p{L}/u.test(e.key)) { typeLetter(e.key); return; }
+      flushWord();
+      if (e.key === '/') mf.executeCommand(['insert', '/']);
       else if (e.key === '*') mf.executeCommand(['insert', '\\cdot']);
       else if (e.key === '^') mf.executeCommand('moveToSuperscript');
       else if (e.key === '_') mf.executeCommand('moveToSubscript');
@@ -297,7 +303,27 @@ function showCat(i) {
 }
 function hide() { dlg.hidden = true; onApply = onDelete = null; if (favMode) setFavMode(false); }
 function close() { const a = onApply; hide(); a && a(null); }
-function apply() { const a = onApply, t = cleanTex(), w = dlg.querySelector('#mdWrap').checked; hide(); a && a(t, w); }
+/* typing shortcuts (sin, tg, sqrt, alpha…): letters are inserted as typed, and a finished name becomes its command */
+let lbuf = '', SHORT = null;
+function shortcuts() {
+  if (SHORT) return SHORT;
+  SHORT = {};
+  for (const [k, v] of Object.entries(mf.inlineShortcuts || {})) if (/^[a-zA-Z]+$/.test(k)) { const t = typeof v === 'string' ? v : v?.value; if (t) SHORT[k] = t; }
+  Object.assign(SHORT, {tg: '\\tg', ctg: '\\ctg', arctg: '\\arctg', arcctg: '\\arcctg', sh: '\\sh', ch: '\\ch', th: '\\th', sqrt: '\\sqrt{#?}'});
+  return SHORT;
+}
+function replaceTail(n, latex) { for (let i = 0; i < n; i++) mf.executeCommand('deleteBackward'); mf.executeCommand(['insert', latex]); }
+function typeLetter(c) {
+  const d = shortcuts(), names = Object.keys(d);
+  mf.executeCommand(['insert', c]); lbuf += c;
+  if (!names.some(n => n.startsWith(lbuf))) {
+    const head = lbuf.slice(0, -1);
+    if (head && d[head]) { replaceTail(lbuf.length, d[head]); mf.executeCommand(['insert', c]); }
+    lbuf = names.some(n => n.startsWith(c)) ? c : '';
+  } else if (d[lbuf] && !names.some(n => n !== lbuf && n.startsWith(lbuf))) { replaceTail(lbuf.length, d[lbuf]); lbuf = ''; }
+}
+function flushWord() { const d = shortcuts(); if (lbuf && d[lbuf]) replaceTail(lbuf.length, d[lbuf]); lbuf = ''; }
+function apply() { flushWord(); const a = onApply, t = cleanTex(), w = dlg.querySelector('#mdWrap').checked; hide(); a && a(t, w); }
 
 /**
  * Open the editor. onApply(tex) is called with the final TeX ('' = empty), or null when cancelled.
