@@ -8,7 +8,7 @@ import { FONT_SETS, DEFAULT_FONT, applyTextFont, loadTextFamily, allFamilies, fa
 import { openMathEditor, isMathEditorOpen, applyMathEditor } from '../mathEditor.js';
 import { tableContext } from '../editor/extensions.js';
 import { svg as svgIcon } from '../icons.js';
-import { renameCurrentFile, currentFileExists, pickFile, isTauri, savePresentation, saveExport, openPresentation, openPathFile, watchOpenedFiles, setCurrentPath, getCurrentPath, getCurrentHandle, setCurrentHandle, currentFileName, autosave, loadAutosave } from '../files.js';
+import { saveTemplateFile, updateTemplateFile, openTemplateFile, templateFilePath, renameCurrentFile, currentFileExists, pickFile, isTauri, savePresentation, saveExport, openPresentation, openPathFile, watchOpenedFiles, setCurrentPath, getCurrentPath, getCurrentHandle, setCurrentHandle, currentFileName, autosave, loadAutosave } from '../files.js';
 import { Anim } from './anim.js';
 import { W, H, uid, clone, emptyDoc, textDoc, tableDoc, T, M, isEmptyText, blockCount, makeBackground, phName, ph, TITLE_PROMPT,
   defaultMaster, defaultTemplates, newSlide as makeSlide, syncPlaceholders as syncPh, migrate,
@@ -61,6 +61,9 @@ function applyStyle(kind, changes) {
     if (roleOf(o) !== kind || (!layoutLevel && (o.phStyled || o.ownStyle))) return;
     if ('size' in changes) o.size = o.placeholder ? Math.round(o.size * k * 100) / 100 : nw.size;
     for (const key of ['color', 'bold', 'italic', 'underline']) if (key in changes) o[key] = nw[key] || undefined;
+    if ('line' in changes) o.lineHeight = nw.line && nw.line !== 1.25 ? nw.line : undefined;
+    if ('letterSpacing' in changes) o.letterSpacing = nw.letterSpacing || undefined;
+    if ('align' in changes) o.align = nw.align || 'left';
     if ('font' in changes) o.font = nw.font || undefined;
   };
   for (const g of [doc.master, ...Object.values(doc.templates)]) flatObjects(g.objects).forEach(o => upd(o, true));
@@ -68,7 +71,81 @@ function applyStyle(kind, changes) {
   commit();
 }
 /** Apply a built-in template: master, slide types, text styles (and its font set). The slides keep their content. */
+/* ================================================================== template files (.mpsab)
+   save the template (master, slide types, text styles, base font) into a Matekos Prezi Sablon file and use one
+   (at most one per presentation), as in Matekos Doksi */
+const tplLabel = () => doc.customTpl?.on ? doc.customTpl.name : (doc.templateName === 'Üres' ? 'Sima' : (doc.templateName || 'Saját'));
+const tplSnapshot = () => JSON.parse(JSON.stringify({master: doc.master, templates: doc.templates, styles: stylesOf(), font: doc.font || DEFAULT_FONT}));
+function tplMedia(t) {
+  const keys = new Set();
+  for (const g of [t.master, ...Object.values(t.templates || {})]) { if (!g) continue; if (g.background) keys.add(g.background); for (const o of flatObjects(g.objects || [])) { if (o.media) keys.add(o.media); if (o.poster) keys.add(o.poster); } }
+  return [...keys];
+}
+async function packTemplate(name, t) {
+  const z = new JSZip(), files = {};
+  for (const k of tplMedia(t)) { const m = media[k]?.match(/^data:([^;]+);base64,(.*)$/); if (!m) continue; const fn = `media/${k}.${EXT[m[1]] ?? 'bin'}`; z.file(fn, m[2], {base64: true}); files[k] = fn; }
+  z.file('manifest.json', JSON.stringify({format: 'mprezi', version: doc.version || 4, size: {w: W, h: H}, app: 'matekos-prezi-sablon', name, ...t, slides: [], media: files}, null, 1));
+  return z.generateAsync({type: 'blob', mimeType: 'application/zip', compression: 'DEFLATE'});
+}
+async function readTemplate(buf) {
+  let z, m;
+  try { z = await JSZip.loadAsync(buf); m = JSON.parse(await z.file('manifest.json').async('string')); } catch (e) { m = null; }
+  if (!m || m.app !== 'matekos-prezi-sablon' || !m.master) throw new Error('Ez nem Matekos Prezi sablonfájl (.mpsab).');
+  const md = {};
+  for (const [k, fn] of Object.entries(m.media ?? {})) { const ext = fn.split('.').pop(), mime = Object.keys(EXT).find(x => EXT[x] === ext) ?? 'application/octet-stream'; md[k] = `data:${mime};base64,` + await z.file(fn).async('base64'); }
+  const d = migrate({format: 'mprezi', version: m.version, size: m.size, master: m.master, templates: m.templates, styles: m.styles, font: m.font, slides: []});
+  return {t: {master: d.master, templates: d.templates, styles: m.styles, font: m.font}, media: md};
+}
+/** Use a template (master, slide types, styles, font); the slides keep their content. */
+async function useTemplate(p, label, custom) {
+  if (editing) exitEdit();
+  p = JSON.parse(JSON.stringify(p));
+  doc.master = p.master; doc.templates = p.templates; doc.styles = {...defaultStyles(), ...p.styles}; doc.templateName = label;
+  if (doc.customTpl) doc.customTpl.on = !!custom;
+  const first = Object.keys(doc.templates)[0];
+  for (const sl of doc.slides) {
+    if (!doc.templates[sl.template]) sl.template = doc.templates.tartalom ? 'tartalom' : first;
+    for (const o of sl.objects) if (o.placeholder) { delete o.phMoved; delete o.phStyled; }
+    syncPlaceholders(sl);
+  }
+  tcur = 'master'; setSel([]);
+  if (p.font && p.font !== (doc.font || DEFAULT_FONT)) { doc.font = p.font; commit(); await restartWithFont(p.font); return; }
+  commit(); toast(`Sablon: ${label}`);
+}
+async function templateToFile() {
+  try {
+    const name = doc.customTpl?.on ? doc.customTpl.name : (doc.title || 'Bemutató') + ' sablon', t = tplSnapshot();
+    const n = await saveTemplateFile(await packTemplate(name, t), name); if (!n) return;
+    if (doc.customTpl && !doc.customTpl.on && !await confirmBox(`A bemutatóban már van egy sablonfájl („${doc.customTpl.name}”). Egyszerre csak egy lehet – ez lép a helyére: „${n.replace(/\.mpsab$/i, '')}”?`, 'Csere')) { toast('Sablon elmentve: ' + n); return; }
+    doc.customTpl = {name: n.replace(/\.mpsab$/i, ''), path: templateFilePath(), data: t, on: true}; doc.templateName = doc.customTpl.name;
+    commit(); toast('Sablon elmentve és használatban: ' + n);
+  } catch (e) { toast('A sablon mentése nem sikerült: ' + (e?.message || e)); }
+}
+async function templateUpdateFile() {
+  if (!doc.customTpl) return;
+  try {
+    const t = tplSnapshot(), n = await updateTemplateFile(doc.customTpl.path || null, await packTemplate(doc.customTpl.name, t), doc.customTpl.name);
+    if (n) { doc.customTpl.data = t; commit(); toast('Sablonfájl frissítve: ' + n); }
+  } catch (e) { toast('A sablonfájl frissítése nem sikerült: ' + (e?.message || e)); }
+}
+async function templateFromFile(given) {
+  let r;
+  try { r = given || await openTemplateFile(); } catch (e) { toast(e?.message || String(e)); return; }
+  if (!r) return;
+  let tp; try { tp = await readTemplate(r.buf); } catch (e) { toast(e.message); return; }
+  const name = r.name.replace(/\.mpsab$/i, '');
+  if (!given && doc.customTpl && !await confirmBox(`A bemutatóban már van egy sablonfájl („${doc.customTpl.name}”). Egyszerre csak egy lehet – lecseréled erre: „${name}”?`, 'Csere')) return;
+  if (!given && !await confirmBox(`A(z) „${name}” sablon lép a mostani helyére (háttér, diatípusok, szövegstílusok). A diák tartalma megmarad. Folytatod?`, 'Sablon alkalmazása')) return;
+  Object.assign(media, tp.media);
+  doc.customTpl = {name, path: r.path || null, data: tp.t, on: true};
+  await useTemplate(tp.t, name, true);
+}
 async function applyPreset(key) {
+  if (key === 'custom') {
+    if (!doc.customTpl || doc.customTpl.on) return;
+    if (!await confirmBox(`A(z) „${doc.customTpl.name}” sablon lép a mostani helyére (háttér, diatípusok, szövegstílusok). A diák tartalma megmarad. Folytatod?`, 'Sablon alkalmazása')) return;
+    await useTemplate(doc.customTpl.data, doc.customTpl.name, true); return;
+  }
   const P = PRESETS[key]; if (!P || P.locked) return;
   if (!await confirmBox(`A(z) „${P.label}” sablon lép a mostani helyére (háttér, diatípusok, szövegstílusok). A diák tartalma megmarad. Folytatod?`, 'Sablon alkalmazása')) return;
   if (editing) exitEdit();
@@ -80,6 +157,7 @@ async function applyPreset(key) {
   }
   p ??= P.build();
   doc.master = p.master; doc.templates = p.templates; doc.styles = {...defaultStyles(), ...p.styles}; doc.templateName = P.label;
+  if (doc.customTpl) doc.customTpl.on = false;
   const first = Object.keys(doc.templates)[0];
   for (const sl of doc.slides) {
     if (!doc.templates[sl.template]) sl.template = doc.templates.tartalom ? 'tartalom' : first;
@@ -127,6 +205,113 @@ function demoDoc() {
   doc.slides = [s1, s2, s3];
 }
 
+/* ================================================================== comments (Matekos Doksi)
+   attached to selected text (a mark), to objects (o.cmt) or to a slide / layout (no selection); listed in the
+   order of the presentation; drawn on a layer over the slide, never in the slideshow or the exports */
+const cmtDate = t => new Date(t).toLocaleString('hu-HU', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'});
+const cmtList = () => doc ? (doc.comments ||= []) : [];
+const idsOf = v => String(v || '').split(' ').filter(Boolean);
+const addId = (v, id) => (v ? v + ' ' : '') + id;
+function stripCommentMarks(json, id = null) {
+  (function w(n) { if (n.marks) { n.marks = n.marks.filter(m => m.type !== 'comment' || (id && m.attrs?.id !== id)); if (!n.marks.length) delete n.marks; } (n.content || []).forEach(w); })(json || {});
+}
+function textCommentIds(json) { const out = []; (function w(n) { for (const m of n.marks || []) if (m.type === 'comment' && m.attrs?.id && !out.includes(m.attrs.id)) out.push(m.attrs.id); (n.content || []).forEach(w); })(json || {}); return out; }
+/** Where each comment is: id -> {si (slide index, or -1 for master/layouts), tk (template key), oid, order} */
+function commentPlaces() {
+  const at = {}; let order = 0;
+  const put = (id, p) => { if (!at[id]) at[id] = {...p, order: order++}; };
+  const scan = (g, si, tk) => {
+    for (const id of idsOf(g.cmt)) put(id, {si, tk, oid: null});
+    for (const o of flatObjects(g.objects)) { for (const id of idsOf(o.cmt)) put(id, {si, tk, oid: o.id}); for (const id of textCommentIds(o.doc)) put(id, {si, tk, oid: o.id, text: true}); }
+  };
+  if (editing) syncEditor();
+  doc.slides.forEach((sl, si) => scan(sl, si, null));
+  scan(doc.master, -1, 'master'); for (const [k, L] of Object.entries(doc.templates)) scan(L, -1, k);
+  return at;
+}
+let cmtMode = false, activeCmt = null, cmtHidden = lsGet('matekosprezi.cmthide') === '1', cmtSel = null, cmtRaf = 0;
+const cmtOpen = () => cmtMode && !mainEl.classList.contains('noprops');
+function commentsOn(v) {
+  cmtMode = v; mainEl.classList.toggle('cmtmode', v); $('#bCmt').classList.toggle('primary', v);
+  if (v) panelVisible(true);
+  renderComments();
+}
+function renderComments() {
+  const at = commentPlaces(), list = [...cmtList()].sort((a, b) => ((at[a.id]?.si ?? 1e6) - (at[b.id]?.si ?? 1e6)) || ((at[a.id]?.order ?? 1e9) - (at[b.id]?.order ?? 1e9)));
+  $('#cmtCount').textContent = cmtList().length ? `${cmtList().length} db` : '';
+  const where = p => !p ? 'a helye törölve' : p.si >= 0 ? `${p.si + 1}. dia` : p.tk === 'master' ? 'mester' : (doc.templates[p.tk]?.name || 'diatípus');
+  $('#cmtList').innerHTML = list.length ? list.map(c => `<div class="cmtcard${c.done ? ' done' : ''}${c.id === activeCmt ? ' act' : ''}${at[c.id] ? '' : ' lost'}" data-cid="${c.id}">
+      <div class="ctop"><span class="cdate">${cmtDate(c.at)} · ${where(at[c.id])}</span>
+        <button class="tb mini${c.done ? ' on' : ''}" data-cact="done" title="${c.done ? 'Mégsem megoldott' : 'Megoldva'}">${svgIcon('tick')}</button>
+        <button class="tb mini" data-cact="del" title="Megjegyzés törlése">${svgIcon('xmark')}</button></div>
+      <div class="ctext">${esc(c.text).replace(/\n/g, '<br>')}</div>
+      ${(c.replies || []).map(r => `<div class="creply"><span class="cdate">${cmtDate(r.at)}</span><div>${esc(r.text).replace(/\n/g, '<br>')}</div></div>`).join('')}
+      <div class="crow"><input type="text" class="cin" placeholder="Válasz…"><button class="btn mini" data-cact="reply">Válasz</button></div>
+    </div>`).join('') : '<div class="phint" style="padding:6px 2px">Még nincs megjegyzés. Jelölj ki szöveget vagy objektumot (vagy semmit: akkor a diához kerül), írd be a megjegyzést fent, és kattints a „Megjegyzés hozzáadása” gombra.</div>';
+  drawComments();
+}
+function addComment() {
+  const text = $('#cmtText').value.trim();
+  if (!text) { toast('Írd be a megjegyzés szövegét.'); $('#cmtText').focus(); return; }
+  const id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const s0 = cmtSel || (editing && ed && !ed.state.selection.empty ? {oid: editing, from: ed.state.selection.from, to: ed.state.selection.to} : null);
+  if (s0 && objById(s0.oid)) {                                      // selected text in a text box
+    if (editing !== s0.oid) { if (editing) exitEdit(); enterEdit(s0.oid); }
+    ed.chain().setTextSelection({from: s0.from, to: s0.to}).setMark('comment', {id}).run(); syncEditor();
+  } else if (selIds.length) { for (const oid of selIds) { const o = objById(oid); if (o) o.cmt = addId(o.cmt, id); } }   // objects
+  else { const g = tgt(); g.cmt = addId(g.cmt, id); }                                                                   // the slide
+  cmtList().push({id, text, at: Date.now(), done: false, replies: []});
+  $('#cmtText').value = ''; cmtSel = null; activeCmt = id;
+  commit(); renderComments(); focusCard(id);
+}
+function removeCommentAnchors(id) {
+  if (editing) exitEdit();
+  const drop = x => { const r = idsOf(x.cmt).filter(v => v !== id).join(' '); if (r) x.cmt = r; else delete x.cmt; };
+  for (const g of [doc.master, ...Object.values(doc.templates), ...doc.slides]) { drop(g); for (const o of flatObjects(g.objects)) { drop(o); if (o.doc) stripCommentMarks(o.doc, id); } }
+}
+function focusCard(id) {
+  activeCmt = id;
+  for (const c of $$('#cmtList .cmtcard')) c.classList.toggle('act', c.dataset.cid === id);
+  $(`#cmtList [data-cid="${id}"]`)?.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+  drawComments();
+}
+function showCommentPlace(id) {
+  const p = commentPlaces()[id]; activeCmt = id; if (!p) { drawComments(); return; }
+  if (p.si >= 0) { if (mode !== 'slides') closeTemplateBuilder(); if (cur !== p.si) gotoSlide(p.si); }
+  else { if (mode !== 'template') openTemplateBuilder(); if (tcur !== p.tk) { tcur = p.tk; setSel([]); renderAll(); } }
+  if (p.oid && objById(p.oid)) { setSel([p.oid]); renderAll(); }
+  drawComments();
+}
+function setCmtHidden(v) {
+  cmtHidden = v; lsSet('matekosprezi.cmthide', v ? '1' : '0');
+  $('#cmtHide').classList.toggle('on', v);
+  $('#cmtHide').title = v ? 'A megjegyzések jelölése el van rejtve a dián, amíg a panel zárva van – kattints a megjelenítéshez' : 'A megjegyzések jelölése a dián akkor is látszik, ha a panel zárva van – kattints az elrejtéshez';
+  drawComments();
+}
+/** Purple marks on the slide being edited: commented text, objects, and a flag for the slide itself. */
+function drawComments() {
+  if (cmtRaf) return;
+  cmtRaf = requestAnimationFrame(() => {
+    cmtRaf = 0;
+    let layer = $('#cmtLayer'); if (!layer) { layer = document.createElement('div'); layer.id = 'cmtLayer'; stageWrap.appendChild(layer); }
+    if (!cmtList().length || (cmtHidden && !cmtOpen()) || sh) { layer.innerHTML = ''; return; }
+    const wr = stageWrap.getBoundingClientRect(), done = new Set(cmtList().filter(c => c.done).map(c => c.id)), known = new Set(cmtList().map(c => c.id));
+    const cls = ids => (ids.every(i => done.has(i)) ? ' done' : '') + (ids.includes(activeCmt) ? ' act' : '');
+    const box = (q, extra) => `<div class="cmt-hl${extra}" style="left:${q.left - wr.left}px;top:${q.top - wr.top}px;width:${q.width}px;height:${q.height}px"></div>`;
+    const out = [];
+    for (const el of stage.querySelectorAll('.obj[data-id]')) {
+      const o = objById(el.dataset.id), ids = idsOf(o?.cmt).filter(i => known.has(i)); if (!ids.length) continue;
+      const q = (el.querySelector('.rot') || el).getBoundingClientRect(); if (q.width) out.push(box(q, ' obj' + cls(ids)));
+    }
+    for (const sp of stage.querySelectorAll('[data-cmt]')) {
+      const ids = idsOf(sp.dataset.cmt).filter(i => known.has(i)); if (!ids.length) continue;
+      for (const q of sp.getClientRects()) if (q.width && q.height) out.push(box(q, cls(ids)));
+    }
+    const sIds = idsOf(tgt()?.cmt).filter(i => known.has(i));
+    if (sIds.length) { const sr = stage.getBoundingClientRect(); out.push(`<div class="cmt-flag${cls(sIds)}" style="left:${sr.right - wr.left - 8}px;top:${sr.top - wr.top + 8}px" title="Megjegyzés a diához">${svgIcon('comment')}<b>${sIds.length}</b></div>`); }
+    layer.innerHTML = out.join('');
+  });
+}
 function setSel(ids) { selIds = [...new Set(ids.filter(Boolean))]; sel = selIds.length === 1 ? selIds[0] : null; }
 
 /** In-app confirmation dialog (works the same in the browser and in the desktop app). */
@@ -239,7 +424,7 @@ function shapeSVG(o) {
   return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${body}</svg>`;
 }
 function txtStyle(t, o) {
-  Object.assign(t.style, {fontFamily: o.font ? `${familyCSS(o.font)}, var(--slide-font)` : '', textTransform: o.upper ? 'uppercase' : '',letterSpacing: o.letterSpacing ? o.letterSpacing + 'pt' : '', fontSize: o.size + 'px', color: o.color, textAlign: o.align, fontWeight: o.bold ? 700 : 400, fontStyle: o.italic ? 'italic' : 'normal',
+  Object.assign(t.style, {fontFamily: o.font ? `${familyCSS(o.font)}, var(--slide-font)` : '', textTransform: o.upper ? 'uppercase' : '',letterSpacing: o.letterSpacing ? o.letterSpacing + 'pt' : '', lineHeight: o.lineHeight || '', fontSize: o.size + 'px', color: o.color, textAlign: o.align, fontWeight: o.bold ? 700 : 400, fontStyle: o.italic ? 'italic' : 'normal',
     textDecorationLine: [o.underline && 'underline', o.strike && 'line-through'].filter(Boolean).join(' ') || 'none'});
 }
 let measureT = 0;
@@ -363,11 +548,12 @@ function measureTexts() {
     if (ge) { Object.assign(ge.style, {left: g.x + 'px', top: g.y + 'px', width: g.w + 'px', height: g.h + 'px'}); for (const c of g.children) { const ce = ge.querySelector(`.obj[data-id="${c.id}"]`); if (ce) placeEl(ce, c); } }
   }
 }
-function renderAll() { renderStage(); renderThumbs(); renderProps(); updateRibbon(); }
+function renderAll() { renderStage(); renderThumbs(); renderProps(); updateRibbon(); drawComments(); drawFind(); if (cmtOpen()) renderComments(); }
 
 /* ================================================================== selection frame + animation badges */
 const HANDLES_FULL = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'], HANDLES_W = ['nw', 'ne', 'e', 'se', 'sw', 'w'];
 function drawSelection() {
+  drawComments();
   stage.querySelectorAll('.self').forEach(x => x.remove());
   const objs = selIds.map(objById).filter(Boolean);
   if (!objs.length) return;
@@ -504,7 +690,7 @@ $('#popNewSlide').onopen = () => {
 $('#lgalNew').addEventListener('click', e => { const b = e.target.closest('[data-k]'); if (!b) return; closePops(); if (editing) exitEdit();
   doc.slides.splice(cur + 1, 0, newSlide(b.dataset.k)); cur++; setSel([]); commit(); });
 function renderTemplateList() {
-  slidesNav.innerHTML = `<div class="plist"><div class="tplbar"><b>Sablonszerkesztő</b><button class="btn primary" id="tClose">Sablon bezárása</button></div>
+  slidesNav.innerHTML = `<div class="plist"><div class="tplbar"><b>Sablonszerkesztő</b><button class="btn primary" id="tClose">Sablonszerkesztő bezárása</button></div>
     <div class="phint" style="margin:0 0 10px">A mester elemei minden elrendezésen megjelennek. Az elrendezésekből készülnek az új diák.</div><div id="tlist"></div></div>`;
   const list = $('#tlist');
   const m = thumbFrame('<span class="tname">Mester</span>', 'master' + (tcur === 'master' ? ' cur' : ''));
@@ -561,12 +747,12 @@ function gotoSlide(i) { if (editing) exitEdit(); cur = i; setSel([]); curAnim = 
 function gotoTemplate(k) { if (editing) exitEdit(); tcur = k; setSel([]); renderAll(); }
 function openTemplateBuilder() {
   if (editing) exitEdit(); closePops();
-  mode = 'template'; tcur = doc.slides[cur] ? doc.slides[cur].template : 'master'; setSel([]); renderAll(); fitStage();
+  mode = 'template'; mainEl.classList.add('tplmode'); tcur = doc.slides[cur] ? doc.slides[cur].template : 'master'; setSel([]); renderAll(); fitStage();
 }
 function closeTemplateBuilder() {
   if (editing) exitEdit(); closePops();
   for (const s of doc.slides) syncPlaceholders(s);
-  mode = 'slides'; setSel([]); commit(); fitStage();
+  mode = 'slides'; mainEl.classList.remove('tplmode'); setSel([]); commit(); fitStage();
 }
 
 /* ================================================================== pointer interaction on the slide */
@@ -857,7 +1043,7 @@ function select(id) {
 }
 
 /* ================================================================== text editing (Matekos Doksi editor) */
-setTextHooks({onEdit: (pos, node) => openMath(pos, node), onRendered: onMathRendered, onPreview: p => showPreview(p)});
+setTextHooks({onEdit: (pos, node) => openMath(pos, node), onRendered: onMathRendered, onPreview: p => showPreview(p), getScale: () => scale});
 function enterEdit(id, ev) {
   const o = objById(id); if (!isTextLike(o) || o.locked || o.field) return;
   if (sel !== id) { setSel([id]); curAnim = null; }
@@ -1313,11 +1499,14 @@ function renderProps() {
   const title = selIds.length > 1 ? `${selIds.length} objektum` : o ? esc(o.name ?? TYPE_LABEL[o.type] ?? 'Objektum') : mode === 'slides' ? `${cur + 1}. dia` : tcur === 'master' ? 'Mester' : 'Elrendezés';
   h += `<div class="phead2"><b>${title}</b><button class="tb" id="propsX" title="Jobb oldali panel bezárása">${svgIcon('panel')}</button></div>`;
   if (mode === 'template' && !selIds.length) {
-    h += `<section class="presetbox"><div class="pbhead"><b>Kész sablonok</b><span>Jelenleg: ${esc(doc.templateName || 'Saját')}</span></div>
+    const curTpl = tplLabel();
+    h += `<section class="presetbox"><div class="pbhead"><b>Sablonok</b></div>
       <div class="pbgrid">${PRESET_ORDER.map(k => { const P = PRESETS[k], sw = P.swatch || ['#ffffff', '#d8d8d8'];
         if (P.locked) return `<button class="pbcard locked" disabled title="${esc(P.note)}"><i style="--a:${sw[0]};--b:${sw[1]}"></i><span>${svgIcon('lock')}${P.label}</span><small>Hamarosan</small></button>`;
-        return `<button class="pbcard${(doc.templateName || '') === P.label ? ' on' : ''}" data-preset="${k}" title="${esc(P.note)}"><i style="--a:${sw[0]};--b:${sw[1]}"></i><span>${P.label}${k === 'ures' ? ' (új, üres)' : ''}</span></button>`; }).join('')}</div>
-      <div class="pbnote">Válassz kész sablont, és szabd tovább lent és a dián – a módosítások ebbe a fájlba mentődnek. Új bemutató mindig az Üres sablonnal indul. Az Elmélet sablon hamarosan érkezik.</div></section>`;
+        return `<button class="pbcard${curTpl === P.label && !doc.customTpl?.on ? ' on' : ''}" data-preset="${k}" title="${esc(P.note)}"><i style="--a:${sw[0]};--b:${sw[1]}"></i><span>${P.label}</span></button>`; }).join('')}
+        ${doc.customTpl ? `<button class="pbcard custom${doc.customTpl.on ? ' on' : ''}" data-preset="custom" title="Sablonfájlból: ${esc(doc.customTpl.name)}"><i style="--a:#ffffff;--b:#2e4a9e"></i><span>${esc(doc.customTpl.name)}</span><small>sablonfájlból</small></button>` : ''}</div>
+      <div class="pbfile">${doc.customTpl?.on ? `<button class="btn primary" id="tplUpdate" title="A sablonfájl felülírása a mostani beállításokkal (különben a változások csak ebbe a bemutatóba kerülnek)">Sablonfájl frissítése</button>` : ''}<button class="btn" id="tplToFile" title="A mester, a diatípusok, a szövegstílusok és az alap betűtípus egy Matekos Prezi Sablon fájlba">Sablon mentése fájlba…</button><button class="btn" id="tplFromFile" title="Egy Matekos Prezi Sablon fájl használata ebben a bemutatóban">Sablonfájl importálása…</button></div>
+      <div class="pbnote">Válassz kész sablont, és szabd tovább lent és a dián – a módosítások ebbe a fájlba mentődnek. Új bemutató mindig a Sima sablonnal indul. Az Elmélet sablon hamarosan érkezik.</div></section>`;
     const isM = tcur === 'master', L = tgt();
     h += `<section><div class="fgrid">
       ${isM ? '' : fld('Név', `<input type="text" id="pName" value="${esc(L.name)}">`, true)}
@@ -1333,7 +1522,10 @@ function renderProps() {
       <div class="stctl"><input type="number" class="stsize" data-st="${k}" min="8" max="120" step="0.5" value="${Math.round(st[k].size * 0.75 * 2) / 2}" title="Betűméret (pt)"><span class="unit">pt</span>
         <button class="btn colbtn stcolor" data-st="${k}" title="Betűszín"><i class="dot fill" style="--c:${st[k].color}"></i>Szín</button>
         <button class="tb${st[k].bold ? ' on' : ''}" data-stt="bold" data-st="${k}" title="Félkövér"><b>B</b></button><button class="tb${st[k].italic ? ' on' : ''}" data-stt="italic" data-st="${k}" title="Dőlt"><i>I</i></button><button class="tb${st[k].underline ? ' on' : ''}" data-stt="underline" data-st="${k}" title="Aláhúzott"><u>U</u></button>
-        ${famSel(k, st[k].font)}</div></div>`;
+        ${famSel(k, st[k].font)}</div>
+      <div class="stctl st2"><label title="Sorköz">Sorköz <input type="number" class="stline" data-st="${k}" min="0.8" max="3" step="0.05" value="${st[k].line ?? 1.25}"></label>
+        <label title="Betűköz (pt)">Betűköz <input type="number" class="stls" data-st="${k}" min="-3" max="10" step="0.1" value="${st[k].letterSpacing ?? 0}"></label>
+        <span class="stalign">${[['left', 'alignL', 'Balra'], ['center', 'alignC', 'Középre'], ['right', 'alignR', 'Jobbra'], ['justify', 'alignJ', 'Sorkizárt']].map(([v, ic, t]) => `<button class="tb${(st[k].align || 'left') === v ? ' on' : ''}" data-stal="${v}" data-st="${k}" title="${t}">${svgIcon(ic)}</button>`).join('')}</span></div></div>`;
     h += `<section><div class="fgrid">${fld('Alap betűtípus (szöveg és képletek)', `<select id="pBaseFont">${Object.entries(FONT_SETS).map(([k2, f]) => `<option value="${k2}" ${k2 === (doc.font || DEFAULT_FONT) ? 'selected' : ''}>${f.label}</option>`).join('')}</select>`, true)}</div>
       <div class="phint">Az új szövegdobozok és a képletek ezt használják. Csak képletbarát betűtípus lehet.</div></section>`;
     h += section('styles', 'Szövegstílusok', row('title', 'Címek', 'cím-helykitöltők') + row('subtitle', 'Alcímek', 'alcím-helykitöltők') + row('body', 'Szöveg', 'szöveg-helykitöltők, új szövegdobozok')
@@ -1366,6 +1558,12 @@ function bindProps(o) {
   props.querySelectorAll('.stcolor').forEach(b => b.onclick = () => pickAnyColor(b, b.dataset.st === 'title' ? 'Címek színe' : 'Szöveg színe', stylesOf()[b.dataset.st].color, c => { if (c !== 'none') applyStyle(b.dataset.st, {color: c}); }));
   props.querySelectorAll('[data-stt]').forEach(b => b.onclick = () => applyStyle(b.dataset.st, {[b.dataset.stt]: !stylesOf()[b.dataset.st][b.dataset.stt]}));
   props.querySelectorAll('.stfont').forEach(sel_ => sel_.onchange = () => applyStyle(sel_.dataset.st, {font: sel_.value || null}));
+  props.querySelectorAll('.stline').forEach(inp => inp.onchange = () => { const v = parseFloat(String(inp.value).replace(',', '.')); if (v >= 0.8 && v <= 3) applyStyle(inp.dataset.st, {line: Math.round(v * 100) / 100}); });
+  props.querySelectorAll('.stls').forEach(inp => inp.onchange = () => { const v = parseFloat(String(inp.value).replace(',', '.')); if (isFinite(v)) applyStyle(inp.dataset.st, {letterSpacing: Math.round(v * 10) / 10}); });
+  props.querySelectorAll('[data-stal]').forEach(b => b.onclick = () => applyStyle(b.dataset.st, {align: b.dataset.stal}));
+  $('#tplToFile')?.addEventListener('click', templateToFile);
+  $('#tplFromFile')?.addEventListener('click', () => templateFromFile());
+  $('#tplUpdate')?.addEventListener('click', templateUpdateFile);
   on('pBaseFont', 'change', e => switchFont(e.target.value));
   props.querySelectorAll('[data-preset]').forEach(b => b.onclick = () => applyPreset(b.dataset.preset));
   on('pBgPick', 'click', () => pickImage(key => { tgt().background = key; commit(); }));
@@ -1722,7 +1920,7 @@ function updateRibbon() {
   }
   if (!isTextLike(o)) $('#fontLabel').textContent = 'Betűtípus';
   $('#bTpl').classList.toggle('primary', mode === 'template');
-  $('#tplName').textContent = doc.templateName || 'Saját';
+  $('#tplName').textContent = tplLabel();
   $('#bTpl').querySelector('.tpll').textContent = mode === 'template' ? 'Bezárás · Sablon:' : 'Sablon:';
   if (!edit || !ed?.isActive('table')) $('#tableBar').hidden = true;
 }
@@ -1741,7 +1939,7 @@ function showPop(id, anchor) {
   p.style.top = top + 'px';
   openPop = p; openAnchor = anchor;
 }
-function closePops() { if (openPop) { openPop.hidden = true; openPop = null; openAnchor = null; tblCtx = null; } }
+function closePops() { if (openPop) { const p_ = openPop; openPop.hidden = true; openPop = null; openAnchor = null; tblCtx = null; p_.onclose?.(); } }
 document.addEventListener('pointerdown', e => { if (openPop && !openPop.contains(e.target) && !(openAnchor && openAnchor.contains(e.target))) closePops(); }, true);
 for (const p of $$('.pop')) p.addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
 /** The colour currently in effect for a picker (marked in red in the palette). */
@@ -1871,39 +2069,108 @@ $('#popSpacing').onopen = () => {
   if (inEdit()) { const ls = ed.getAttributes('textStyle').letterSpacing; if (ls) v = parseFloat(ls); }
   spR.value = spN.value = v;
 };
-// bullets, numbering, line height, paragraph spacing (Doksi)
+// bullets, numbering, line spacing, tab stops (as in Matekos Doksi)
 const BUL = ['•', '◦', '▪', '–', '➤', '➔', '✓', '★', '◆', '❖', '☐', '→'];
 $('#bulGrid').innerHTML = BUL.map(b => `<button data-bul="${b}" aria-label="${b}">${b}</button>`).join('')
   + `<button data-bulimg="matekos" title="Matekos végtelen" aria-label="Matekos végtelen"><img src="${MATEKOS_BULLET}" alt="" style="height:.7em"></button>`;
-$('#bulGrid').addEventListener('click', e => { if (!e.target.closest('[data-bulimg]')) return; e.stopPropagation(); closePops(); setBullet({bulletImage: MATEKOS_BULLET, bulletChar: '', bulletSize: 0.7}); }, true);
-const setBullet = attrs => withEditor(c => { if (!ed.isActive('bulletList')) c.toggleBulletList(); c.updateAttributes('bulletList', attrs).run(); });
+/* a change of symbol / numbering on only some items starts a new list for exactly those items */
+function listAround(state, typeName) {
+  const {$from, $to} = state.selection;
+  for (let d = $from.depth; d > 0; d--) {
+    const n = $from.node(d);
+    if (n.type.name === typeName) {
+      const pos = $from.before(d);
+      if ($to.pos > pos + n.nodeSize) return null;
+      let b = n.childCount - 1;
+      const $t = state.doc.resolve(Math.min($to.pos, pos + n.nodeSize - 1));
+      for (let e = $t.depth; e > 0; e--) if ($t.node(e) === n) { b = $t.index(e); break; }
+      return {node: n, pos, a: $from.index(d), b};
+    }
+  }
+  return null;
+}
+function applyListAttrs(typeName, attrs) {
+  withEditor(() => {
+    if (!ed.isActive(typeName)) ed.chain().focus()[typeName === 'bulletList' ? 'toggleBulletList' : 'toggleOrderedList']().run();
+    const st = ed.state, r = listAround(st, typeName);
+    if (!r) return;
+    const {node, pos, a, b} = r, ordered = typeName === 'orderedList';
+    const own = ordered && 'start' in attrs ? {cont: false} : {};          // a start number set here: numbering starts again
+    if (a === 0 && b === node.childCount - 1) { ed.chain().focus().updateAttributes(typeName, {...attrs, ...own}).run(); return; }
+    const items = []; node.forEach(c => items.push(c));
+    const parts = [];
+    if (a > 0) parts.push(node.type.create(node.attrs, items.slice(0, a)));
+    parts.push(node.type.create({...node.attrs, ...(ordered ? {start: 1, cont: false} : {}), ...attrs}, items.slice(a, b + 1)));
+    if (b < items.length - 1) parts.push(node.type.create({...node.attrs, ...(ordered ? {cont: true} : {})}, items.slice(b + 1)));
+    ed.view.dispatch(st.tr.replaceWith(pos, pos + node.nodeSize, parts)); ed.view.focus();
+  });
+}
+const setBullet = attrs => applyListAttrs('bulletList', attrs);
 $('#popBullet').addEventListener('click', e => {
+  if (e.target.closest('[data-bulimg]')) { closePops(); setBullet({bulletImage: MATEKOS_BULLET, bulletChar: '', bulletSize: 0.7}); return; }
   const b = e.target.closest('[data-bul]'); if (!b) return; closePops();
   if (b.dataset.bul === 'none') { withEditor(c => { if (ed.isActive('bulletList')) c.toggleBulletList(); c.run(); }); return; }
   setBullet({bulletChar: b.dataset.bul, bulletImage: ''});
 });
-$('#bulCustomBtn').addEventListener('click', () => { const v = $('#bulCustom').value.trim(); if (v) { closePops(); setBullet({bulletChar: v, bulletImage: ''}); } });
-$('#bulPicBtn').addEventListener('click', () => pickImageURL(512, url => { closePops(); setBullet({bulletImage: url, bulletChar: '', bulletSize: +$('#bulPicSize').value || 0.9}); }));
-$('#popNum').addEventListener('click', e => { const b = e.target.closest('[data-num]'); if (!b) return; closePops();
-  withEditor(c => { if (!ed.isActive('orderedList')) c.toggleOrderedList(); c.updateAttributes('orderedList', {numStyle: b.dataset.num}).run(); }); });
-$('#lineList').innerHTML = [1, 1.15, 1.25, 1.5, 2].map(v => `<button class="pitem" data-lh="${v}">${String(v).replace('.', ',')}</button>`).join('');
-$('#popLine').onopen = () => {
-  const o = selObj(); let v = 1.25;
-  if (inEdit()) { const a = ed.isActive('heading') ? ed.getAttributes('heading') : ed.getAttributes('paragraph'); if (a.lineHeight) v = +a.lineHeight; }
-  else if (isText(o)) { const lh = new Set(); (function w(n) { if (n.type === 'paragraph' || n.type === 'heading') lh.add(+(n.attrs?.lineHeight || 1.25)); (n.content || []).forEach(w); })(o.doc); v = lh.size === 1 ? [...lh][0] : null; }
-  for (const b of $('#lineList').children) b.classList.toggle('on', +b.dataset.lh === v);
-  $('#lhIn').value = v != null && ![1, 1.15, 1.25, 1.5, 2].includes(v) ? String(v).replace('.', ',') : '';
-};
-$('#popNum').onopen = () => { const st = inEdit() && ed.isActive('orderedList') ? (ed.getAttributes('orderedList').numStyle || 'decimal') : null;
-  for (const b of $$('#popNum [data-num]')) b.classList.toggle('on', b.dataset.num === st); };
 $('#popBullet').onopen = () => { const a = inEdit() && ed.isActive('bulletList') ? ed.getAttributes('bulletList') : null;
+  $('#bulPicOk').disabled = !(bulPicPending || (a && a.bulletImage)); if (a && a.bulletImage) $('#bulPicSize').value = a.bulletSize || 0.9;
   for (const b of $$('#popBullet [data-bul]')) b.classList.toggle('on', !!a && !a.bulletImage && b.dataset.bul === (a.bulletChar || '•')); };
-$('#popBorders').onopen = () => { const bw = ed ? (ed.getAttributes('tableCell').borderWidth ?? ed.getAttributes('tableHeader').borderWidth ?? '') : '';
-  for (const b of $$('#popBorders [data-bw]')) b.classList.toggle('on', String(b.dataset.bw) === String(bw ?? '')); };
+$('#bulCustomBtn').addEventListener('click', () => { const v = $('#bulCustom').value.trim(); if (v) { closePops(); setBullet({bulletChar: v, bulletImage: ''}); } });
+$('#bulCustom').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#bulCustomBtn').click(); } });
+let bulPicPending = null;                 // a chosen picture, used only when OK is pressed
+$('#bulPicBtn').addEventListener('click', () => pickImageURL(512, url => { bulPicPending = url; $('#bulPicPrev').innerHTML = `<img src="${url}" alt="">`; $('#bulPicOk').disabled = false; }));
+$('#bulPicOk').addEventListener('click', () => {
+  const a = inEdit() && ed.isActive('bulletList') ? ed.getAttributes('bulletList') : {};
+  const url = bulPicPending || a.bulletImage; if (!url) return;
+  closePops(); setBullet({bulletImage: url, bulletChar: '', bulletSize: +$('#bulPicSize').value || 0.9}); bulPicPending = null; $('#bulPicPrev').innerHTML = '';
+});
+$('#popNum').addEventListener('click', e => {
+  const b = e.target.closest('[data-num]'); if (!b) return; closePops();
+  if (b.dataset.num === 'none') { withEditor(c => { if (ed.isActive('orderedList')) c.toggleOrderedList(); c.run(); }); return; }
+  applyListAttrs('orderedList', {numStyle: b.dataset.num});
+});
+$('#numStartOk').addEventListener('click', () => { const v = parseInt($('#numStart').value, 10); if (!(v >= 0)) return; closePops(); applyListAttrs('orderedList', {start: v}); });
+$('#numStart').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#numStartOk').click(); } });
+$('#popNum').onopen = () => { const on = inEdit() && ed.isActive('orderedList'), a = on ? ed.getAttributes('orderedList') : {};
+  const st = on ? (a.numStyle || 'decimal') : null;
+  for (const b of $$('#popNum [data-num]')) b.classList.toggle('on', b.dataset.num === st);
+  $('#numStart').value = on ? (a.start ?? 1) : 1; };
+/* line spacing: in the paragraph popup */
+const LH = [1, 1.15, 1.25, 1.5, 2, 2.5];
+$('#lineList').innerHTML = LH.map(v => `<button class="pitem" data-lh="${v}">${String(v).replace('.', ',')}</button>`).join('');
+function lineOpen() {
+  const o = selObj(); let v = o?.lineHeight || 1.25;
+  if (inEdit()) { const a = ed.isActive('heading') ? ed.getAttributes('heading') : ed.getAttributes('paragraph'); if (a.lineHeight) v = +a.lineHeight; }
+  else if (isTextLike(o)) { const lh = new Set(); (function w(n) { if (n.type === 'paragraph' || n.type === 'heading') lh.add(+(n.attrs?.lineHeight || o.lineHeight || 1.25)); (n.content || []).forEach(w); })(o.doc || {}); if (lh.size === 1) v = [...lh][0]; }
+  for (const b of $('#lineList').children) b.classList.toggle('on', +b.dataset.lh === v);
+  $('#lhIn').value = String(v).replace('.', ',');
+}
 $('#lhOk').onclick = () => { const v = parseFloat(String($('#lhIn').value).replace(',', '.')); if (!(v >= 0.5 && v <= 5)) return; closePops(); withEditor(c => c.setParaAttrs({lineHeight: Math.round(v * 100) / 100}).run()); };
 $('#lhIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#lhOk').click(); } });
 $('#lineList').addEventListener('click', e => { const b = e.target.closest('[data-lh]'); if (!b) return; closePops(); withEditor(c => c.setParaAttrs({lineHeight: +b.dataset.lh}).run()); });
+/* tab stops of the selected paragraphs */
+const curTabs = () => { if (!inEdit()) { const o = selObj(); let t = null; (function w(n) { if (!t && (n.type === 'paragraph' || n.type === 'heading') && n.attrs?.tabStops) t = n.attrs.tabStops; (n.content || []).forEach(w); })(o?.doc || {}); try { return t ? JSON.parse(t) : []; } catch (e) { return []; } }
+  const a = ed.isActive('heading') ? ed.getAttributes('heading') : ed.getAttributes('paragraph'); try { return a.tabStops ? JSON.parse(a.tabStops) : []; } catch (e) { return []; } };
+const AL = {left: 'balra', center: 'középre', right: 'jobbra'}, LD = {dot: ', pontozott', line: ', vonallal'};
+function showTabs() {
+  const t = curTabs();
+  $('#tabList').innerHTML = t.length ? t.map((x, i) => `<div class="tabrow"><span>${String(x.pos).replace('.', ',')} cm – ${AL[x.align] || 'balra'}${LD[x.leader] || ''}</span><button class="tb mini" data-deltab="${i}" title="Tabulátor törlése">✕</button></div>`).join('')
+    : '<div class="phint" style="margin:2px 0 4px">Nincs saját tabulátor.</div>';
+}
+function setTabs(list) { list.sort((a, b) => a.pos - b.pos); withEditor(c => c.setParaAttrs({tabStops: list.length ? JSON.stringify(list) : null}).run()); showTabs(); }
+$('#tabAdd').addEventListener('click', () => { const v = parseFloat(String($('#tabPos').value).replace(',', '.')); if (!(v > 0 && v < 60)) return; setTabs([...curTabs().filter(x => x.pos !== v), {pos: v, align: $('#tabAlign').value, ...($('#tabLeader').value ? {leader: $('#tabLeader').value} : {})}]); $('#tabPos').value = ''; });
+$('#tabPos').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#tabAdd').click(); } });
+$('#popTabs').onopen = showTabs;
+$('#tabRightMargin').addEventListener('click', () => {     // a right tab exactly at the right edge of the text
+  const o = selObj(); const pm = o && stage.querySelector(`.obj[data-id="${o.id}"] .ProseMirror`); if (!pm) return;
+  const v = Math.round(pm.clientWidth / (96 / 2.54) * 100) / 100;
+  setTabs([...curTabs().filter(x => Math.abs(x.pos - v) > 0.01), {pos: v, align: 'right', ...($('#tabLeader').value ? {leader: $('#tabLeader').value} : {})}]);
+});
+$('#tabList').addEventListener('click', e => { const b = e.target.closest('[data-deltab]'); if (!b) return; const t = curTabs(); t.splice(+b.dataset.deltab, 1); setTabs(t); });
+$('#popBorders').onopen = () => { const bw = ed ? (ed.getAttributes('tableCell').borderWidth ?? ed.getAttributes('tableHeader').borderWidth ?? '') : '';
+  for (const b of $$('#popBorders [data-bw]')) b.classList.toggle('on', String(b.dataset.bw) === String(bw ?? '')); };
 $('#popPara').onopen = () => {
+  lineOpen();
   const a = ed ? (ed.isActive('heading') ? ed.getAttributes('heading') : ed.getAttributes('paragraph')) : {};
   for (const inp of $$('#popPara [data-pf]')) { const k = inp.dataset.pf; if (inp.type === 'checkbox') inp.checked = !!a[k]; else inp.value = a[k] ?? (k === 'lineHeight' ? 1.25 : 0); }
   const hang = a.hang || (a.firstLine < 0 ? -a.firstLine : 0);
@@ -1951,7 +2218,7 @@ $('#popPh').addEventListener('click', e => {
   const o = ph(key, def[0], def[1] + (n > 2 ? 40 : 0), def[2], def[3], def[4], def[5], 'left', def[6]);
   L.objects.push(o); setSel([o.id]); commit();
 });
-$('#bTpl').onclick = () => mode === 'template' ? closeTemplateBuilder() : openTemplateBuilder();
+$('#bTpl').onclick = () => { if (cmtMode) commentsOn(false); mode === 'template' ? closeTemplateBuilder() : openTemplateBuilder(); };
 
 /* ================================================================== slideshow preview */
 const show = $('#show'), SHOW = show;
@@ -2083,6 +2350,7 @@ function usedMedia() {
   if (doc.master.background) keys.add(doc.master.background);
   for (const t of Object.values(doc.templates)) if (t.background) keys.add(t.background);
   for (const g of [doc.master, ...Object.values(doc.templates), ...doc.slides]) for (const o of flatObjects(g.objects)) { if (o.media) keys.add(o.media); if (o.poster) keys.add(o.poster); }
+  if (doc.customTpl?.data) for (const k of tplMedia(doc.customTpl.data)) keys.add(k);
   return [...keys];
 }
 async function packMprezi() {
@@ -2298,7 +2566,7 @@ function clipSlide(i) {
 }
 const clipText = d => CLIP + JSON.stringify(d);
 function readClip(text) { if (!text || !text.startsWith(CLIP)) return null; try { return JSON.parse(text.slice(CLIP.length)); } catch (e) { return null; } }
-const reid = (o, map) => { const n = uid(); map.set(o.id, n); o.id = n; if (o.children) o.children.forEach(c => reid(c, map)); };
+const reid = (o, map) => { const n = uid(); map.set(o.id, n); o.id = n; delete o.cmt; if (o.doc) stripCommentMarks(o.doc); if (o.children) o.children.forEach(c => reid(c, map)); };
 /** Paste / drop clipboard data. `at`: slide point to place the objects (drop), else +20 px when pasted onto the same slide. */
 function pasteData(d, at) {
   if (editing) exitEdit();
@@ -2427,6 +2695,40 @@ document.addEventListener('dragstart', e => {
   if (th && mode === 'slides') { e.dataTransfer.setData('text/plain', clipText(clipSlide(+th.dataset.i))); e.dataTransfer.effectAllowed = 'copy'; }
 });
 
+/* comments panel: wiring */
+$('#bCmt').onclick = () => { if (mode === 'template' && !cmtOpen()) closeTemplateBuilder(); commentsOn(!cmtOpen()); };
+$('#cmtClose').onclick = () => panelVisible(false);
+$('#cmtHide').onclick = () => setCmtHidden(!cmtHidden);
+setCmtHidden(cmtHidden);
+$('#cmtAdd').addEventListener('mousedown', e => e.preventDefault());
+$('#cmtText').addEventListener('focus', () => { cmtSel = editing && ed && !ed.state.selection.empty ? {oid: editing, from: ed.state.selection.from, to: ed.state.selection.to} : null; });
+$('#cmtAdd').addEventListener('click', addComment);
+$('#cmtText').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); addComment(); } });
+$('#cmtList').addEventListener('click', e => {
+  const card = e.target.closest('.cmtcard'); if (!card) return;
+  const id = card.dataset.cid, c = cmtList().find(x => x.id === id); if (!c) return;
+  const act = e.target.closest('[data-cact]');
+  if (act?.dataset.cact === 'del') { removeCommentAnchors(id); doc.comments = cmtList().filter(x => x.id !== id); if (activeCmt === id) activeCmt = null; commit(); renderComments(); return; }
+  if (act?.dataset.cact === 'done') { c.done = !c.done; commit(); renderComments(); return; }
+  if (act?.dataset.cact === 'reply') {
+    const inp = card.querySelector('.cin'), t = inp.value.trim(); if (!t) { inp.focus(); return; }
+    (c.replies ||= []).push({text: t, at: Date.now()}); commit(); renderComments(); focusCard(id); return;
+  }
+  if (e.target.closest('input')) return;
+  focusCard(id); showCommentPlace(id);
+});
+$('#cmtList').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.classList.contains('cin')) { e.preventDefault(); e.target.closest('.cmtcard').querySelector('[data-cact=reply]').click(); } });
+// a click on commented text or a commented object: its comment in the panel
+stage.addEventListener('click', e => {
+  if (!cmtOpen()) return;
+  const known = new Set(cmtList().map(c => c.id));
+  const tx = e.target.closest?.('[data-cmt]'), ob = e.target.closest?.('.obj[data-id]');
+  const ids = [...(tx ? idsOf(tx.dataset.cmt) : []), ...(ob ? idsOf(objById(ob.dataset.id)?.cmt) : [])].filter(i => known.has(i));
+  if (ids.length) focusCard(ids[0]);
+});
+addEventListener('resize', drawComments);
+work.addEventListener('scroll', drawComments, {passive: true});
+
 /* ================================================================== find & replace */
 let findPos = -1;
 function findRegex() { const q = $('#findIn').value; if (!q) return null; return new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $('#findCase').checked ? 'g' : 'gi'); }
@@ -2448,6 +2750,7 @@ function findNext() {
   const re = findRegex(); let n = 0, hit = null;
   ed.state.doc.descendants((node, pos) => { if (hit || !node.isText) return; for (const x of node.text.matchAll(re)) { if (n++ === m.n) { hit = {from: pos + x.index, to: pos + x.index + x[0].length}; break; } } });
   if (hit) { ed.commands.setTextSelection(hit); ed.commands.scrollIntoView(); }
+  drawFind();
 }
 function replaceOne() {
   const re = findRegex(); if (!re || !editing || !ed) { findNext(); return; }
@@ -2465,8 +2768,37 @@ function replaceAll() {
   $('#findInfo').textContent = count ? `${count} csere történt.` : 'Nincs találat.'; findPos = -1;
   if (count) commit();
 }
+/** Find: every match on the slide highlighted, the current one stronger (as in Matekos Doksi). */
+let findRaf = 0;
+function drawFind() {
+  if (findRaf) return;
+  findRaf = requestAnimationFrame(() => {
+    findRaf = 0;
+    let layer = $('#findLayer'); if (!layer) { layer = document.createElement('div'); layer.id = 'findLayer'; stageWrap.appendChild(layer); }
+    const re = !$('#popFind').hidden && findRegex();
+    if (!re || sh) { layer.innerHTML = ''; return; }
+    const wr = stageWrap.getBoundingClientRect(), all = findAll(), curM = findPos >= 0 ? all[findPos] : null, out = [];
+    for (const el of stage.querySelectorAll('.obj[data-id]')) {
+      const pm = el.querySelector('.ProseMirror'); if (!pm || el.querySelector('.obj[data-id]')) continue;
+      let n = 0;
+      const tw = document.createTreeWalker(pm, NodeFilter.SHOW_TEXT, {acceptNode: nd => nd.parentElement.closest('.math, .lm') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT});
+      for (let nd = tw.nextNode(); nd; nd = tw.nextNode()) {
+        for (const m of nd.data.matchAll(re)) {
+          if (!m[0]) continue;
+          const r = document.createRange(); r.setStart(nd, m.index); r.setEnd(nd, m.index + m[0].length);
+          const cur_ = curM && curM.id === el.dataset.id && curM.si === (mode === 'slides' ? cur : -1) && curM.n === n;
+          for (const q of r.getClientRects()) if (q.width) out.push(`<div class="find-hit${cur_ ? ' cur' : ''}" style="left:${q.left - wr.left}px;top:${q.top - wr.top}px;width:${q.width}px;height:${q.height}px"></div>`);
+          n++;
+        }
+      }
+    }
+    layer.innerHTML = out.join('');
+  });
+}
 $('#findNext').onclick = findNext; $('#findRepl').onclick = replaceOne; $('#findAll').onclick = replaceAll;
-$('#findIn').addEventListener('input', () => { findPos = -1; const n = findAll().length; $('#findInfo').textContent = $('#findIn').value ? `${n} találat` : 'Az összes dia szövegében és táblázataiban keres.'; });
+$('#findIn').addEventListener('input', () => { findPos = -1; const n = findAll().length; $('#findInfo').textContent = $('#findIn').value ? `${n} találat` : ''; drawFind(); });
+$('#findCase').addEventListener('change', () => $('#findIn').dispatchEvent(new Event('input')));
+$('#popFind').onclose = () => { findPos = -1; drawFind(); };
 $('#findIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); findNext(); } });
 $('#replIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); replaceOne(); } });
 
@@ -2562,7 +2894,16 @@ addEventListener('beforeunload', e => { if (dirty && !isTauri()) e.preventDefaul
         clearTimeout(autoT); await autosave({...autoValue(), dirty: false}); await win.destroy();
       });
     } catch (e) { /* not available */ }
-    try { const p = await watchOpenedFiles(async path => openResult(await openPathFile(path))); if (p) openResult(await openPathFile(p)); }
+    // a Matekos Prezi Sablon (.mpsab) opened from the system: a new presentation with that template
+    const openSys = async path => {
+      if (/\.mpsab$/i.test(path)) {
+        try { const {readFile} = await import('@tauri-apps/plugin-fs'); const buf = (await readFile(path)).buffer; if (!await newPresentation()) return; await templateFromFile({buf, name: path.split(/[\\/]/).pop(), path}); }
+        catch (e) { toast('A sablon nem nyitható meg: ' + (e?.message || e)); }
+        return;
+      }
+      openResult(await openPathFile(path));
+    };
+    try { const p = await watchOpenedFiles(openSys); if (p) await openSys(p); }
     catch (e) { /* not available */ }
   }
 })();

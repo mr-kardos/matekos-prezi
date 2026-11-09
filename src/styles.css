@@ -92,12 +92,15 @@ button,input,select,textarea{ font-family:inherit; }
 .ProseMirror h3{ font-size:1.12em; line-height:1.3; font-weight:700; --sb:.4em; --sa:.3em; }
 .ProseMirror .shaded{ background-color:var(--shade); }
 
-.ProseMirror ul,.ProseMirror ol{ margin:0; padding:0 0 0 1.8em; list-style:none; }
-.ProseMirror li{ position:relative; }
+.ProseMirror ul,.ProseMirror ol{ margin:0; padding:0; list-style:none; }
+/* list text starts where the next level's symbol stands (0,8 cm after the symbol, like in Matekos Doksi) */
+.ProseMirror li{ position:relative; padding-left:var(--gap,0.8cm); }
+.ProseMirror li[data-ghost] > p:first-child{ height:0; padding:0 !important; margin:0 !important; overflow:hidden; }
 .ProseMirror li > p{ --sa:2pt; }
 .ProseMirror li:last-child > p:last-child{ --sa:var(--after,6pt); }
 .ProseMirror li li:last-child > p:last-child{ --sa:2pt; }
-.lm{ position:absolute; left:auto; transform:translateX(calc(-100% - .45em)); white-space:nowrap; user-select:none; pointer-events:none; text-indent:0; font-style:normal; font-weight:normal; text-decoration:none; }
+.lm{ display:inline-flex; justify-content:flex-start; width:0; vertical-align:baseline; transform:translateX(calc(-1 * var(--gap,0.8cm))); white-space:nowrap; user-select:none; pointer-events:none; text-indent:0; font-style:normal; font-weight:normal; text-decoration:none; }
+.lm.lm-b{ font-weight:700; }
 .lm img{ vertical-align:-0.1em; }
 mark{ color:inherit; padding:0; }
 .ProseMirror .tableWrapper{ padding:0 0 var(--after,6pt); overflow-x:auto; }

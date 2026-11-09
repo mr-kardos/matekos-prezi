@@ -12,7 +12,7 @@ import { jsPDF } from 'jspdf';
 import 'svg2pdf.js';
 import { familyFiles, fontSet, familyFromCSS } from './fontsets.js';
 import { Anim } from './anim.js';
-import { pieceEls, mathPending } from './textview.js';
+import { pieceEls, mathPending, layoutStaticTabs } from './textview.js';
 import { PPTX_SKELETON } from './pptx-skeleton.js';
 import { W, H, flatObjects } from './model.js';
 
@@ -76,6 +76,12 @@ function textBody(roots, stop, ox, oy) {
       const cs = getComputedStyle(el);
       if (!transparent(cs.backgroundColor) && el !== stop && !el.classList.contains('math')) {
         for (const rr of el.getClientRects()) { const q = R(rr); back += `<rect x="${n2(q.x)}" y="${n2(q.y)}" width="${n2(q.w)}" height="${n2(q.h)}" fill="${cs.backgroundColor}"/>`; }
+      }
+      // tab leaders: a dotted or plain line up to the tab stop
+      if (el.matches('span.tab[data-leader]')) {
+        const q = R(el.getBoundingClientRect()), col = cs.borderBottomColor, y = q.y + q.h;
+        if (el.dataset.leader === 'line') lines += `<rect x="${n2(q.x)}" y="${n2(y - 0.8)}" width="${n2(q.w)}" height="0.8" fill="${col}"/>`;
+        else for (let x = q.x + 1.5; x < q.x + q.w - 1; x += 4.5) lines += `<circle cx="${n2(x)}" cy="${n2(y - 0.8)}" r="0.85" fill="${col}"/>`;
       }
       if (el.tagName === 'TD' || el.tagName === 'TH') {
         const q = R(el.getBoundingClientRect());
@@ -183,6 +189,7 @@ async function collect(doc, renderSlide, layoutOf, onProgress, only = null) {
       for (let t = 0; t < 200 && mathPending(el); t++) await new Promise(r => setTimeout(r, 50));
       await document.fonts.ready;
       await new Promise(r => requestAnimationFrame(() => r()));
+      layoutStaticTabs(el);                                                      // tab widths (after fonts and formulas)
       const L = layoutOf(s), bgSrc = L.ownBg ? L : doc.master;
       out.push({s, pieces: slidePieces(s, el, model), bg: bgSrc.bgColor || '#ffffff'});
     }

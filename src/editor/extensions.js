@@ -1,10 +1,12 @@
 import { Extension, Node, Mark, mergeAttributes } from '@tiptap/core';
+import { Fragment } from '@tiptap/pm/model';
 import { Plugin, PluginKey, NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { BulletList, OrderedList } from '@tiptap/extension-list';
 import { Table, TableRow, TableCell, TableHeader, TableView } from '@tiptap/extension-table';
 import { CellSelection, TableMap } from '@tiptap/pm/tables';
 import { renderInto, isReady, mathReady, mathFontFromCSS } from '../math.js';
+import { layoutTabs } from '../tabs.js';
 
 const numOrNull = v => (v === '' || v === null || v === undefined || isNaN(+v)) ? null : +v;
 
@@ -41,6 +43,12 @@ export const ParaFormat = Extension.create({
           default: false,
           parseHTML: el => el.getAttribute('data-kn') === '1',
           renderHTML: a => a.keepNext ? { 'data-kn': '1' } : {}
+        },
+        // tab stops: JSON [{pos: cm, align: left|center|right, leader?}]
+        tabStops: {
+          default: null,
+          parseHTML: el => el.getAttribute('data-tabs') || null,
+          renderHTML: a => a.tabStops ? { 'data-tabs': typeof a.tabStops === 'string' ? a.tabStops : JSON.stringify(a.tabStops) } : {}
         }
       }
     }];
@@ -84,20 +92,28 @@ export const KvBulletList = BulletList.extend({
       ...this.parent?.(),
       bulletChar: { default: '', parseHTML: el => el.getAttribute('data-bullet') || legacyBullet(el) || '', renderHTML: a => a.bulletChar ? { 'data-bullet': a.bulletChar } : {} },
       bulletImage: { default: '', parseHTML: el => el.getAttribute('data-bullet-img') || '', renderHTML: a => a.bulletImage ? { 'data-bullet-img': a.bulletImage } : {} },
+      // hanging indent of the whole list (all levels): the text starts this far from its symbol, and an inner
+      // list's symbol stands where the outer text starts – so the gaps are equal on every level
+      gap: { default: null, parseHTML: el => numOrNull(el.getAttribute('data-gap')), renderHTML: a => a.gap ? { 'data-gap': a.gap, style: `--gap:${a.gap}cm` } : {} },
       bulletSize: { default: 0.9, parseHTML: el => numOrNull(el.getAttribute('data-bullet-size')) ?? 0.9, renderHTML: a => a.bulletImage ? { 'data-bullet-size': a.bulletSize } : {} }
     };
   }
 });
 export const KvOrderedList = OrderedList.extend({
+  addInputRules() { return []; },
   addAttributes() {
     return {
       ...this.parent?.(),
-      numStyle: { default: 'decimal', parseHTML: el => el.getAttribute('data-num') || el.style.listStyleType || 'decimal', renderHTML: a => ({ 'data-num': a.numStyle }) }
+      // hanging indent of the whole list (all levels): the text starts this far from its symbol, and an inner
+      // list's symbol stands where the outer text starts – so the gaps are equal on every level
+      gap: { default: null, parseHTML: el => numOrNull(el.getAttribute('data-gap')), renderHTML: a => a.gap ? { 'data-gap': a.gap, style: `--gap:${a.gap}cm` } : {} },
+      numStyle: { default: null, parseHTML: el => el.getAttribute('data-num') || null, renderHTML: a => a.numStyle ? { 'data-num': a.numStyle } : {} },
+      cont: { default: false, parseHTML: el => el.getAttribute('data-cont') === '1', renderHTML: a => a.cont ? { 'data-cont': '1' } : {} }
     };
   }
 });
 
-function ordinal(n, style) {
+export function ordinal(n, style) {
   const alpha = (k, up) => { let s = ''; while (k > 0) { k--; s = String.fromCharCode(97 + k % 26) + s; k = Math.floor(k / 26); } return up ? s.toUpperCase() : s; };
   const roman = (k, up) => { const t = [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'], [50, 'l'], [40, 'xl'], [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']]; let s = ''; for (const [v, r] of t) while (k >= v) { s += r; k -= v; } return up ? s.toUpperCase() : s; };
   switch (style) {
@@ -110,60 +126,84 @@ function ordinal(n, style) {
   }
 }
 const DEFAULT_BULLETS = ['•', '◦', '▪'];
+/** Default list symbol and numbering of the document template (Normál stílus). */
+export const listDefaults = { bullet: '•', num: 'decimal', img: null };   // img: the template's picture symbol (Matekos végtelen)
+const bulletAt = depth => depth % 3 === 0 ? (listDefaults.img ? '•' : (listDefaults.bullet || '•')) : DEFAULT_BULLETS[depth % 3];
 /** Real (measurable, printable) list markers, rendered as widgets at the start of each item's first line. */
 export const ListMarkers = Extension.create({
   name: 'listMarkers',
   addProseMirrorPlugins() {
     const build = doc => {
       const decos = [];
-      const walk = (node, pos, depth) => {
+      /** carry: markers of outer items whose first line is the first line of a nested list (same-line nesting) */
+      const walk = (node, pos, depth, carry) => {
+        const ends = {};                              // last number of the lists on this level, per numbering style
         node.forEach((child, off) => {
           const cpos = pos + off + 1;
           if (child.type.name === 'bulletList' || child.type.name === 'orderedList') {
             const ordered = child.type.name === 'orderedList';
-            const start = ordered ? (child.attrs.start || 1) : 1;
-            child.forEach((item, ioff, idx) => {
+            const sty = child.attrs.numStyle || listDefaults.num;
+            const start = ordered ? (child.attrs.cont ? (ends[sty] ?? 0) + 1 : (child.attrs.start ?? 1)) : 1;
+            if (ordered) { let n = 0; child.forEach(it => { if (!it.attrs.ghost) n++; }); ends[sty] = start + n - 1; }
+            let real = -1;                           // holder items are not counted
+            child.forEach((item, ioff) => {
+              if (!item.attrs.ghost) real++;
+              const idx = Math.max(0, real);
               const ipos = cpos + 1 + ioff;          // position of listItem
               const first = item.firstChild;
-              if (first && first.isTextblock) {
-                const key = ordered ? 'o' + ordinal(start + idx, child.attrs.numStyle)
+              const mk = {
+                key: ordered ? 'o' + ordinal(start + idx, child.attrs.numStyle || listDefaults.num)
                   : child.attrs.bulletImage ? 'i' + child.attrs.bulletSize + child.attrs.bulletImage.length + child.attrs.bulletImage.slice(-24)
-                    : 'b' + (child.attrs.bulletChar || DEFAULT_BULLETS[depth % 3]);
-                decos.push(Decoration.widget(ipos + 2, () => {
-                  const s = document.createElement('span');
-                  s.className = 'lm';
-                  s.contentEditable = 'false';
-                  if (ordered) s.textContent = ordinal(start + idx, child.attrs.numStyle);
-                  else if (child.attrs.bulletImage) {
-                    const im = document.createElement('img');
-                    im.src = child.attrs.bulletImage; im.alt = '';
-                    im.style.height = (child.attrs.bulletSize || 0.9) + 'em';
-                    s.appendChild(im);
-                  } else s.textContent = child.attrs.bulletChar || DEFAULT_BULLETS[depth % 3];
-                  return s;
-                }, { side: -1, key, ignoreSelection: true }));
+                    : 'b' + (child.attrs.bulletChar || bulletAt(depth)) + (!child.attrs.bulletChar && depth % 3 === 0 && listDefaults.img ? 'img' : ''),
+                text: ordered ? ordinal(start + idx, child.attrs.numStyle || listDefaults.num) : (child.attrs.bulletImage || (!child.attrs.bulletChar && depth % 3 === 0 && listDefaults.img)) ? null : (child.attrs.bulletChar || bulletAt(depth)),
+                img: !ordered && child.attrs.bulletImage ? child.attrs.bulletImage : (!ordered && !child.attrs.bulletChar && depth % 3 === 0 && listDefaults.img) || null,
+                size: child.attrs.bulletImage ? (child.attrs.bulletSize || 0.9) : 0.7
+              };
+              const here = idx === 0 && carry ? carry : [];
+              // all the text of the item's first line bold -> the symbol bold too
+              let allBold = false;
+              if (first && first.isTextblock && first.textContent.trim()) { allBold = true; first.descendants(c => { if (c.isText && c.text.trim() && !c.marks.some(m => m.type.name === 'bold')) allBold = false; }); }
+              mk.bold = allBold;
+              // an item that starts with an empty line and a list: the nested list's first item shares the line
+              const sameLine = !!item.attrs.sameLine && first && first.isTextblock && !first.content.size && item.childCount > 1 && /List$/.test(item.child(1).type.name);
+              if (sameLine) {
+                decos.push(Decoration.node(ipos + 1, ipos + 1 + first.nodeSize, { class: 'lm-collapsed' }));
+                walk(item, ipos, depth + 1, [...here.map(m => ({ ...m, up: m.up + 1 })), { ...mk, up: 1 }]);
+                return;
               }
-              walk(item, ipos, depth + 1);
+              if (item.attrs.ghost) { walk(item, ipos, depth + 1, null); return; }
+              if (first && first.isTextblock) {
+                for (const m of [{ ...mk, up: 0 }, ...here]) {
+                  decos.push(Decoration.widget(ipos + 2, () => {
+                    const s = document.createElement('span');
+                    s.className = 'lm' + (m.up ? ' lm-up' : '') + (m.bold ? ' lm-b' : '');
+                    if (m.up) s.style.setProperty('--up', m.up);
+                    s.contentEditable = 'false';
+                    if (m.img) { const im = document.createElement('img'); im.src = m.img; im.alt = ''; im.style.height = m.size + 'em'; s.appendChild(im); }
+                    else s.textContent = m.text;
+                    return s;
+                  }, { side: -1, key: m.key + '|' + m.up + (m.bold ? 'b' : ''), ignoreSelection: true }));
+                }
+              }
+              walk(item, ipos, depth + 1, null);
             });
-          } else if (!child.isTextblock && child.childCount) walk(child, cpos, depth);
+          } else if (!child.isTextblock && child.childCount) walk(child, cpos, depth, null);
         });
       };
-      walk(doc, -1, 0);
+      walk(doc, -1, 0, null);
       return DecorationSet.create(doc, decos);
     };
     return [new Plugin({
       key: new PluginKey('listMarkers'),
       state: {
         init: (_, state) => build(state.doc),
-        apply: (tr, old, _o, state) => tr.docChanged ? build(state.doc) : old
+        apply: (tr, old, _o, state) => tr.docChanged || tr.getMeta('listDefaults') ? build(state.doc) : old
       },
       props: { decorations(state) { return this.getState(state); } }
     })];
   }
 });
 
-/* ------------------------------------------------------------------ */
-/* Table cells: fill colour and vertical alignment                     */
 /* ------------------------------------------------------------------ */
 const cellAttrs = {
   background: {
@@ -676,5 +716,230 @@ export const KvImage = Node.create({
   },
   addCommands() {
     return { insertImage: attrs => ({ commands }) => commands.insertContent({ type: this.name, attrs }) };
+  }
+});
+
+/* ---------- from Matekos Doksi: tabs, list levels, comments, list joining ---------- */
+export const TabNode = Node.create({
+  name: 'tab',
+  priority: 1000,                 // its Tab / Backspace rules come before the general list keys
+  group: 'inline',
+  inline: true,
+  atom: true,
+  selectable: false,
+  parseHTML() { return [{ tag: 'span.tab' }]; },
+  renderHTML() { return ['span', { class: 'tab' }]; },
+  renderText() { return '\t'; },
+  // the width is set by the tab layout; the editor must not treat that as a change of the text
+  addNodeView() { return () => { const dom = document.createElement('span'); dom.className = 'tab'; dom.contentEditable = 'false'; return { dom, ignoreMutation: () => true }; }; },
+  addProseMirrorPlugins() {
+    const opts = this.options;
+    return [new Plugin({ view: () => ({ update: (view, prev) => {
+      if (view.state.doc === prev.doc || !view.dom.querySelector('span.tab')) return;
+      layoutTabs(view.dom, opts.getScale ? opts.getScale() : 1);
+    } }) })];
+  },
+  addOptions() { return { getScale: () => 1 }; },
+  addKeyboardShortcuts() {
+    return {
+      // in a list item, right after the symbol: the item moves one level in; anywhere else: a tab
+      Tab: () => {
+        const ed = this.editor;
+        if (ed.isActive('table')) { ed.commands.goToNextCell(1); return true; }       // no new rows from Tab
+        const { $from, empty } = ed.state.selection;
+        // in a list: right after the symbol, on a selected formula or with several items selected -> one level in
+        if (ed.isActive('listItem') && (!empty || $from.parentOffset === 0)) { changeListLevel(ed.view, 1); return true; }
+        return ed.commands.insertContent({ type: 'tab' });
+      },
+      'Shift-Tab': () => { const ed = this.editor; if (ed.isActive('table')) { ed.commands.goToNextCell(-1); return true; } if (!ed.isActive('listItem')) return false; changeListLevel(ed.view, -1); return true; },
+      Enter: () => {
+        const ed = this.editor, { $from, empty } = ed.state.selection;
+        if (!empty || !ed.isActive('listItem') || $from.parent.content.size) return false;
+        const li = $from.node($from.depth - 1);
+        if (!li || li.type.name !== 'listItem' || li.childCount !== 1 || $from.depth < 4) return false;   // top level: the usual (leaves the list)
+        return changeListLevel(ed.view, -1);
+      },
+      Backspace: () => {
+        if (deleteEmptyListItem(this.editor.view)) return true;
+        const st = this.editor.state, sel = st.selection;
+        if (!sel.empty) return false;
+        const $f = sel.$from, d = $f.depth - 1;
+        if ($f.parentOffset !== 0 || d < 3) return false;
+        if ($f.node(d).type.name !== 'listItem' || $f.index(d) !== 0) return false;
+        const L2 = $f.node(d - 1); if (!/List$/.test(L2.type.name) || $f.index(d - 1) !== 0) return false;
+        const LI1 = $f.node(d - 2); if (LI1.type.name !== 'listItem' || $f.index(d - 2) !== 1 || !LI1.attrs.sameLine) return false;
+        const first = LI1.firstChild; if (!first || !first.isTextblock || first.content.size) return false;
+        const inner = L2.firstChild, kids = [];
+        inner.forEach(c => kids.push(c));
+        if (L2.childCount > 1) { const rest = []; L2.forEach((c, o, i) => { if (i) rest.push(c); }); kids.push(L2.copy(Fragment.from(rest))); }
+        LI1.forEach((c, o, i) => { if (i > 1) kids.push(c); });
+        const liPos = $f.before(d - 2);
+        const tr = st.tr.replaceWith(liPos, liPos + LI1.nodeSize, LI1.type.create({ ...LI1.attrs, sameLine: false }, kids));
+        tr.setSelection(TextSelection.create(tr.doc, liPos + 2));
+        this.editor.view.dispatch(tr.scrollIntoView());
+        return true;
+      },
+      'Mod-l': () => this.editor.chain().focus().toggleSubscript().run(),
+      'Mod-h': () => this.editor.chain().focus().toggleSuperscript().run()
+    };
+  }
+});
+
+export const ListItemAttrs = Extension.create({
+  name: 'listItemAttrs',
+  addGlobalAttributes() {
+    return [{ types: ['listItem'], attributes: {
+      sameLine: { default: false, keepOnSplit: false, parseHTML: el => el.getAttribute('data-same') === '1', renderHTML: a => a.sameLine ? { 'data-same': '1' } : {} },
+      // an invisible holder item: lets the first item of a list stand one level deeper
+      ghost: { default: false, keepOnSplit: false, parseHTML: el => el.hasAttribute('data-ghost'), renderHTML: a => a.ghost ? { 'data-ghost': '1' } : {} }
+    } }];
+  }
+});
+const isList = n => n && (n.type.name === 'bulletList' || n.type.name === 'orderedList');
+function flatten(list, level, out, pos) {
+  list.forEach((li, off) => {
+    const liPos = pos + 1 + off, content = [], subs = [];
+    let cOff = 0, contentStart = liPos + 1;
+    li.forEach((c, o) => { if (isList(c)) subs.push([c, liPos + 1 + o]); else content.push(c); });
+    if (!li.attrs.ghost) out.push({ level, type: list.type, attrs: list.attrs, itemAttrs: li.attrs, content, from: liPos, start: contentStart,
+      end: subs.length ? subs[0][1] : liPos + li.nodeSize - 1 });
+    void cOff;
+    for (const [sub, sp] of subs) flatten(sub, level + 1, out, sp);
+  });
+}
+const sameAttrs = (a, b) => ['bulletChar', 'bulletImage', 'bulletSize', 'numStyle', 'gap'].every(k => (a[k] ?? null) === (b[k] ?? null));
+function rebuild(items, schema) {
+  let i = 0;
+  const build = level => {
+    const lists = []; let cur = null;
+    while (i < items.length && items[i].level >= level) {
+      const it = items[i];
+      if (it.level === level) {
+        if (!cur || cur.type !== it.type || !sameAttrs(cur.attrs, it.attrs)) {
+          const attrs = { ...it.attrs };
+          if (cur && it.type.name === 'orderedList' && lists.some(l => l.type === it.type && sameAttrs(l.attrs, it.attrs))) { attrs.cont = true; }
+          cur = { type: it.type, attrs, items: [] }; lists.push(cur);
+        }
+        cur.items.push({ attrs: it.itemAttrs, content: [...it.content], src: it });
+        i++;
+      } else {
+        if (!cur) { cur = { type: it.type, attrs: { ...it.attrs }, items: [{ attrs: { ghost: true }, content: [schema.nodes.paragraph.create()] }] }; lists.push(cur); }
+        const subs = build(level + 1);
+        cur.items[cur.items.length - 1].content.push(...subs);
+      }
+    }
+    return lists.map(l => l.type.create(l.attrs, l.items.map(x => { const n = schema.nodes.listItem.create(x.attrs, x.content.length ? x.content : [schema.nodes.paragraph.create()]); n._src = x.src; return n; })));
+  };
+  return build(0);
+}
+/** Change the level of the selected list items by delta (+1 / -1). Returns false when not in a list. */
+export function changeListLevel(view, delta) {
+  const st = view.state, { $from, $to, from, to } = st.selection;
+  let d = 1; while (d <= $from.depth && !isList($from.node(d))) d++;
+  if (d > $from.depth) return false;
+  const outer = $from.node(d), outerPos = $from.before(d);
+  if (to > outerPos + outer.nodeSize) return false;
+  const items = []; flatten(outer, 0, items, outerPos);
+  // the selected items: their own content (not their nested items) touches the selection
+  const sel = items.filter(it => it.end >= from && it.start <= to);
+  if (!sel.length) return false;
+  for (const it of items) it.newLevel = it.level;
+  for (const it of sel) {
+    it.newLevel = Math.max(0, it.level + delta);
+    // keep the symbol it shows now (a default bullet would otherwise change with the level)
+    if (it.newLevel !== it.level && it.type.name === 'bulletList' && !it.attrs.bulletChar && !it.attrs.bulletImage) it.attrs = { ...it.attrs, bulletChar: bulletAt(it.level) };
+  }
+  // a list cannot skip a level: an item is at most one level deeper than the one before it
+  // the items after a moved one keep their level; holder items fill any gap above a deeper first item
+  if (items.every(it => it.newLevel === it.level)) return true;
+  // an item moving to another level takes the format (numbering / symbol) of the items already on that level
+  const moved = new Set(sel.filter(it => it.newLevel !== it.level));
+  for (const it of moved) {
+    const i = items.indexOf(it);
+    let nb = null;
+    for (let k = i - 1; k >= 0; k--) { const o = items[k]; if (o.newLevel < it.newLevel) break; if (o.newLevel === it.newLevel && !moved.has(o)) { nb = o; break; } }
+    if (!nb) for (let k = i + 1; k < items.length; k++) { const o = items[k]; if (o.newLevel < it.newLevel) break; if (o.newLevel === it.newLevel && !moved.has(o)) { nb = o; break; } }
+    if (nb) { it.type = nb.type; it.attrs = { ...nb.attrs }; }
+  }
+  for (const it of items) it.level = it.newLevel;
+  const nodes = rebuild(items, st.schema);
+  // selection: same offset inside the same item
+  const offA = (() => { const it = items.find(x => x.start <= st.selection.anchor && st.selection.anchor <= x.end); return it ? [items.indexOf(it), st.selection.anchor - it.start] : null; })();
+  const offH = (() => { const it = items.find(x => x.start <= st.selection.head && st.selection.head <= x.end); return it ? [items.indexOf(it), st.selection.head - it.start] : null; })();
+  const tr = st.tr.replaceWith(outerPos, outerPos + outer.nodeSize, nodes);
+  const starts = []; const walk = (n, p) => n.forEach((c, o) => { const cp = p + 1 + o; if (c.type.name === 'listItem') { if (!c.attrs.ghost) starts.push(cp + 1); c.forEach((g, go) => { if (isList(g)) walk(g, cp + 1 + go); }); } });
+  let p = outerPos; for (const n of nodes) { walk(n, p); p += n.nodeSize; }
+  try {
+    const A = offA && starts[offA[0]] != null ? starts[offA[0]] + offA[1] : null, H = offH && starts[offH[0]] != null ? starts[offH[0]] + offH[1] : null;
+    if (A != null && H != null) tr.setSelection(TextSelection.create(tr.doc, A, H));
+  } catch (e) { /* keep the mapped selection */ }
+  view.dispatch(tr.scrollIntoView());
+  return true;
+}
+
+/** Backspace in an empty item of an inner list: the item goes, everything else keeps its level (renumbered). */
+export function deleteEmptyListItem(view) {
+  const st = view.state, sel = st.selection;
+  if (!sel.empty) return false;
+  const $f = sel.$from;
+  if ($f.parent.content.size || $f.depth < 4) return false;
+  const li = $f.node($f.depth - 1);
+  if (li.type.name !== 'listItem' || li.childCount !== 1) return false;
+  let d = 1; while (d <= $f.depth && !isList($f.node(d))) d++;
+  const outer = $f.node(d), outerPos = $f.before(d);
+  const items = []; flatten(outer, 0, items, outerPos);
+  const k = items.findIndex(it => it.start <= sel.from && sel.from <= it.end);
+  if (k < 0 || items[k].level === 0) return false;
+  const prev = k - 1;
+  items.splice(k, 1);
+  const nodes = rebuild(items, st.schema);
+  const tr = st.tr.replaceWith(outerPos, outerPos + outer.nodeSize, nodes);
+  // cursor: end of the previous item's text
+  const starts = []; const walk = (n, p) => n.forEach((c, o) => { const cp = p + 1 + o; if (c.type.name === 'listItem') { starts.push([cp, c]); c.forEach((g, go) => { if (isList(g)) walk(g, cp + 1 + go); }); } });
+  let p = outerPos; for (const n of nodes) { walk(n, p); p += n.nodeSize; }
+  const t = starts[Math.max(0, prev)];
+  if (t) { let endPos = t[0] + 1; t[1].forEach((c, o) => { if (!isList(c)) endPos = t[0] + 1 + o + c.nodeSize - 1; }); try { tr.setSelection(TextSelection.create(tr.doc, endPos)); } catch (e) { /* mapped */ } }
+  view.dispatch(tr.scrollIntoView());
+  return true;
+}
+
+export const CommentMark = Mark.create({
+  name: 'comment',
+  inclusive: false,
+  excludes: '',                 // several comments may cover the same text
+  addAttributes() { return { id: { default: null, parseHTML: el => el.getAttribute('data-cmt'), renderHTML: a => ({ 'data-cmt': a.id }) } }; },
+  parseHTML() { return [{ tag: 'span[data-cmt]' }]; },
+  renderHTML({ HTMLAttributes }) { return ['span', HTMLAttributes, 0]; }
+});
+
+export const ListJoin = Extension.create({
+  name: 'listJoin',
+  addProseMirrorPlugins() {
+    return [new Plugin({
+      appendTransaction(trs, oldState, state) {
+        if (!trs.some(t => t.docChanged)) return null;
+        const joins = [];
+        const scan = (n, start) => {          // start: position of n's first child
+          let prev = null;
+          n.forEach((c, off) => {
+            const cp = start + off;
+            if (prev && /^(orderedList|bulletList)$/.test(c.type.name) && prev.type === c.type) {
+              const a = prev.attrs, b = c.attrs;
+              const same = c.type.name === 'orderedList'
+                ? (a.numStyle || null) === (b.numStyle || null) && (b.start == null || b.start === 1) && !b.cont
+                : (a.bulletChar || '') === (b.bulletChar || '') && (a.bulletImage || '') === (b.bulletImage || '');
+              if (same) joins.push(cp);
+            }
+            prev = c;
+            if (!c.isTextblock && !c.isLeaf) scan(c, cp + 1);
+          });
+        };
+        scan(state.doc, 0);
+        if (!joins.length) return null;
+        const tr = state.tr;
+        for (const j of joins.reverse()) { try { tr.join(tr.mapping.map(j)); } catch (e) { /* leave it */ } }
+        return tr.docChanged ? tr.setMeta('addToHistory', false) : null;
+      }
+    })];
   }
 });

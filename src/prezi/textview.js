@@ -11,11 +11,12 @@ import Highlight from '@tiptap/extension-highlight';
 import Subscript from '@tiptap/extension-subscript';
 import Superscript from '@tiptap/extension-superscript';
 import { ListItem } from '@tiptap/extension-list';
-import { ParaFormat, KvBulletList, KvOrderedList, ListMarkers, KvTable, KvTableRow, KvTableCell, KvTableHeader, MathNode } from '../editor/extensions.js';
+import { ParaFormat, KvBulletList, KvOrderedList, ListMarkers, KvTable, KvTableRow, KvTableCell, KvTableHeader, MathNode, ListItemAttrs, ListJoin, CommentMark, TabNode, ordinal, listDefaults } from '../editor/extensions.js';
+import { layoutTabs } from '../tabs.js';
 import { renderInto, mathStyleOf } from '../math.js';
 import { emptyDoc } from './model.js';
 
-const hooks = {onEdit: null, onRendered: null, onPreview: null};
+const hooks = {onEdit: null, onRendered: null, onPreview: null, getScale: null};
 
 /** Upper case display (the typed letters stay as they were): <span style="text-transform:uppercase">. */
 const TextCase = Extension.create({
@@ -119,7 +120,7 @@ function extensions(kind = 'text') {
       ...(table ? {document: false} : {})
     }),
     ...(table ? [Document.extend({content: 'table'}), KvTable, KvTableRow, KvTableHeader, KvTableCell] : []),
-    ListItem, KvBulletList, KvOrderedList, ListMarkers,
+    ListItem, KvBulletList, KvOrderedList, ListMarkers, ListItemAttrs, ListJoin, CommentMark, TabNode.configure({getScale: () => hooks.getScale?.() || 1}),
     TextStyle, Color, FontSize, FontFamily, LetterSpacing, TextCase, InlineMathOnly, ListHang,
     Highlight.configure({multicolor: true}),
     TextAlign.configure({types: table ? ['paragraph'] : ['heading', 'paragraph']}),
@@ -135,35 +136,42 @@ function extensions(kind = 'text') {
 const STATIC_EXT = {text: extensions('text'), table: extensions('table')};
 
 /* ---------- list markers for the static view (same output as the ListMarkers plugin) ---------- */
-function ordinal(n, style) {
-  const alpha = (k, up) => { let s = ''; while (k > 0) { k--; s = String.fromCharCode(97 + k % 26) + s; k = Math.floor(k / 26); } return up ? s.toUpperCase() : s; };
-  const roman = (k, up) => { const t = [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'], [50, 'l'], [40, 'xl'], [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']]; let s = ''; for (const [v, r] of t) while (k >= v) { s += r; k -= v; } return up ? s.toUpperCase() : s; };
-  switch (style) {
-    case 'decimal-paren': return n + ')';
-    case 'lower-alpha': return alpha(n) + ')';
-    case 'upper-alpha': return alpha(n, true) + '.';
-    case 'lower-roman': return roman(n) + '.';
-    case 'upper-roman': return roman(n, true) + '.';
-    default: return n + '.';
-  }
-}
 const DEFAULT_BULLETS = ['•', '◦', '▪'];
+const firstLineBold = p => {
+  if (!p.textContent.trim()) return false;
+  const tw = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+  for (let n = tw.nextNode(); n; n = tw.nextNode()) if (n.data.trim() && !n.parentElement.closest('.math') && !n.parentElement.closest('strong, b')) return false;
+  return true;
+};
 function addMarkers(root, depth = 0) {
+  const ends = {};                                  // last number per numbering style on this level (continued lists)
   for (const list of root.querySelectorAll(':scope > ul, :scope > ol, :scope > li > ul, :scope > li > ol')) {
-    const ordered = list.tagName === 'OL', start = +(list.getAttribute('start') || 1);
-    [...list.children].forEach((li, i) => {
+    const ordered = list.tagName === 'OL', sty = list.getAttribute('data-num') || listDefaults.num;
+    const items = [...list.children].filter(c => c.tagName === 'LI');
+    const start = ordered ? (list.getAttribute('data-cont') === '1' ? (ends[sty] ?? 0) + 1 : +(list.getAttribute('start') || 1)) : 1;
+    if (ordered) ends[sty] = start + items.filter(li => !li.hasAttribute('data-ghost')).length - 1;
+    let real = -1;
+    items.forEach(li => {
+      if (!li.hasAttribute('data-ghost')) real++;
       const first = li.firstElementChild;
-      if (first && /^(P|H[1-3])$/.test(first.tagName)) {
-        const s = document.createElement('span'); s.className = 'lm'; s.contentEditable = 'false';
-        if (ordered) s.textContent = ordinal(start + i, list.getAttribute('data-num'));
+      if (!li.hasAttribute('data-ghost') && first && /^(P|H[1-3])$/.test(first.tagName)) {
+        const s = document.createElement('span'); s.className = 'lm' + (firstLineBold(first) ? ' lm-b' : ''); s.contentEditable = 'false';
+        if (ordered) s.textContent = ordinal(start + Math.max(0, real), sty);
         else if (list.getAttribute('data-bullet-img')) {
           const im = document.createElement('img'); im.src = list.getAttribute('data-bullet-img'); im.alt = '';
           im.style.height = (list.getAttribute('data-bullet-size') || 0.9) + 'em'; s.appendChild(im);
-        } else s.textContent = list.getAttribute('data-bullet') || DEFAULT_BULLETS[depth % 3];
+        } else s.textContent = list.getAttribute('data-bullet') || (depth % 3 === 0 ? (listDefaults.bullet || '•') : DEFAULT_BULLETS[depth % 3]);
         first.prepend(s);
       }
       addMarkers(li, depth + 1);
     });
+  }
+}
+/** Tabs of a drawn (not edited) text: their widths once the box is on the page. */
+export function layoutStaticTabs(root) {
+  for (const pm of root.querySelectorAll('.txt .ProseMirror')) {
+    if (!pm.querySelector('span.tab') || !pm.isConnected || !pm.offsetWidth) continue;
+    layoutTabs(pm, pm.getBoundingClientRect().width / pm.offsetWidth || 1);
   }
 }
 
@@ -180,6 +188,7 @@ export function renderStatic(host, json, onRendered, kind = 'text') {
     if (!hasContent) b.appendChild(document.createElement('br'));
   }
   host.innerHTML = ''; host.appendChild(pm);         // first in place, so each formula can see the text around it
+  if (pm.querySelector('span.tab')) requestAnimationFrame(() => { if (pm.isConnected && pm.offsetWidth) layoutTabs(pm, pm.getBoundingClientRect().width / pm.offsetWidth || 1); });
   for (const sp of pm.querySelectorAll('span.math')) {
     sp.contentEditable = 'false';
     sp.classList.remove('disp');
@@ -203,7 +212,7 @@ export function mathPending(root) { return !!root.querySelector('.math .mpending
 /** Live editor inside a text box. */
 export function mountEditor(host, json, {onUpdate, onSelection, onFocus, onBlur} = {}, kind = 'text') {
   host.innerHTML = '';
-  return new Editor({
+  const editor = new Editor({
     element: host,
     extensions: extensions(kind),
     content: json || emptyDoc(),
@@ -221,4 +230,6 @@ export function mountEditor(host, json, {onUpdate, onSelection, onFocus, onBlur}
     onFocus: () => onFocus?.(),
     onBlur: () => onBlur?.()
   });
+  requestAnimationFrame(() => { try { if (editor.view.dom.querySelector('span.tab')) layoutTabs(editor.view.dom, hooks.getScale?.() || 1); } catch (e) { /* not mounted */ } });
+  return editor;
 }

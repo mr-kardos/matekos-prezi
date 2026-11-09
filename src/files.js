@@ -161,3 +161,41 @@ export async function loadAutosave() {
     db.close(); return v || null;
   } catch (e) { return null; }
 }
+
+/* ---------- template files (.mpsab = Matekos Prezi SABlon): a zip like .mprezi, without slides ---------- */
+let lastTplPath = null;                 // the path of the template file last saved / opened (desktop app)
+export const templateFilePath = () => lastTplPath;
+const TPL_FILTER = [{name: 'Matekos Prezi Sablon', extensions: ['mpsab']}];
+export async function saveTemplateFile(blob, suggested) {
+  if (isTauri()) {
+    const {save} = await import('@tauri-apps/plugin-dialog');
+    const {writeFile} = await import('@tauri-apps/plugin-fs');
+    const path = await save({defaultPath: safeName(suggested) + '.mpsab', filters: TPL_FILTER});
+    if (!path) return null;
+    await writeFile(path, new Uint8Array(await blob.arrayBuffer()));
+    lastTplPath = path; return baseName(path);
+  }
+  const url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = safeName(suggested) + '.mpsab'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+  lastTplPath = null; return a.download;
+}
+/** Overwrite a template file (desktop app: at its path; otherwise a download). */
+export async function updateTemplateFile(path, blob, name) {
+  if (isTauri() && path) { const {writeFile} = await import('@tauri-apps/plugin-fs'); await writeFile(path, new Uint8Array(await blob.arrayBuffer())); return baseName(path); }
+  return saveTemplateFile(blob, name || 'sablon');
+}
+/** Pick a template file: {buf, name, path} or null. */
+export async function openTemplateFile() {
+  if (isTauri()) {
+    const {open} = await import('@tauri-apps/plugin-dialog');
+    const {readFile} = await import('@tauri-apps/plugin-fs');
+    const path = await open({multiple: false, filters: TPL_FILTER});
+    if (!path) return null;
+    lastTplPath = path;
+    return {buf: (await readFile(path)).buffer, name: baseName(path), path};
+  }
+  const f = await new Promise(res => { const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.mpsab'; inp.onchange = () => res(inp.files[0] || null); inp.click(); });
+  if (!f) return null;
+  lastTplPath = null;
+  return {buf: await f.arrayBuffer(), name: f.name, path: null};
+}
