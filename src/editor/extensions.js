@@ -761,6 +761,7 @@ export const TabNode = Node.create({
       },
       Backspace: () => {
         if (deleteEmptyListItem(this.editor.view)) return true;
+        if (unlistFirstItem(this.editor.view)) return true;
         const st = this.editor.state, sel = st.selection;
         if (!sel.empty) return false;
         const $f = sel.$from, d = $f.depth - 1;
@@ -877,6 +878,28 @@ export function changeListLevel(view, delta) {
   return true;
 }
 
+/** Backspace at the start of a list's first item that has inner items: its symbol goes (the text stays as a normal
+ *  paragraph above the list) and the inner items keep their levels (they do not move up a level). */
+export function unlistFirstItem(view) {
+  const st = view.state, sel = st.selection;
+  if (!sel.empty) return false;
+  const $f = sel.$from;
+  if ($f.parentOffset !== 0 || !$f.parent.isTextblock) return false;
+  let d = 1; while (d <= $f.depth && !isList($f.node(d))) d++;
+  if (d > $f.depth || d + 2 !== $f.depth) return false;                 // the paragraph of a top-level item
+  const outer = $f.node(d), outerPos = $f.before(d);
+  if ($f.index(d) !== 0 || $f.index(d + 1) !== 0) return false;          // its first item, first paragraph
+  const li = outer.firstChild; let hasSub = false; li.forEach(c => { if (isList(c)) hasSub = true; });
+  if (!hasSub) return false;                                             // no inner items: the usual behaviour
+  const items = []; flatten(outer, 0, items, outerPos);
+  if (!items.length || items[0].level !== 0) return false;
+  const head = items[0].content, rest = items.slice(1);
+  const nodes = [...head, ...(rest.length ? rebuild(rest, st.schema) : [])];
+  const tr = st.tr.replaceWith(outerPos, outerPos + outer.nodeSize, nodes);
+  try { tr.setSelection(TextSelection.create(tr.doc, outerPos + 1)); } catch (e) { /* mapped */ }
+  view.dispatch(tr.scrollIntoView());
+  return true;
+}
 /** Backspace in an empty item of an inner list: the item goes, everything else keeps its level (renumbered). */
 export function deleteEmptyListItem(view) {
   const st = view.state, sel = st.selection;

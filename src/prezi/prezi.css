@@ -165,7 +165,7 @@ body.tplmode .slideonly{ display:none !important; }
 /* ---------- text boxes: the Doksi editor inside a slide ---------- */
 .txt{ padding:8px; line-height:1.25; outline:none; --after:.3em; position:relative; font-family:var(--doc-font); }
 .txt > .ProseMirror{ position:relative; z-index:auto; outline:none; min-height:1.25em; }
-.txt > .ProseMirror > :last-child, .txt > .ProseMirror > ul:last-child > li:last-child > p:last-child, .txt > .ProseMirror > ol:last-child > li:last-child > p:last-child{ --sa:0px; }
+.txt > .ProseMirror > :last-child{ --sa:0px; margin-bottom:0; }
 .txt > .ProseMirror > .tableWrapper:last-child{ padding-bottom:0; }
 .txt.empty::before{ content:attr(data-prompt); position:absolute; left:8px; top:8px; right:8px; color:#9aa6b2; pointer-events:none; }
 .obj.text .ProseMirror[contenteditable="true"]{ cursor:text; }
@@ -444,7 +444,7 @@ input[type=checkbox], input[type=radio]{ accent-color:var(--accent); }
 #popPara .pf label{ display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--ink-2); min-width:0; }
 #popPara .pf input, #popPara .pf select{ width:100%; min-width:0; box-sizing:border-box; height:28px; border:1px solid var(--line); border-radius:6px; background:var(--chrome-2); color:var(--ink); padding:0 6px; font-size:13px; }
 /* list paragraphs with a hanging indent: the symbol stays, the text moves right */
-.ProseMirror p[data-hang] > .lm{ transform:translateX(calc(-1 * var(--gap,0.8cm) - var(--hang))); }
+.ProseMirror p[data-hang] > .lm{ margin-left:calc(-1 * var(--gap,0.8cm) - var(--hang)); min-width:calc(var(--gap,0.8cm) + var(--hang)); }
 /* line spacing: custom value */
 .lhrow{ display:flex; align-items:center; gap:6px; margin:6px 4px 2px; font-size:12.5px; color:var(--ink-2); }
 .lhrow input{ width:64px; height:28px; border:1px solid var(--line); border-radius:6px; background:var(--chrome-2); color:var(--ink); padding:0 6px; }
@@ -677,3 +677,79 @@ span.tab .tab-sp{ display:inline-block; height:1px; }
 .stctl .stalign .tb{ min-width:28px; height:28px; padding:0; }
 .stctl .stalign .tb svg{ width:15px; height:15px; }
 .stctl .stalign .tb.on{ background:var(--accent-soft); color:var(--accent); }
+/* ---------- 1.4.1 ---------- */
+/* comments panel header: title, count and buttons on one line */
+.cmthead{ align-items:center; }
+.cmthead b, .cmthead .phint{ line-height:26px; margin-top:0; margin-bottom:0; }
+/* find: plain yellow / orange, no colour mixing with the selection */
+#findLayer{ mix-blend-mode:normal; }
+#findLayer .find-hit{ background:rgba(255,213,0,.45); }
+#findLayer .find-hit.cur{ background:rgba(255,152,0,.55); }
+/* the kept selection while a ribbon box / the comments panel has the focus */
+#keepLayer{ position:absolute; left:0; top:0; pointer-events:none; z-index:39; }
+#keepLayer div{ position:absolute; background:rgba(56,120,255,.28); }
+/* a selected table shows its invisible borders */
+.obj.table.tblsel td[data-bw="0"], .obj.table.tblsel th[data-bw="0"], .obj.table.editing td[data-bw="0"], .obj.table.editing th[data-bw="0"]{ outline:1.2px dashed rgba(218,41,28,.85); outline-offset:-1px; }
+/* left panel: can be closed like the right one */
+.main.noslides{ grid-template-columns:0 0 1fr 6px var(--rw,300px); }
+.main.noslides.noprops{ grid-template-columns:0 0 1fr 0 0; }
+.main.noslides #slides, .main.noslides .lsplit{ visibility:hidden; overflow:hidden; min-width:0; }
+.slidesx, .slidesopen{ position:absolute; top:6px; z-index:8; background:var(--chrome-2); border:1px solid var(--line); min-width:26px; height:26px; padding:0; }
+.slidesx{ left:calc(var(--lw,176px) - 32px); opacity:.75; }
+.slidesx:hover{ opacity:1; }
+.slidesopen{ left:12px; display:none !important; box-shadow:var(--shadow); }
+.main.noslides .slidesx{ display:none; }
+.main.noslides .slidesopen{ display:inline-flex !important; }
+.slidesx svg, .slidesopen svg{ width:16px; height:16px; }
+/* spelling: red wavy lines on their own layer */
+#spellLayer{ position:absolute; left:0; top:0; pointer-events:none; z-index:38; }
+#spellLayer div{ position:absolute; height:4px; background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='4'%3E%3Cpath d='M0 3 Q1.5 0 3 3 T6 3' fill='none' stroke='%23e53935' stroke-width='1.1'/%3E%3C/svg%3E") repeat-x 0 0 / 6px 4px; }
+#popSpell{ width:240px; }
+/* right-click menu */
+.ctxmenu{ width:250px; padding:5px; position:fixed; }
+.ctxmenu .pitem{ display:flex; justify-content:space-between; gap:10px; }
+.ctxmenu .pitem .phint{ margin:0 !important; }
+.ctxmenu .pitem[disabled]{ opacity:.4; pointer-events:none; }
+.ctxmenu .ctitle{ font:600 11px var(--ui); color:var(--ink-2); padding:6px 8px 2px; text-transform:uppercase; letter-spacing:.04em; }
+/* eye mode (formatting marks as in Matekos Doksi) */
+#marksLayer{ position:absolute; left:0; top:0; width:100%; height:100%; z-index:60; pointer-events:none; color:#00b140; font:700 12px/1 var(--ui); text-shadow:0 0 2px #fff, 0 0 2px #fff; }
+#marksLayer span{ position:absolute; pointer-events:none; white-space:nowrap; }
+#marksLayer .mk-sp,#marksLayer .mk-nb{ transform:translate(-50%,-50%); font-size:20px; }
+#marksLayer .mk-par,#marksLayer .mk-br{ transform:translateY(-50%); font-size:17px; }
+#marksLayer .mk-tab{ transform:translateY(-50%); text-align:center; font-size:16px; border-bottom:1.5px solid #00b140; line-height:0; height:0; }
+#marksLayer .mk-tab s{ text-decoration:none; font:700 9px/1 var(--ui); position:absolute; left:2px; top:-11px; }
+#marksLayer .mk-tab b{ position:absolute; left:100%; top:-15px; transform:translateX(-50%); font:700 10px/1 var(--ui); background:#fff; padding:1px 3px; border-radius:3px; border:1px solid #00b140; }
+#marksLayer .mk-cb{ position:absolute; pointer-events:none; }
+#marksLayer .mk-cb.h{ height:0; border-top:1.4px dashed #00b140; }
+#marksLayer .mk-cb.v{ width:0; border-left:1.4px dashed #00b140; }
+#marksLayer .mk-ind{ height:0; border-top:1.8px dashed #00b140; transform:translateY(-50%); opacity:.9; }
+#marksLayer .mk-ind::after{ content:''; position:absolute; right:-1px; top:-4px; height:7px; border-right:2px solid #00b140; }
+#marksLayer .mk-ind i{ position:absolute; font:700 10px/1 var(--ui); font-style:normal; top:-6px; background:#fff; padding:1px 3px; border:1px solid #00b140; border-radius:3px; }
+#marksLayer .mk-ind.lft i{ right:calc(100% + 4px); }
+#marksLayer .mk-ind.rgt i{ left:calc(100% + 4px); }
+#marksLayer .mk-ind.rgt::after{ right:auto; left:-1px; }
+/* objects that would jump at the change of slides */
+#marksLayer .mk-jump{ outline:2px dashed #f59e0b; outline-offset:2px; background:rgba(245,158,11,.08); }
+#marksLayer .mk-jump i{ position:absolute; left:0; top:-22px; font:700 11px/1 var(--ui); font-style:normal; background:#f59e0b; color:#1a1a1a; padding:3px 6px; border-radius:4px; text-shadow:none; }
+/* half of a screen (two apps side by side): everything stays in the window */
+@media (max-width:1000px){
+  .bar1{ grid-template-columns:auto minmax(0,1fr) auto; gap:6px; padding-left:8px; padding-right:8px; }
+  .b1mid{ min-width:0; }
+  .b1mid .title{ flex:1 1 auto; width:auto; min-width:60px; }
+  .tpll{ display:none; }
+  .main{ grid-template-columns:min(var(--lw,176px),140px) 6px 1fr 6px min(var(--rw,300px),260px); }
+  .slidesx{ left:calc(min(var(--lw,176px),140px) - 32px); }
+}
+@media (max-width:820px){
+  .b1left, .b1right{ gap:4px; }
+  .bar1 .btn{ padding-left:8px; padding-right:8px; }
+  #bExport span, #status{ display:none; }
+  #bExport::before{ content:'Export'; }
+  .b1sep{ display:none; }
+  .main{ grid-template-columns:min(var(--lw,176px),120px) 6px 1fr 6px min(var(--rw,300px),230px); }
+  .slidesx{ left:calc(min(var(--lw,176px),120px) - 32px); }
+}
+@media (max-width:700px){ #bExport::before{ content:''; } #bExport{ padding:0 6px; } #zoomLabel{ display:none; } }
+.slide-actions{ flex-wrap:wrap; }
+/* the close button of the left panel: bottom corner, never over a slide */
+.slidesx{ top:auto; bottom:10px; }

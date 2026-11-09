@@ -1,4 +1,4 @@
-# Matekos Prezi 1.4
+# Matekos Prezi 1.4.1
 
 Presentation editor with live inline TeX, the twin of **Matekos Doksi**. Built with **TipTap**
 (text editor), **MathJax 4** (formulas), **MathLive** (visual formula editor) and **Tauri 2**
@@ -79,6 +79,8 @@ Browser test version: `npm run build:web` → one self-contained `dist-web/index
 * Lists as in Matekos Doksi: the text starts 0,8 cm after the symbol (where the next level's symbol stands), start
   numbers, Tab / Shift+Tab change the level next to the symbol or with several items selected, otherwise Tab inserts
   a tabulator; tab stops per paragraph (left / centre / right, dotted or line leader).
+* Spell checking (Hunspell WebAssembly + Magyar Ispell, public/spell), eye mode (formatting marks, and objects that
+  would jump between neighbouring slides), the app's own right-click menu, closable left panel.
 * Template files: Matekos Prezi Sablon (.mpsab) – save, import, update; opening one from the system starts a new
   presentation with it.
 * Formula editor: "Kedvencek" tab with the user's favourite buttons (kept by the app for every presentation).

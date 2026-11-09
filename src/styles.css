@@ -96,10 +96,12 @@ button,input,select,textarea{ font-family:inherit; }
 /* list text starts where the next level's symbol stands (0,8 cm after the symbol, like in Matekos Doksi) */
 .ProseMirror li{ position:relative; padding-left:var(--gap,0.8cm); }
 .ProseMirror li[data-ghost] > p:first-child{ height:0; padding:0 !important; margin:0 !important; overflow:hidden; }
+/* list items: the same spacing whatever their position or level (it does not change when items move or go) */
 .ProseMirror li > p{ --sa:2pt; }
-.ProseMirror li:last-child > p:last-child{ --sa:var(--after,6pt); }
-.ProseMirror li li:last-child > p:last-child{ --sa:2pt; }
-.lm{ display:inline-flex; justify-content:flex-start; width:0; vertical-align:baseline; transform:translateX(calc(-1 * var(--gap,0.8cm))); white-space:nowrap; user-select:none; pointer-events:none; text-indent:0; font-style:normal; font-weight:normal; text-decoration:none; }
+.ProseMirror > ul, .ProseMirror > ol{ margin-bottom:calc(var(--after,6pt) - 2pt); }
+/* the symbol stands in the room before the text (0,8 cm); a symbol wider than that (big letters, "10.") pushes the
+   first line's text on, like PowerPoint moves it to the next stop – it never covers the text */
+.lm{ display:inline-flex; justify-content:flex-start; box-sizing:border-box; min-width:var(--gap,0.8cm); padding-right:.3em; margin-left:calc(-1 * var(--gap,0.8cm)); vertical-align:baseline; white-space:nowrap; user-select:none; pointer-events:none; text-indent:0; font-style:normal; font-weight:normal; text-decoration:none; }
 .lm.lm-b{ font-weight:700; }
 .lm img{ vertical-align:-0.1em; }
 mark{ color:inherit; padding:0; }
