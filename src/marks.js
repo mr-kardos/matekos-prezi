@@ -47,6 +47,8 @@ export function drawMarks(layer, editorDom, stackEl, scale, styles = null, famLa
   // line breaks (Shift+Enter) and paragraph ends (Enter)
   for (const br of editorDom.querySelectorAll('br:not(.ProseMirror-trailingBreak)')) {
     if (br.closest(SKIP)) continue;
+    const blk = br.parentElement;                       // the only thing in an empty paragraph: just its filler, no line break
+    if (blk && !blk.textContent.replace(/\u200b/g, '').length && !blk.querySelector('.math, img:not(.ProseMirror-separator)') && [...blk.querySelectorAll('br')].length === 1) continue;
     let r = null;
     const prev = br.previousSibling;
     if (prev && prev.nodeType === 3 && prev.data.length) { range.setStart(prev, prev.data.length - 1); range.setEnd(prev, prev.data.length); const q = range.getClientRects(); r = q[q.length - 1]; if (r) r = { left: r.right, top: r.top, height: r.height }; }
@@ -67,7 +69,11 @@ export function drawMarks(layer, editorDom, stackEl, scale, styles = null, famLa
     const msvg = mathEnd ? [...mathEnd.querySelectorAll('svg')].pop() : null;
     if (msvg) { const q = msvg.getBoundingClientRect(); x = X(q.right) + 1; y = Y(q.top + q.height / 2); }
     else if (last && b.textContent.length) { x = X(last.right) + 1; y = Y(last.top + last.height / 2); }
-    else { x = X(br.left + (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.textIndent) || 0)); y = Y(br.top + (parseFloat(cs.paddingTop) || 0)) + (parseFloat(cs.lineHeight) || 20) / 2; }
+    else {
+      const al = cs.textAlign, l = br.left + (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.textIndent) || 0), r = br.right - (parseFloat(cs.paddingRight) || 0);
+      x = X(al === 'center' ? (l + r) / 2 : al === 'right' || al === 'end' ? r - 6 : l);
+      y = Y(br.top + (parseFloat(cs.paddingTop) || 0)) + (parseFloat(cs.lineHeight) || 20) / 2;
+    }
     put('par', x, y, '¶', '', parseFloat(cs.fontSize) || 16);
     // in a table: indents and spacing only in the column being worked in (otherwise they would cover the table)
     const cellEl = b.closest('td,th');

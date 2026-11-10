@@ -668,7 +668,7 @@ function renderSlideList() {
     list.appendChild(t);
     if (i === cur) {
       const a = document.createElement('div'); a.className = 'slide-actions';
-      a.innerHTML = `<button class="tb" id="sNew" title="Új dia az aktuális után – elrendezés választása">${svgIcon('plus')}<span>Új dia</span>${svgIcon('chev')}</button>
+      a.innerHTML = `<button class="tb" id="sNew" title="Új dia az aktuális után – elrendezés választása">${svgIcon('plus')}</button>
         <button class="tb" id="sDup" title="Az aktuális dia másolása">${svgIcon('copy')}</button>
         <button class="tb" id="sDel" title="Az aktuális dia törlése" ${doc.slides.length < 2 ? 'disabled' : ''}>${svgIcon('trash')}</button>
         <button class="tb${s.transition ? ' on' : ''}" id="sTrans" title="Diaváltás (áttűnés) erre a diára">${svgIcon('trans')}${svgIcon('chev')}</button>`;
