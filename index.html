@@ -145,7 +145,12 @@
     <section class="cmtview">
       <div class="cmtstick">
         <div class="cmthead"><b>Megjegyzések</b><span class="phint" id="cmtCount"></span><button class="tb mini" id="cmtHide" data-icon="eyeOff"></button><button class="tb mini" id="cmtClose" data-icon="panel" title="Jobb oldali panel bezárása"></button></div>
+        <div class="cmtbar">
+          <div class="seg2"><button class="pitem" data-cflt="open" title="Csak a még meg nem oldott megjegyzések">Nyitott</button><button class="pitem" data-cflt="all" title="A megoldott megjegyzések is">Mind</button></div>
+          <button class="tb mini" id="cmtPrev" title="Előző nyitott megjegyzés">▲</button><button class="tb mini" id="cmtNext" title="Következő nyitott megjegyzés">▼</button>
+        </div>
         <div class="cmtnew">
+          <label class="cmtwho"><span class="cav" id="cmtAvatar"></span><input type="text" id="cmtAuthor" maxlength="40" autocomplete="off" spellcheck="false" placeholder="A neved (ez kerül a megjegyzéseidre)" aria-label="A neved"></label>
           <textarea id="cmtText" rows="3" placeholder="Jelölj ki szöveget vagy objektumot (vagy semmit a diához), írd ide a megjegyzést…"></textarea>
           <button class="btn primary" id="cmtAdd">Megjegyzés hozzáadása</button>
         </div>
@@ -194,8 +199,6 @@
   <div class="prow numstart"><label>Kezdő szám <input type="number" id="numStart" min="0" step="1"></label><button class="btn" id="numStartOk">OK</button></div>
   <div class="psep"></div>
   <button class="pitem" data-num="none">Lista megszüntetése</button>
-</div>
-  
 </div>
 <div class="pop" id="popPara" hidden>
   <div class="ptitle">Sorköz</div>
@@ -317,7 +320,6 @@
   <button class="pitem" id="transAll">Ugyanez minden diára</button>
   <button class="pitem" id="transPlay">Előnézet</button>
 </div>
-</div>
 
 <div class="pop" id="popAnyColor" hidden><div class="ptitle" id="anyColorTitle">Szín</div><div id="swAny"></div></div>
 <div class="mprev" id="mprev" hidden></div>
@@ -325,12 +327,14 @@
   <div class="home-card">
     <img class="home-logo-img" src="/app-icon.png" alt="" width="84" height="84">
     <h1>Matekos Prezi</h1>
-    <p class="home-sub home-ver">v1.4.4</p>
+    <p class="home-sub home-ver"></p>
     <div class="home-btns">
       <button class="hbtn primary" id="homeNew"><span class="hico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span>Új bemutató</button>
       <button class="hbtn" id="homeOpen"><span class="hico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 10h18"/></svg></span>Meglévő megnyitása</button>
     </div>
     <button class="hlink" id="homeResume" hidden></button>
+    <div class="home-list" id="homeDrafts" hidden></div>
+    <div class="home-list" id="homeRecent" hidden></div>
   </div>
 </div>
 <div class="cfm" id="cfm" hidden role="alertdialog" aria-modal="true" aria-labelledby="cfmMsg">

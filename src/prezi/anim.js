@@ -1,5 +1,6 @@
 // Animation model – shared by the editor (badges, timeline), the slideshow preview and the PPTX exporter.
 import { blockCount } from "./model.js";
+import { partCount } from "./parts.js";
 
 export const Anim = (() => {
   // cls: entr = belépő, emph = kiemelés, exit = kilépő. id/sub = PowerPoint preset ids.
@@ -41,12 +42,22 @@ export const Anim = (() => {
   const delayOf = a => a.delay ?? 0;
 
   /** A text box is cut into one piece per paragraph when at least one of its animations is "by paragraph". */
-  function splitsByParagraph(slide, o) {
-    return o.type === 'text' && !o.rot && blockCount(o) > 1 && slide.anims.some(a => a.target === o.id && a.byParagraph);
+  /** How a text box is cut into pieces: null (one piece), or {mode: 'para' | 'parts', n}.
+   *  byParagraph: true = paragraph by paragraph; 'parts' = also the parts of its formulas (rows, after \quad and ⇒). */
+  function splitMode(slide, o) {
+    if (o.type !== 'text' || o.rot) return null;
+    let para = false, parts = false;
+    for (const a of slide.anims) if (a.target === o.id && a.byParagraph) { para = true; if (a.byParagraph === 'parts') parts = true; }
+    if (!para) return null;
+    const nb = blockCount(o), np = parts ? partCount(o) : nb;
+    if (np > nb) return {mode: 'parts', n: np};
+    return nb > 1 ? {mode: 'para', n: nb} : null;
   }
+  const splitsByParagraph = (slide, o) => !!splitMode(slide, o);
   function pieceKeys(slide, o) {
     if (o.type === 'group') return o.children.flatMap(c => pieceKeys(slide, c));
-    return splitsByParagraph(slide, o) ? Array.from({length: blockCount(o)}, (_, i) => `${o.id}#${i}`) : [o.id];
+    const m = splitMode(slide, o);
+    return m ? Array.from({length: m.n}, (_, i) => `${o.id}#${i}`) : [o.id];
   }
   /** One entry per animated piece. Whole-object animations on a split box drive all its pieces together. */
   function expand(slide) {
@@ -102,5 +113,5 @@ export const Anim = (() => {
     for (const a of s.anims) { const o = s.objects.find(q => q.id === a.target); if (o?.byParagraph && a.byParagraph == null) a.byParagraph = true; }
     for (const o of s.objects) delete o.byParagraph;
   }
-  return {DIRS, dirOf, preset, EFFECTS, CLASSES, DEFAULT, TRIGGERS, durOf, delayOf, splitsByParagraph, pieceKeys, expand, numbers, ranges, groups, timeline, initiallyHidden, migrateSlide};
+  return {DIRS, dirOf, preset, EFFECTS, CLASSES, DEFAULT, TRIGGERS, durOf, delayOf, splitMode, splitsByParagraph, pieceKeys, expand, numbers, ranges, groups, timeline, initiallyHidden, migrateSlide};
 })();

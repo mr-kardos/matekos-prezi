@@ -8,8 +8,9 @@ import { FONT_SETS, DEFAULT_FONT, applyTextFont, loadTextFamily, allFamilies, fa
 import { openMathEditor, isMathEditorOpen, applyMathEditor } from '../mathEditor.js';
 import { tableContext, changeListLevel } from '../editor/extensions.js';
 import { svg as svgIcon } from '../icons.js';
-import { saveTemplateFile, updateTemplateFile, openTemplateFile, templateFilePath, renameCurrentFile, currentFileExists, pickFile, isTauri, savePresentation, saveExport, openPresentation, openPathFile, watchOpenedFiles, setCurrentPath, getCurrentPath, getCurrentHandle, setCurrentHandle, currentFileName, autosave, loadAutosave } from '../files.js';
+import { saveTemplateFile, updateTemplateFile, openTemplateFile, templateFilePath, renameCurrentFile, currentFileExists, pickFile, isTauri, savePresentation, saveExport, openPresentation, openPathFile, watchOpenedFiles, setCurrentPath, getCurrentPath, getCurrentHandle, setCurrentHandle, currentFileName, autosave, loadAutosave, recoverableDrafts, takeDraft, dropDraft, shelveDraft, recentFiles, forgetRecent } from '../files.js';
 import { Anim } from './anim.js';
+import { partCount, markDoc, partPieces, partEls, setPartVis, refreshParts } from './parts.js';
 import { W, H, uid, clone, emptyDoc, textDoc, tableDoc, T, M, isEmptyText, blockCount, makeBackground, phName, ph, TITLE_PROMPT,
   defaultMaster, defaultTemplates, newSlide as makeSlide, syncPlaceholders as syncPh, migrate,
   flatObjects, findObject, parentGroup, bounds, fitGroup, moveObject, scaleFrom } from './model.js';
@@ -86,7 +87,7 @@ function tplMedia(t) {
 }
 async function packTemplate(name, t) {
   const z = new JSZip(), files = {};
-  for (const k of tplMedia(t)) { const m = media[k]?.match(/^data:([^;]+);base64,(.*)$/); if (!m) continue; const fn = `media/${k}.${EXT[m[1]] ?? 'bin'}`; z.file(fn, m[2], {base64: true}); files[k] = fn; }
+  for (const k of tplMedia(t)) { const m = media[k]?.match(/^data:([^;]+);base64,(.*)$/); if (!m) continue; const fn = `media/${k}.${EXT[m[1]] ?? 'bin'}`; z.file(fn, m[2], {base64: true, compression: 'STORE'}); files[k] = fn; }
   z.file('manifest.json', JSON.stringify({format: 'mprezi', version: doc.version || 4, size: {w: W, h: H}, app: 'matekos-prezi-sablon', name, ...t, slides: [], media: files}, null, 1));
   return z.generateAsync({type: 'blob', mimeType: 'application/zip', compression: 'DEFLATE'});
 }
@@ -233,29 +234,59 @@ function commentPlaces() {
   return at;
 }
 let cmtMode = false, activeCmt = null, cmtHidden = lsGet('matekosprezi.cmthide') === '1', cmtSel = null, cmtRaf = 0;
+let cmtFilter = lsGet('matekosprezi.cmtfilter') === 'open' ? 'open' : 'all';      // 'open': resolved comments are not listed
+/** The name written on new comments and replies (asked once, kept by the app). Null (and a hint) while it is missing. */
+function cmtAuthor() {
+  const inp = $('#cmtAuthor'), name = inp.value.trim().slice(0, 40);
+  if (!name) { toast('Írd be a neved – ez kerül a megjegyzéseidre.'); inp.focus(); return null; }
+  lsSet('matekosprezi.author', name); return name;
+}
+/** Comments in the order of the presentation (slides first, then master and layouts; lost ones last). */
+function orderedComments(at = commentPlaces()) {
+  return [...cmtList()].sort((a, b) => ((at[a.id]?.si ?? 1e6) - (at[b.id]?.si ?? 1e6)) || ((at[a.id]?.order ?? 1e9) - (at[b.id]?.order ?? 1e9)));
+}
+/** Jump to the next / previous unresolved comment (dir = 1 / -1), going round at the ends. */
+function stepOpenComment(dir) {
+  const open = orderedComments().filter(c => !c.done);
+  if (!open.length) { toast('Nincs nyitott megjegyzés.'); return; }
+  const i = open.findIndex(c => c.id === activeCmt);
+  const c = open[i < 0 ? (dir > 0 ? 0 : open.length - 1) : (i + dir + open.length) % open.length];
+  showCommentPlace(c.id); renderComments(); focusCard(c.id);
+}
+/** Open comments per slide index (for the marks on the slide thumbnails). */
+function openCommentsBySlide() {
+  const at = commentPlaces(), n = {};
+  for (const c of cmtList()) if (!c.done && at[c.id] && at[c.id].si >= 0) n[at[c.id].si] = (n[at[c.id].si] || 0) + 1;
+  return n;
+}
 const cmtOpen = () => cmtMode && !mainEl.classList.contains('noprops');
 function commentsOn(v) {
   cmtMode = v; mainEl.classList.toggle('cmtmode', v); $('#bCmt').classList.toggle('primary', v);
   if (v) panelVisible(true);
-  renderComments();
+  renderComments(); if (doc && mode === 'slides') renderThumbs();
 }
 function renderComments() {
-  const at = commentPlaces(), list = [...cmtList()].sort((a, b) => ((at[a.id]?.si ?? 1e6) - (at[b.id]?.si ?? 1e6)) || ((at[a.id]?.order ?? 1e9) - (at[b.id]?.order ?? 1e9)));
-  $('#cmtCount').textContent = cmtList().length ? `${cmtList().length} db` : '';
+  const at = commentPlaces(), all = orderedComments(at), nOpen = all.filter(c => !c.done).length;
+  const list = cmtFilter === 'open' ? all.filter(c => !c.done) : all;
+  $('#cmtCount').textContent = all.length ? `${nOpen} nyitott / ${all.length}` : '';
+  for (const b of $$('#cmtPanel [data-cflt]')) b.classList.toggle('on', b.dataset.cflt === cmtFilter);
+  $('#cmtPrev').disabled = $('#cmtNext').disabled = !nOpen;
+  const who = x => x.by ? `<span class="cav" style="--c:${avatarColor(x.by)}">${svgIcon('user')}</span><b class="cby">${esc(x.by)}</b>` : '';
   const where = p => !p ? 'a helye törölve' : p.si >= 0 ? `${p.si + 1}. dia` : p.tk === 'master' ? 'mester' : (doc.templates[p.tk]?.name || 'diatípus');
   $('#cmtList').innerHTML = list.length ? list.map(c => `<div class="cmtcard${c.done ? ' done' : ''}${c.id === activeCmt ? ' act' : ''}${at[c.id] ? '' : ' lost'}" data-cid="${c.id}">
-      <div class="ctop"><span class="cdate">${cmtDate(c.at)} · ${where(at[c.id])}</span>
+      <div class="ctop"><span class="cdate">${who(c)}${cmtDate(c.at)} · ${where(at[c.id])}</span>
         <button class="tb mini${c.done ? ' on' : ''}" data-cact="done" title="${c.done ? 'Mégsem megoldott' : 'Megoldva'}">${svgIcon('tick')}</button>
         <button class="tb mini" data-cact="del" title="Megjegyzés törlése">${svgIcon('xmark')}</button></div>
       <div class="ctext">${esc(c.text).replace(/\n/g, '<br>')}</div>
-      ${(c.replies || []).map(r => `<div class="creply"><span class="cdate">${cmtDate(r.at)}</span><div>${esc(r.text).replace(/\n/g, '<br>')}</div></div>`).join('')}
+      ${(c.replies || []).map(r => `<div class="creply"><span class="cdate">${who(r)}${cmtDate(r.at)}</span><div>${esc(r.text).replace(/\n/g, '<br>')}</div></div>`).join('')}
       <div class="crow"><input type="text" class="cin" placeholder="Válasz…"><button class="btn mini" data-cact="reply">Válasz</button></div>
-    </div>`).join('') : '<div class="phint" style="padding:6px 2px">Még nincs megjegyzés. Jelölj ki szöveget vagy objektumot (vagy semmit: akkor a diához kerül), írd be a megjegyzést fent, és kattints a „Megjegyzés hozzáadása” gombra.</div>';
+    </div>`).join('') : all.length ? '<div class="phint" style="padding:6px 2px">Nincs nyitott megjegyzés – minden meg van oldva. A „Mind” gombbal a megoldottak is látszanak.</div>' : '<div class="phint" style="padding:6px 2px">Még nincs megjegyzés. Jelölj ki szöveget vagy objektumot (vagy semmit: akkor a diához kerül), írd be a megjegyzést fent, és kattints a „Megjegyzés hozzáadása” gombra.</div>';
   drawComments();
 }
 function addComment() {
   const text = $('#cmtText').value.trim();
   if (!text) { toast('Írd be a megjegyzés szövegét.'); $('#cmtText').focus(); return; }
+  const by = cmtAuthor(); if (!by) return;
   const id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const s0 = cmtSel || (editing && ed && !ed.state.selection.empty ? {oid: editing, from: ed.state.selection.from, to: ed.state.selection.to} : null);
   if (s0 && objById(s0.oid)) {                                      // selected text in a text box
@@ -263,7 +294,7 @@ function addComment() {
     ed.chain().setTextSelection({from: s0.from, to: s0.to}).setMark('comment', {id}).run(); syncEditor();
   } else if (selIds.length) { for (const oid of selIds) { const o = objById(oid); if (o) o.cmt = addId(o.cmt, id); } }   // objects
   else { const g = tgt(); g.cmt = addId(g.cmt, id); }                                                                   // the slide
-  cmtList().push({id, text, at: Date.now(), done: false, replies: []});
+  cmtList().push({id, text, by, at: Date.now(), done: false, replies: []});
   $('#cmtText').value = ''; cmtSel = null; activeCmt = id;
   commit(); renderComments(); focusCard(id);
 }
@@ -286,7 +317,7 @@ function showCommentPlace(id) {
   drawComments();
 }
 function setCmtHidden(v) {
-  cmtHidden = v; lsSet('matekosprezi.cmthide', v ? '1' : '0');
+  cmtHidden = v; lsSet('matekosprezi.cmthide', v ? '1' : '0'); if (doc && mode === 'slides') renderThumbs();
   $('#cmtHide').classList.toggle('on', v);
   $('#cmtHide').title = v ? 'A megjegyzések jelölése el van rejtve a dián, amíg a panel zárva van – kattints a megjelenítéshez' : 'A megjegyzések jelölése a dián akkor is látszik, ha a panel zárva van – kattints az elrejtéshez';
   drawComments();
@@ -355,13 +386,32 @@ async function switchFont(key) {
   doc.font = key; commit(); await restartWithFont(key);
 }
 function syncEditor() { if (editing && ed) { const o = objById(editing); if (o) o.doc = ed.getJSON(); } }
+function pushHistory() {
+  history = history.slice(0, hIdx + 1); history.push(snapshot());
+  if (history.length > 150) { history.shift(); editBase--; }
+  hIdx = history.length - 1; dirty = true; editedNow = true; setStatus(); saveSoon();
+}
 function commit() {
   syncEditor();
-  history = history.slice(0, hIdx + 1); history.push(snapshot());
-  if (history.length > 150) history.shift();
-  hIdx = history.length - 1; dirty = true; editedNow = true; setStatus(); saveSoon();
+  pushHistory();
   renderAll();
 }
+/* Typing in a text box makes its own undo steps (one per pause), so after leaving the box Ctrl+Z goes back step by
+   step instead of dropping everything typed – and the automatic draft follows the typing too. Undo / redo inside the
+   box (the editor's own) folds the box's steps so far into one, so the two histories never contradict each other. */
+let editT = 0, editBase = -1, editNav = false;
+function foldEditSteps() {
+  if (editNav && editBase >= 0 && editBase < history.length) { history = history.slice(0, editBase + 1); hIdx = editBase; }
+  editNav = false;
+}
+function editStep() {
+  clearTimeout(editT); editT = 0;
+  if (!editing || !ed) return;
+  const o = objById(editing); if (!o) return;
+  const j = ed.getJSON(); if (JSON.stringify(j) === JSON.stringify(o.doc)) return;
+  o.doc = j; foldEditSteps(); pushHistory(); updateRibbon();
+}
+function editSoon(nav) { if (nav) editNav = true; clearTimeout(editT); editT = setTimeout(editStep, 1200); }
 function restore(i) {
   if (editing) stopEditor();
   hIdx = i; const s = JSON.parse(history[i]); doc = s.doc; mode = s.mode ?? 'slides'; tcur = s.tcur ?? 'master';
@@ -463,7 +513,9 @@ function objEl(o, rmode, tpl = false, ox = 0, oy = 0) {
     if (empty && rmode !== 'edit') el.style.visibility = 'hidden';
     const t = document.createElement('div'); t.className = 'txt' + (empty && rmode === 'edit' && o.prompt ? ' empty' : ''); t.dataset.prompt = (o.prompt === 'Kattints duplán a cím beírásához' ? 'Cím' : o.prompt) ?? '';
     txtStyle(t, o); r.appendChild(t);
-    renderStatic(t, o.doc, rmode === 'edit' ? onMathRendered : null, kindOf(o));
+    const parts = rmode === 'show' && !tpl && partsSlide && Anim.splitMode(partsSlide, o)?.mode === 'parts';   // formulas revealed part by part
+    if (parts) t.dataset.parts = '1';
+    renderStatic(t, parts ? markDoc(o.doc) : o.doc, rmode === 'edit' ? onMathRendered : null, kindOf(o));
   } else if (o.type === 'shape') r.innerHTML = shapeSVG(o);
   else if (o.type === 'video') {
     const {l = 0, t = 0, r: rr = 0, b = 0} = o.crop || {}, fw = 1 / (1 - l - rr), fh = 1 / (1 - t - b);
@@ -492,12 +544,16 @@ function paintLayoutBase(clip, L, rmode, withLayoutObjs) {
   if (withLayoutObjs) for (const o of L.objects) if (!o.placeholder) clip.appendChild(objEl(o, rmode, true));
 }
 function newClip(el) { el.innerHTML = ''; const c = document.createElement('div'); c.className = 'clip'; el.appendChild(c); return c; }
+let partsSlide = null;               // the slide being drawn for the slideshow / an export (objEl marks its formula parts)
 function renderSlide(s, el, rmode) {
   const clip = newClip(el), i = doc.slides.indexOf(s);
-  renderNum = i >= 0 ? i + 1 : null;
+  renderNum = i >= 0 ? i + 1 : null; partsSlide = rmode === 'show' ? s : null;
   paintLayoutBase(clip, layoutOf(s), rmode, true);
   for (const o of s.objects) clip.appendChild(objEl(o, rmode));
-  renderNum = null;
+  renderNum = null; partsSlide = null;
+  if (rmode === 'show' && clip.querySelector('.txt[data-parts]')) {          // formulas rendered later get their parts then
+    new MutationObserver(() => clip.querySelectorAll('.txt[data-parts]').forEach(refreshParts)).observe(clip, {childList: true, subtree: true});
+  }
   return clip;
 }
 function renderTemplate(key, el, rmode) {
@@ -645,15 +701,32 @@ function renderThumbs() {
   const pl = slidesNav.querySelector('.plist'); if (pl && same) pl.scrollTop = st;
   renderThumbs.mode = mode;
 }
+let thumbCache = new Map();          // slide id -> {sig, el}: thumbnails that are still up to date
 function renderSlideList() {
   slidesNav.innerHTML = `<div class="phead2 lhead"><b>Diák</b><button class="tb" id="slidesX" title="Bal oldali panel bezárása">${svgIcon('panelL')}</button></div><div class="plist" id="plist"></div>`;
   $('#slidesX').onclick = () => slidesVisible(false);
   const list = $('#plist');
+  const cmtN = cmtHidden && !cmtOpen() ? {} : openCommentsBySlide();
+  const tplSig = {}, used = new Set(), keep = new Map();
   doc.slides.forEach((s, i) => {
     const t = thumbFrame(i + 1, i === cur ? 'cur' : ''); t.draggable = true; t.dataset.i = i;
-    renderSlide(s, t.querySelector('.slide'), 'thumb');
+    // a slide whose content, layout and number are unchanged keeps its drawn thumbnail
+    const sig = i + '|' + (tplSig[s.template] ??= JSON.stringify([doc.master, doc.templates[s.template], doc.font, doc.styles])) + '|' + JSON.stringify(s);
+    const old = thumbCache.get(s.id);
+    if (old && old.sig === sig && !used.has(old.el)) { t.querySelector('.slide').replaceWith(old.el); used.add(old.el); keep.set(s.id, old); }
+    else { const sl = t.querySelector('.slide'); renderSlide(s, sl, 'thumb'); used.add(sl); if (s.id) keep.set(s.id, {sig, el: sl}); }
     if (s.transition) t.querySelector('.no').insertAdjacentHTML('beforeend', `<span class="trmark" title="Diaváltás: ${esc(TRANSITIONS[s.transition.type]?.label ?? '')}">★</span>`);
-    t.onclick = () => { gotoSlide(i); slideFocus = true; };
+    if (cmtN[i]) t.querySelector('.frame').insertAdjacentHTML('beforeend', `<span class="cmtmark" title="${cmtN[i]} nyitott megjegyzés ezen a dián – kattints a megnyitásához">${svgIcon('comment')}${cmtN[i]}</span>`);
+    t.onclick = e => {
+      if (e.target.closest('.cmtmark')) {                     // straight to the slide's first open comment
+        if (cur !== i) gotoSlide(i);
+        if (!cmtOpen()) commentsOn(true);
+        const at = commentPlaces(), c = orderedComments(at).find(x => !x.done && at[x.id]?.si === i);
+        if (c) { showCommentPlace(c.id); renderComments(); focusCard(c.id); }
+        return;
+      }
+      gotoSlide(i); slideFocus = true;
+    };
     t.ondragstart = e => e.dataTransfer.setData('text/slide', WIN + ':' + i);
     t.ondragover = e => { e.preventDefault(); const r = t.getBoundingClientRect(), below = e.clientY > r.top + r.height / 2;
       list.querySelectorAll('.thumb.above, .thumb.below').forEach(x => x !== t && x.classList.remove('above', 'below'));
@@ -675,9 +748,11 @@ function renderSlideList() {
       list.appendChild(a);
     }
   });
+  thumbCache = keep;
   $('#sNew').onclick = e => showPop('popNewSlide', e.currentTarget);
   $('#sTrans').onclick = e => showPop('popTrans', e.currentTarget);
   $('#sDup').onclick = () => { if (editing) exitEdit(); const s = clone(tgt()); const ids = {};
+    delete s.cmt; for (const o of flatObjects(s.objects)) { delete o.cmt; if (o.doc) stripCommentMarks(o.doc); }   // comments stay with the original
     s.id = uid(); s.objects.forEach(o => { ids[o.id] = uid(); o.id = ids[o.id]; });
     s.anims.forEach(a => { a.id = uid(); a.target = ids[a.target]; });
     doc.slides.splice(cur + 1, 0, s); cur++; setSel([]); commit(); };
@@ -816,7 +891,9 @@ stage.addEventListener('pointerdown', e => {
 function startMove(p, e) {
   const objs = selIds.map(objById).filter(o => o && !o.locked);
   if (!objs.length) return;
-  action = {type: 'move', p0: p, starts: objs.map(o => ({o, x: o.x, y: o.y})), moved: false};
+  const bs = objs.map(bounds), x0 = Math.min(...bs.map(b => b.x)), y0 = Math.min(...bs.map(b => b.y));
+  action = {type: 'move', p0: p, starts: objs.map(o => ({o, x: o.x, y: o.y})), moved: false, skip: snapSkip(objs.map(o => o.id)),
+    box: {x: x0, y: y0, w: Math.max(...bs.map(b => b.x + b.w)) - x0, h: Math.max(...bs.map(b => b.y + b.h)) - y0}};
   stage.setPointerCapture(e.pointerId); e.preventDefault();
 }
 stage.addEventListener('pointermove', e => {
@@ -835,14 +912,15 @@ stage.addEventListener('pointermove', e => {
     if (!action.moved && Math.hypot(dx, dy) < 2) return;
     action.moved = true;
     const lead = action.starts[0];
-    if (!e.altKey && action.starts.length === 1) { const [x, y] = snap(lead.o, lead.x + dx, lead.y + dy); dx = x - lead.x; dy = y - lead.y; }
+    if (!e.altKey) { const [sx, sy] = snapBox({...action.box, x: action.box.x + dx, y: action.box.y + dy}, action.skip); dx += sx; dy += sy; }   // Alt: no snapping
+    else clearGuides();
     for (const s of action.starts) moveObject(s.o, Math.round(s.x + dx) - s.o.x, Math.round(s.y + dy) - s.o.y);
     action.starts.forEach(s => updateObjLive(s.o, true)); drawSelection(); drawBadges();
     if (action.starts.length === 1) syncGeometryInputs(lead.o);
     return;
   }
   const o = selObj(); if (!o) return;
-  if (action.type === 'resize') doResize(o, p, e.shiftKey);
+  if (action.type === 'resize') doResize(o, p, e.shiftKey, e.altKey);
   updateObjLive(o);
 });
 stage.addEventListener('pointerup', () => {
@@ -994,7 +1072,7 @@ function coverCrop(o, iw, ih) {
 }
 $('#imgReplace').onclick = () => { const o = selObj(); if (o?.type !== 'image') return; pickImage((key, img) => { o.media = key; coverCrop(o, img.naturalWidth || img.width, img.naturalHeight || img.height); commit(); }); };
 /** Resize in the object's rotated frame, keeping the opposite handle fixed. Groups scale uniformly. */
-function doResize(o, p, keepRatio) {
+function doResize(o, p, keepRatio, noSnap) {
   if (cropping === o.id) {                                       // crop: the frame moves over the fixed picture
     const {h, p0, o0} = action, F = fullRect(o0), dx = p.x - p0.x, dy = p.y - p0.y;
     let x0 = o0.x, y0 = o0.y, x1 = o0.x + o0.w, y1 = o0.y + o0.h;
@@ -1014,21 +1092,45 @@ function doResize(o, p, keepRatio) {
   if (isText(o) || o.shape === 'line') hh = o0.h;
   else if ((keepRatio || o.type === 'group' || o.type === 'image' || o.type === 'video') && sx && sy) { const k = Math.max(w / o0.w, hh / o0.h); w = o0.w * k; hh = o0.h * k; }
   else if (o.type === 'group') { const k = sx ? w / o0.w : hh / o0.h; w = o0.w * k; hh = o0.h * k; }
+  // the dragged edges snap to the same lines as moving does (unrotated objects; Alt: no snapping)
+  clearGuides();
+  if (!noSnap && !((o0.rot || 0) % 360)) {
+    const {xs, ys} = snapLines(action.skip ||= snapSkip([o.id]));
+    const fixedH = isText(o) || o.shape === 'line', oneScale = o.type === 'group' || ((keepRatio || o.type === 'image' || o.type === 'video') && sx && sy);
+    const hx = sx ? nearLine(sx > 0 ? o0.x + w : o0.x + o0.w - w, xs) : null;
+    const hy = sy && !fixedH ? nearLine(sy > 0 ? o0.y + hh : o0.y + o0.h - hh, ys) : null;
+    if (oneScale) {                                               // one scale factor: the nearer line wins
+      if (hx && (!hy || Math.abs(hx.d) <= Math.abs(hy.d))) { w += sx * hx.d; hh = o0.h * w / o0.w; guide('v', hx.line); }
+      else if (hy) { hh += sy * hy.d; w = o0.w * hh / o0.h; guide('h', hy.line); }
+    } else {
+      if (hx) { w += sx * hx.d; guide('v', hx.line); }
+      if (hy) { hh += sy * hy.d; guide('h', hy.line); }
+    }
+  }
   const cx0 = o0.x + o0.w / 2, cy0 = o0.y + o0.h / 2, ax = -sx * o0.w / 2, ay = -sy * o0.h / 2;
   const Ax = cx0 + ax * c - ay * s, Ay = cy0 + ax * s + ay * c, nx = sx * w / 2, ny = sy * hh / 2;
   const cx = Ax + nx * c - ny * s, cy = Ay + nx * s + ny * c;
   if (o.type === 'group') { const k = w / o0.w; scaleFrom(o, o0, k, o0.x, o0.y); moveObject(o, Math.round(cx - w / 2) - o.x, Math.round(cy - hh / 2) - o.y); return; }
   o.w = Math.round(w); o.h = Math.round(hh); o.x = Math.round(cx - w / 2); o.y = Math.round(cy - hh / 2);
 }
-function snap(o, x, y) {
-  stage.querySelectorAll('.guide').forEach(g => g.remove());
-  const T_ = 6 / scale, xs = [0, W / 2, W], ys = [0, H / 2, H];
-  for (const q of tgt().objects) if (q.id !== o.id) { xs.push(q.x, q.x + q.w / 2, q.x + q.w); ys.push(q.y, q.y + q.h / 2, q.y + q.h); }
-  const best = (pos, size, cands) => { let r = null; for (const off of [0, size / 2, size]) for (const c of cands) { const d = c - (pos + off); if (Math.abs(d) < T_ && (!r || Math.abs(d) < Math.abs(r.d))) r = {d, line: c}; } return r; };
-  const bx = best(x, o.w, xs), by = best(y, o.h, ys);
-  if (bx) { x += bx.d; guide('v', bx.line); }
-  if (by) { y += by.d; guide('h', by.line); }
-  return [x, y];
+/** Lines objects can snap to: the slide's edges and middle, and the edges and middles of the other objects. */
+function snapLines(skip) {
+  const xs = [0, W / 2, W], ys = [0, H / 2, H];
+  for (const q of tgt().objects) if (!skip.has(q.id) && !q.hidden) { const b = bounds(q); xs.push(b.x, b.x + b.w / 2, b.x + b.w); ys.push(b.y, b.y + b.h / 2, b.y + b.h); }
+  return {xs, ys};
+}
+const nearLine = (v, cands) => { const T_ = 6 / scale; let r = null; for (const c of cands) { const d = c - v; if (Math.abs(d) < T_ && (!r || Math.abs(d) < Math.abs(r.d))) r = {d, line: c}; } return r; };
+const clearGuides = () => stage.querySelectorAll('.guide').forEach(g => g.remove());
+const snapSkip = ids => new Set([...ids, ...ids.map(id => groupOf(id)?.id).filter(Boolean)]);
+/** Snap a box (the bounds of everything that is being moved): the correction [dx, dy]; draws the guides. */
+function snapBox(b, skip) {
+  clearGuides();
+  const {xs, ys} = snapLines(skip);
+  const best = (pos, size, cands) => { let r = null; for (const off of [0, size / 2, size]) { const h = nearLine(pos + off, cands); if (h && (!r || Math.abs(h.d) < Math.abs(r.d))) r = h; } return r; };
+  const bx = best(b.x, b.w, xs), by = best(b.y, b.h, ys);
+  if (bx) guide('v', bx.line);
+  if (by) guide('h', by.line);
+  return [bx ? bx.d : 0, by ? by.d : 0];
 }
 function guide(dir, v) {
   const g = document.createElement('div'); g.className = 'guide';
@@ -1055,7 +1157,7 @@ setTextHooks({onEdit: (pos, node) => openMath(pos, node), onRendered: onMathRend
 function enterEdit(id, ev) {
   const o = objById(id); if (!isTextLike(o) || o.locked || o.field) return;
   if (sel !== id) { setSel([id]); curAnim = null; }
-  editing = id;
+  editing = id; editBase = hIdx; editNav = false;
   editFlags = [];
   let anyText = false; eachInline(o.doc, n => { if (n.type === 'math' || n.text.trim()) anyText = true; });
   if (anyText) for (const [k, t] of Object.entries(FLAG_MARKS)) if (o[k]) {
@@ -1066,7 +1168,8 @@ function enterEdit(id, ev) {
   if (editFlags.length) txtStyle(txt, o);
   txt.classList.remove('empty'); el.classList.add('editing');
   ed = mountEditor(txt, o.doc, {
-    onUpdate: () => {
+    onUpdate: tr => {
+      editSoon(!!tr?.getMeta?.('history$'));
       if (isTable(o) && ed && !ed.state.doc.firstChild?.type.name.startsWith('table')) { setTimeout(() => { const id_ = editing; if (!id_) return; stopEditor(); setSel([id_]); deleteSelected(); }, 0); return; }
       measureTexts(); drawSelection(); drawTableHandles();
     },
@@ -1090,6 +1193,7 @@ function enterEdit(id, ev) {
 function stopEditor() {
   if (!editing) return null;
   const id = editing, json = ed.getJSON();
+  clearTimeout(editT); editT = 0;
   ed.destroy(); ed = null; editing = null; showPreview(null);
   $('#tableBar').hidden = true; $('#fcaret')?.remove();
   return {id, json};
@@ -1108,9 +1212,9 @@ function exitEdit() {
   if (isText(o) && isEmptyText(o) && !o.placeholder) {
     const g = groupOf(o.id), list = g ? g.children : tgt().objects; list.splice(list.indexOf(o), 1); if (g) fitGroup(g);
     if (tgt().anims) tgt().anims = tgt().anims.filter(a => a.target !== o.id);
-    setSel([]); commit(); return;
+    foldEditSteps(); setSel([]); commit(); return;
   }
-  if (changed) commit(); else renderAll();
+  if (changed) { foldEditSteps(); commit(); } else { editNav = false; renderAll(); }
 }
 /** Run a TipTap command on the selected text box: directly while editing, otherwise on its whole content. */
 function withEditor(fn) {
@@ -1362,10 +1466,12 @@ function pickImageURL(maxSide, cb) {
 }
 
 /* grouping, locking, deleting */
-function groupSelected() {
+async function groupSelected() {
+  if (editing) exitEdit();
   const objs = tgt().objects.filter(o => selIds.includes(o.id));
   if (objs.length < 2) return;
-  if (editing) exitEdit();
+  const lost = (tgt().anims || []).filter(a => objs.some(o => flatObjects([o]).some(q => q.id === a.target))).length;
+  if (lost && !await confirmBox(`A csoportosítással a kijelölt objektumok ${lost} animációja törlődik – a csoport ezután egyben animálható. Folytatod?`, 'Csoportosítás')) return;
   const at = tgt().objects.indexOf(objs.at(-1));
   const g = fitGroup({id: uid(), type: 'group', name: nextName('Csoport'), x: 0, y: 0, w: 1, h: 1, rot: 0, children: objs});
   tgt().objects.splice(at, 1, g);
@@ -1374,9 +1480,11 @@ function groupSelected() {
   if (tgt().anims) tgt().anims = tgt().anims.filter(a => !objs.some(o => flatObjects([o]).some(q => q.id === a.target)));
   setSel([g.id]); commit();
 }
-function ungroupSelected() {
-  const g = selObj(); if (g?.type !== 'group') return;
+async function ungroupSelected() {
   if (editing) exitEdit();
+  const g = selObj(); if (g?.type !== 'group') return;
+  const lost = (tgt().anims || []).filter(a => a.target === g.id).length;
+  if (lost && !await confirmBox(`A csoport bontásával a csoport ${lost} animációja törlődik. Folytatod?`, 'Csoport bontása')) return;
   const list = tgt().objects, at = list.indexOf(g);
   list.splice(at, 1, ...g.children);
   if (tgt().anims) tgt().anims = tgt().anims.filter(a => a.target !== g.id);
@@ -1666,7 +1774,16 @@ async function previewAnim(id) {
   const s_ = tgt(), items = Anim.expand(s_).filter(x => x.src === id); if (!items.length) return;
   const token = previewing = {}, running = [];
   const E = Anim.EFFECTS[items[0].effect];
-  for (const it of items) { const el = keyEl(stage, it.key); if (el && E.cls === 'entr') el.style.visibility = 'hidden'; }
+  const po = objById(items[0].target);
+  if (po && Anim.splitMode(s_, po)?.mode === 'parts') {
+    const old = stage.querySelector(`.obj[data-id="${po.id}"]`);
+    if (old) {
+      partsSlide = s_; const neu = objEl(po, 'show'); partsSlide = null; old.replaceWith(neu);
+      for (let t = 0; t < 60 && mathPending(neu); t++) await new Promise(r => setTimeout(r, 50));
+      if (previewing !== token) return;
+    }
+  }
+  for (const it of items) { const el = keyEl(stage, it.key); if (el && E.cls === 'entr') setVis(el, 'hidden'); }
   await new Promise(r => setTimeout(r, 120));
   for (const it of items) { if (previewing !== token) return; await playEffect(stage, {...it, delay: 0}, running); }
   await new Promise(r => setTimeout(r, E.cls === 'exit' ? 500 : 250));
@@ -1690,7 +1807,7 @@ function addAnimation(effect, byParagraph) {
   const o = selObj(); if (!o || mode !== 'slides') return;
   if (editing) syncEditor();
   const a = {id: uid(), target: o.id, effect, trigger: 'click'};
-  if (byParagraph && isText(o) && blockCount(o) > 1 && !o.rot) a.byParagraph = true;
+  if (byParagraph && isText(o) && blockCount(o) > 1 && !o.rot) a.byParagraph = (tgt().anims || []).some(x => x.target === o.id && x.byParagraph === 'parts') ? 'parts' : true;
   if (groupOf(o.id)) return toast('Csoport tagja nem animálható külön – az egész csoportot animáld.');
   tgt().anims.push(a); curAnim = a.id; commit();
   requestAnimationFrame(() => previewAnim(a.id));
@@ -1706,7 +1823,7 @@ function timelineHTML(list) {
     for (const it of g.items) {
       if (it.a.part > 0 && !it.a.byParagraph) continue;
       const a = it.a, o = objById(a.target), E = Anim.EFFECTS[a.effect], left = it.start / Tm * 100, w = (it.end - it.start) / Tm * 100;
-      const name = (o?.name ?? '') + (a.part != null && a.byParagraph ? ` ¶${a.part + 1}` : '');
+      const name = (o?.name ?? '') + (a.part != null && a.byParagraph ? ` ${o && Anim.splitMode(tgt(), o)?.mode === 'parts' ? '§' : '¶'}${a.part + 1}` : '');
       h += `<div class="tl-row${a.src === curAnim ? ' cur' : ''}" data-id="${a.src}" title="${esc(name)} – ${E.label}: ${secs(it.start)}–${secs(it.end)} mp">
         <span class="tl-lab"><span class="badge ${E.cls}">${nums[idx.get(a)]}</span>${esc(name)}</span>
         <div class="tl-track"><i class="${E.instant ? 'pt' : ''}" style="left:${left}%;width:${E.instant ? 0 : w}%;--c:${CLS_COLOR[E.cls]}"></i></div></div>`;
@@ -1718,7 +1835,8 @@ function animBody() {
   const s = tgt(), list = Anim.expand(s), rg = Anim.ranges(list), o = selObj();
   const rows = s.anims.map((a, i) => {
     const t = objById(a.target); if (!t) return '';
-    const E = Anim.EFFECTS[a.effect], canPara = isText(t) && blockCount(t) > 1;
+    const E = Anim.EFFECTS[a.effect], nb = isText(t) ? blockCount(t) : 1, np = isText(t) ? partCount(t) : 1, canPara = nb > 1;
+    const rotOff = t.rot ? 'disabled title="Elforgatott szövegdoboznál nem érhető el"' : '';
     return `<div class="anim${a.id === curAnim ? ' cur' : ''}" data-id="${a.id}" style="--c:${CLS_COLOR[E.cls]}">
       <span class="badge ${E.cls}">${rangeLabel(rg[a.id])}</span><span class="name" title="${esc(t.name ?? '')}">${esc(t.name ?? '')}<small>${Anim.CLASSES[E.cls]}</small></span>
       <span class="ctl"><button data-act="up" title="Előrébb a sorban" ${i ? '' : 'disabled'}>▲</button><button data-act="down" title="Hátrébb a sorban" ${i < s.anims.length - 1 ? '' : 'disabled'}>▼</button><button data-act="del" title="Animáció törlése">✕</button></span>
@@ -1727,7 +1845,8 @@ function animBody() {
       <select data-k="trigger" aria-label="Indítás">${Object.entries(Anim.TRIGGERS).map(([k, l]) => `<option value="${k}" ${k === a.trigger ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <div class="times"><label class="fld">Időtartam (mp)<input type="text" inputmode="decimal" data-k="dur" value="${secs(Anim.durOf(a))}" ${E.instant ? 'disabled title="Ez az effektus azonnali"' : ''}></label>
         <label class="fld">Késleltetés (mp)<input type="text" inputmode="decimal" data-k="delay" value="${secs(Anim.delayOf(a))}"></label></div>
-      ${canPara ? `<label class="chk opts"><input type="checkbox" data-k="byParagraph" ${a.byParagraph ? 'checked' : ''} ${t.rot ? 'disabled title="Elforgatott szövegdoboznál nem érhető el"' : ''}> Bekezdésenként</label>` : ''}
+      ${canPara ? `<label class="chk opts"><input type="checkbox" data-k="byParagraph" ${a.byParagraph ? 'checked' : ''} ${rotOff}> Bekezdésenként</label>` : ''}
+      ${np > nb ? `<label class="chk opts" title="A képlet új sora (\\\\), a nagy szóköz (\\quad, \\qquad) és a következtetésnyíl (⇒, ⇔) után új lépés kezdődik – összesen ${np} lépés"><input type="checkbox" data-k="byParts" ${a.byParagraph === 'parts' ? 'checked' : ''} ${rotOff}> Képletek részenként is (${np} lépés)</label>` : ''}
     </div>`;
   }).join('');
   const dis = o ? '' : 'disabled title="Előbb jelölj ki egy objektumot (vagy csoportot)"';
@@ -1761,7 +1880,9 @@ function bindAnims() {
   list.addEventListener('change', e => {
     const row = e.target.closest('.anim'), a = s.anims.find(x => x.id === row.dataset.id), k = e.target.dataset.k;
     const num = v => parseFloat(String(v).replace(',', '.'));
+    const tb = objById(a.target);
     if (k === 'byParagraph') a.byParagraph = e.target.checked || undefined;
+    else if (k === 'byParts') a.byParagraph = e.target.checked ? 'parts' : (tb && isText(tb) && blockCount(tb) > 1) || undefined;
     else if (k === 'dur') a.dur = Math.min(60000, Math.max(100, Math.round(num(e.target.value) * 1000) || Anim.EFFECTS[a.effect].dur));
     else if (k === 'delay') a.delay = Math.max(0, Math.round(num(e.target.value) * 1000) || 0);
     else if (k === 'effect') { a.effect = e.target.value; delete a.dur; delete a.dir; }
@@ -1830,7 +1951,7 @@ function paintOnto(t) {
   if (src.type === 'image' && t.type === 'image') t.opacity = src.opacity;
   if (mode === 'slides' && painterAnims.length) {
     const s_ = tgt(); s_.anims = s_.anims.filter(a => a.target !== t.id);
-    for (const a of painterAnims) { const c = {...clone(a), id: uid(), target: t.id}; if (c.byParagraph && !(isText(t) && blockCount(t) > 1)) delete c.byParagraph; s_.anims.push(c); }
+    for (const a of painterAnims) { const c = {...clone(a), id: uid(), target: t.id}; if (c.byParagraph && !(isText(t) && (blockCount(t) > 1 || (c.byParagraph === 'parts' && partCount(t) > 1)))) delete c.byParagraph; s_.anims.push(c); }
   }
   setSel([t.id]); commit(); toast('Formázás átmásolva.');
 }
@@ -2271,8 +2392,12 @@ function showScale(el) { const k = Math.min(innerWidth / W, innerHeight / H); Ob
 function keyEl(root, key) {
   const [id, part] = key.split('#');
   const el = root.querySelector(`.obj[data-id="${id}"]`);
-  return part == null ? el : el && pieceEls(el.querySelector('.txt'))[+part];
+  if (part == null || !el) return el;
+  const txt = el.querySelector('.txt');
+  return (txt.dataset.parts ? partPieces(txt) : pieceEls(txt))[+part];
 }
+/** Show / hide an animated piece: an element, or a set of formula parts and text (parts.js). */
+const setVis = (e, v) => { if (e.set) setPartVis(e, v === 'hidden' ? 'hidden' : ''); else e.style.visibility = v; };
 function loadShowSlide(i, step, animateAuto, withTransition) {
   const old = show.querySelector('.slide');
   show.querySelectorAll('.slide.leaving').forEach(x => x.remove());
@@ -2283,11 +2408,11 @@ function loadShowSlide(i, step, animateAuto, withTransition) {
   if (t && t.type && t.type !== 'none') { old.classList.add('leaving'); show.append(el); wait = playTransition(old, el, t); }
   else { old?.remove(); show.prepend(el); }
   const list = Anim.expand(doc.slides[i]), groups = Anim.groups(list);
-  for (const k of Anim.initiallyHidden(list)) { const e = keyEl(el, k); if (e) e.style.visibility = 'hidden'; }
+  for (const k of Anim.initiallyHidden(list)) { const e = keyEl(el, k); if (e) setVis(e, 'hidden'); }
   const offset = groups[0]?.auto ? 1 : 0;
   Object.assign(sh, {i, step, el, groups, offset, busy: null});
   const instant = grp => grp.chains.flat().forEach(a => { const e = keyEl(el, a.key); if (!e) return; const c = Anim.EFFECTS[a.effect].cls;
-    if (c === 'entr') e.style.visibility = 'visible'; else if (c === 'exit') e.style.visibility = 'hidden'; else if (a.effect === 'grow') e.style.transform = 'scale(1.5)'; });
+    if (c === 'entr') setVis(e, 'visible'); else if (c === 'exit') setVis(e, 'hidden'); else if (a.effect === 'grow' && !e.set) e.style.transform = 'scale(1.5)'; });
   let g = 0;
   if (offset) { if (animateAuto && step === 0) setTimeout(() => sh && sh.el === el && playGroup(el, groups[0]), wait); else instant(groups[0]); g = 1; }
   for (; g < step + offset; g++) instant(groups[g]);
@@ -2328,7 +2453,7 @@ function playTransition(old, el, t, box) {
   Promise.all(anims.map(a => a.finished.catch(() => {}))).then(() => { old.remove(); anims.forEach(a => a.cancel()); });
   return dur;
 }
-function info() { show.querySelector('.info').textContent = `${sh.i + 1}. dia · ${sh.step}/${sh.groups.length - sh.offset}. lépés · Esc: kilépés`; }
+function info() { show.querySelector('.info').textContent = `${sh.i + 1}. dia · ${sh.step}/${sh.groups.length - sh.offset}. lépés · Esc: kilépés` + (sh.num ? ` · ugrás a(z) ${sh.num}. diára: Enter` : ''); }
 async function playGroup(root, g) {
   const running = [];
   const p = (async () => { for (const chain of g.chains) await Promise.all(chain.map(a => playEffect(root, a, running))); })();
@@ -2345,6 +2470,17 @@ function playEffect(root, a, running) {
     const y = dir.includes('t') ? -(r.bottom - sr.top) / k : dir.includes('b') ? (sr.bottom - r.top) / k : 0;
     return `translate(${x}px, ${y}px)`;
   };
+  if (el.set) {                                  // a part inside a paragraph: it fades in / out in the preview (PowerPoint plays the chosen effect)
+    const E = Anim.EFFECTS[a.effect];
+    if (E.cls === 'emph') return wait();
+    const inn = E.cls === 'entr';
+    if (E.instant) return wait().then(() => setPartVis(el, inn ? '' : 'hidden'));
+    if (inn) setPartVis(el, '');
+    const as = partEls(el).map(x => x.animate(inn ? [{opacity: 0}, {opacity: 1}] : [{opacity: 1}, {opacity: 0}], inn ? opt : {...opt, fill: 'forwards'}));
+    if (!as.length) return wait();
+    as.slice(1).forEach(x => running.push(x));
+    return after(as[0], () => { if (!inn) { setPartVis(el, 'hidden'); as.forEach(x => x.cancel()); } });
+  }
   const FLOAT = H * 0.1;
   switch (a.effect) {
     case 'appear': return wait().then(() => { el.style.visibility = 'visible'; });
@@ -2394,7 +2530,7 @@ async function packMprezi() {
   const z = new JSZip(), files = {};
   for (const k of usedMedia()) {
     const m = media[k]?.match(/^data:([^;]+);base64,(.*)$/); if (!m) continue;
-    const name = `media/${k}.${EXT[m[1]] ?? 'bin'}`; z.file(name, m[2], {base64: true}); files[k] = name;
+    const name = `media/${k}.${EXT[m[1]] ?? 'bin'}`; z.file(name, m[2], {base64: true, compression: /svg/.test(m[1]) ? 'DEFLATE' : 'STORE'}); files[k] = name;   // pictures and videos are compressed already
   }
   z.file('manifest.json', JSON.stringify({...doc, app: 'matekos-prezi', media: files}, null, 1));
   return z.generateAsync({type: 'blob', mimeType: 'application/zip', compression: 'DEFLATE'});
@@ -2430,13 +2566,13 @@ async function doSave(saveAs) {
   try { const msg = await savePresentation(await packMprezi(), doc.title, saveAs); if (msg === 'Mentve') { titleFromFile(); dirty = false; saveSoon(); setStatus(); } else { setStatus(msg); toast(msg); setTimeout(() => setStatus(), 2500); } }
   catch (e) { setStatus('A mentés nem sikerült: ' + (e?.message || e)); }
 }
-function loadDocument(d, m, name, path, handle) {
+function loadDocument(d, m, name, path, handle, asDirty) {
   setCurrentHandle(handle ?? null);
   doc = d; media = m; if (name) doc.title = name.replace(/\.(mprezi|pptx)$/i, '');   // the file's own name
   doc.font = FONT_SETS[doc.font] ? doc.font : DEFAULT_FONT;
-  if (doc.font !== activeMathFont()) { setCurrentPath(path ?? null); resetHistory(); restartWithFont(doc.font); return; }
+  if (doc.font !== activeMathFont()) { setCurrentPath(path ?? null); resetHistory(); if (asDirty) dirty = true; restartWithFont(doc.font); return; }
   mode = 'slides'; cur = 0; setSel([]); curAnim = null; setCurrentPath(path ?? null);
-  resetHistory(); renderAll(); fitStage();
+  resetHistory(); if (asDirty) { dirty = true; setStatus(); } renderAll(); fitStage();
 }
 async function openResult(r) {
   if (!r) return;
@@ -2444,10 +2580,43 @@ async function openResult(r) {
   try { const {doc: d, media: m} = await unpackMprezi(r.data); loadDocument(d, m, r.name, r.path, r.handle); saveSoon(); toast('Megnyitva: ' + r.name); setStatus('Megnyitva: ' + r.name); }
   catch (e) { toast('A fájl nem nyitható meg: ' + (e?.message || e)); }
 }
+/** May this window's presentation be replaced by another one? Unsaved work made in this session asks first; a draft
+ *  that only came back from the last session (and was not touched) is put aside as a recoverable draft instead. */
+async function okToReplace(msg, yes) {
+  if (editing) exitEdit();
+  if (!dirty) return true;
+  if (editedNow) return confirmBox(msg, yes);
+  if (await shelveDraft(autoValue())) { toast('Az előző, nem mentett bemutató megmaradt – a kezdőképernyőn állítható vissza.'); return true; }
+  return confirmBox(msg, yes);
+}
 async function doOpen() {
   if (editing) exitEdit();
-  if (dirty && $('#home').hidden && !await confirmBox('A nem mentett módosítások elvesznek. Megnyitsz egy másik bemutatót?', 'Megnyitás')) return;
-  const r = await openPresentation(); if (r) { showHome(false); openResult(r); }
+  if (dirty && editedNow && !await confirmBox('A nem mentett módosítások elvesznek. Megnyitsz egy másik bemutatót?', 'Megnyitás')) return;
+  const r = await openPresentation(); if (!r) return;
+  if (dirty && !editedNow && await shelveDraft(autoValue())) toast('Az előző, nem mentett bemutató megmaradt – a kezdőképernyőn állítható vissza.');   // only once a file was really chosen
+  showHome(false); openResult(r);
+}
+/** Home screen: a recently used presentation. */
+async function openRecent(path) {
+  if (!await okToReplace('A nem mentett módosítások elvesznek. Megnyitsz egy másik bemutatót?', 'Megnyitás')) return;
+  let r = null;
+  try { r = await openPathFile(path); }
+  catch (e) { forgetRecent(path); renderHomeLists(); toast(`A(z) „${path.split(/[\\/]/).pop()}” fájl már nincs a korábbi helyén.`); return; }
+  openResult(r);
+}
+/** Home screen: continue an unsaved presentation of a window that is no longer running. */
+async function openDraft(id) {
+  if (!await okToReplace('A mostani bemutató nem mentett módosításai elvesznek. Visszaállítod a másikat?', 'Visszaállítás')) return;
+  const v = await takeDraft(id);
+  if (!v?.doc) { renderHomeLists(); toast('Ez a bemutató már nem állítható vissza (lehet, hogy egy másik ablakban van nyitva).'); return; }
+  sessionOpen = true; showHome(false);
+  try {
+    let path = v.path || null;
+    if (path) { setCurrentPath(path); if (!await currentFileExists()) path = null; }
+    loadDocument(migrate(v.doc), v.media || {}, v.title || null, path, v.handle, true);
+    if (path) titleFromFile();
+    saveSoon(); toast(path ? 'Visszaállítva – a módosítások még nincsenek a fájlba mentve.' : 'Visszaállítva – még nincs fájlba mentve.');
+  } catch (e) { toast('A bemutató nem állítható vissza: ' + (e?.message || e)); }
 }
 function busy(msg) { $('#busyMsg').textContent = msg || ''; $('#busy').hidden = !msg; }
 async function doExport(kind) {
@@ -2475,7 +2644,37 @@ $('#bSave').onclick = () => doSave(false);
 $('#bPlay').onclick = () => startShow(cur);
 $('#bZoom').onclick = e => showPop('popZoom', e.currentTarget);
 $('#popZoom').onopen = () => { for (const b of $$('#popZoom [data-zoom]')) b.classList.toggle('on', b.dataset.zoom === String(zoom)); };
-$('#popZoom').addEventListener('click', e => { const b = e.target.closest('[data-zoom]'); if (!b) return; closePops(); zoom = b.dataset.zoom === 'auto' ? 'auto' : +b.dataset.zoom; $('#zoomLabel').textContent = zoom === 'auto' ? '' : zoom + '%'; $('#bZoom').classList.toggle('pct', zoom !== 'auto'); fitStage(); });
+/** Set the zoom ('auto' = fit, or a percentage). `at` (screen point): that point of the slide stays under the pointer. */
+function setZoom(z, at) {
+  const r0 = stage.getBoundingClientRect(), k0 = scale;
+  zoom = z === 'auto' ? 'auto' : Math.max(25, Math.min(400, Math.round(z)));
+  $('#zoomLabel').textContent = zoom === 'auto' ? '' : zoom + '%'; $('#bZoom').classList.toggle('pct', zoom !== 'auto');
+  fitStage();
+  if (at && zoom !== 'auto') { const r = stage.getBoundingClientRect(); work.scrollLeft += r.left + (at.x - r0.left) / k0 * scale - at.x; work.scrollTop += r.top + (at.y - r0.top) / k0 * scale - at.y; }
+  drawSelection(); drawBadges(); drawFind();
+}
+$('#popZoom').addEventListener('click', e => { const b = e.target.closest('[data-zoom]'); if (!b) return; closePops(); setZoom(b.dataset.zoom === 'auto' ? 'auto' : +b.dataset.zoom); });
+/* Zoom at the pointer: Ctrl/⌘ + mouse wheel, Ctrl/⌘ + two-finger scroll and pinching on a touchpad.
+   Windows (WebView2) and Chrome report a pinch as a wheel event with Ctrl; the Mac (WebKit) as gesture events. */
+let zoomRun = null;                  // exact (not rounded) zoom while a wheel / pinch sequence lasts
+function zoomBy(factor, at) {
+  const pct = Math.round(scale * 100);
+  if (!zoomRun || zoomRun.shown !== pct) zoomRun = {v: pct};
+  zoomRun.v = Math.max(25, Math.min(400, zoomRun.v * factor));
+  setZoom(zoomRun.v, at); zoomRun.shown = Math.round(scale * 100);
+}
+const zoomable = e => !sh && $('#home').hidden && e.target instanceof Node && work.contains(e.target);
+window.addEventListener('wheel', e => {
+  if (!(e.ctrlKey || e.metaKey) || !zoomable(e)) return;
+  e.preventDefault(); e.stopPropagation();
+  let d = e.deltaY || e.deltaX; if (e.deltaMode === 1) d *= 33; else if (e.deltaMode === 2) d *= 300;
+  if (!d) return;
+  zoomBy(Math.abs(d) >= 50 ? (d < 0 ? 1.1 : 1 / 1.1) : Math.exp(-d * 0.01), {x: e.clientX, y: e.clientY});   // a wheel notch: 10%; a touchpad: smooth
+}, {passive: false, capture: true});
+let pinch = null;
+window.addEventListener('gesturestart', e => { if (!zoomable(e)) return; e.preventDefault(); pinch = Math.round(scale * 100); }, {passive: false, capture: true});
+window.addEventListener('gesturechange', e => { if (pinch == null) return; e.preventDefault(); setZoom(pinch * (e.scale || 1), {x: e.clientX, y: e.clientY}); }, {passive: false, capture: true});
+window.addEventListener('gestureend', e => { if (pinch != null) e.preventDefault(); pinch = null; }, {passive: false, capture: true});
 $('#bExport').onclick = e => showPop('popExport', e.currentTarget);
 let titleBusy = false;
 $('#docTitle').addEventListener('keydown', async e => {
@@ -2525,7 +2724,7 @@ function showReport(title, lines) {
 }
 async function importPowerPoint(given) {
   if (editing) exitEdit();
-  if (!given && dirty && !await confirmBox('Az importált fájl új bemutatóként nyílik meg; a mostani nem mentett módosításai elvesznek. Folytatod?', 'Importálás')) return;
+  if (!given && !await okToReplace('Az importált fájl új bemutatóként nyílik meg; a mostani nem mentett módosításai elvesznek. Folytatod?', 'Importálás')) return;
   const f = given || await pickFile('PowerPoint-bemutató', ['pptx']); if (!f) return;
   busy('PowerPoint-fájl beolvasása…');
   try {
@@ -2557,21 +2756,47 @@ function quitBox() {
     extra.className = 'btn'; extra.textContent = 'Mentés és kilépés';
     $('#cfmMsg').textContent = 'A bemutatóban nem mentett módosítások vannak. Kilépsz mentés nélkül?';
     $('#cfmYes').textContent = 'Kilépés mentés nélkül'; $('#cfmNo').after(extra); box.hidden = false;
-    const done = v => { box.hidden = true; extra.remove(); $('#cfmYes').onclick = $('#cfmNo').onclick = null; res(v); };
+    const done = v => { box.hidden = true; extra.remove(); removeEventListener('keydown', key, true); $('#cfmYes').onclick = $('#cfmNo').onclick = null; res(v); };
+    const key = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done('stay'); } else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); done('save'); } };
+    addEventListener('keydown', key, true); extra.focus();
     $('#cfmYes').onclick = () => done('quit'); $('#cfmNo').onclick = () => done('stay'); extra.onclick = () => done('save');
   });
 }
 async function newPresentation() {
-  if (dirty && editedNow && !await confirmBox(dirty ? 'Új bemutatót kezdesz. A mostani nem mentett módosításai elvesznek. Folytatod?' : 'Új, üres bemutatót kezdesz. Folytatod?', 'Új bemutató')) return false;
+  if (!await okToReplace('Új bemutatót kezdesz. A mostani nem mentett módosításai elvesznek. Folytatod?', 'Új bemutató')) return false;
   if (editing) stopEditor();
   blankDoc(); doc.slides.push(newSlide('cimdia')); loadDocument(doc, media, null, null); saveSoon(); sessionOpen = true; editedNow = false; showHome(false); return true;
 }
 /* home screen (as in Matekos Doksi) */
 function showHome(show) {
   $('#home').hidden = !show;
-  if (show) { const f = currentFileName(); $('#homeResume').hidden = !(sessionOpen || f); $('#homeResume').textContent = f ? `Folytatás: ${f}` : 'Vissza a megnyitott bemutatóhoz'; }
+  if (show) {
+    const f = currentFileName();
+    // also an unsaved presentation that came back from the last session can be continued
+    $('#homeResume').hidden = !(sessionOpen || f || dirty);
+    $('#homeResume').textContent = f ? `Folytatás: ${f}${dirty ? ' (nem mentett módosításokkal)' : ''}` : sessionOpen ? 'Vissza a megnyitott bemutatóhoz' : `Nem mentett bemutató folytatása: ${doc.title || 'Névtelen bemutató'}`;
+    renderHomeLists();
+  }
   else fitStage();
 }
+const homeDate = t => t ? new Date(t).toLocaleString('hu-HU', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}) : '';
+/** Home screen lists: recoverable unsaved presentations and recently used files. */
+function renderHomeLists() {
+  const dr = recoverableDrafts(), box = $('#homeDrafts');
+  box.hidden = !dr.length;
+  box.innerHTML = dr.length ? '<h2>Nem mentett munka visszaállítása</h2>' + dr.map(d => `<div class="hrow"><button class="hitem" data-draft="${esc(d.id)}" title="Megnyitás ebben az ablakban"><b>${esc(d.title)}</b><span>${esc(homeDate(d.at))}</span></button><button class="hx" data-dropdraft="${esc(d.id)}" title="Elvetés">${svgIcon('xmark')}</button></div>`).join('') : '';
+  const here = getCurrentPath(), rc = isTauri() ? recentFiles().filter(r => r.path !== here).slice(0, 6) : [], rb = $('#homeRecent');
+  rb.hidden = !rc.length;
+  rb.innerHTML = rc.length ? '<h2>Legutóbbi bemutatók</h2>' + rc.map(r => { const n = r.path.split(/[\\/]/).pop(); return `<div class="hrow"><button class="hitem" data-recent="${esc(r.path)}" title="${esc(r.path)}"><b>${esc(n.replace(/\.mprezi$/i, ''))}</b><span>${esc(homeDate(r.at))}</span></button><button class="hx" data-droprecent="${esc(r.path)}" title="Eltávolítás a listából">${svgIcon('xmark')}</button></div>`; }).join('') : '';
+}
+$('#home').addEventListener('click', async e => {
+  const b = e.target.closest('[data-draft], [data-dropdraft], [data-recent], [data-droprecent]'); if (!b) return;
+  if (b.dataset.draft) return openDraft(b.dataset.draft);
+  if (b.dataset.recent) return openRecent(b.dataset.recent);
+  if (b.dataset.droprecent) { forgetRecent(b.dataset.droprecent); renderHomeLists(); return; }
+  if (await confirmBox('Biztosan elveted ezt a nem mentett bemutatót? Később már nem állítható vissza.', 'Elvetés')) { await dropDraft(b.dataset.dropdraft); renderHomeLists(); }
+});
+$('.home-ver').textContent = 'v' + APP_VERSION;
 $('#homeNew').onclick = newPresentation;
 $('#homeOpen').onclick = doOpen;
 $('#homeResume').onclick = () => { sessionOpen = true; showHome(false); };
@@ -2740,6 +2965,16 @@ setCmtHidden(cmtHidden);
 $('#cmtAdd').addEventListener('mousedown', e => e.preventDefault());
 $('#cmtText').addEventListener('focus', () => { cmtSel = editing && ed && !ed.state.selection.empty ? {oid: editing, from: ed.state.selection.from, to: ed.state.selection.to} : null; });
 $('#cmtAdd').addEventListener('click', addComment);
+/** Every reviewer has a colour of their own (from the name), shown behind the profile icon. */
+function avatarColor(name) { let h = 0; for (const ch of String(name).trim().toLowerCase()) h = (h * 31 + ch.codePointAt(0)) % 360; return `hsl(${h} 55% 45%)`; }
+const paintAvatar = () => { const a = $('#cmtAvatar'), n = $('#cmtAuthor').value.trim(); a.innerHTML = svgIcon('user'); a.style.setProperty('--c', n ? avatarColor(n) : 'var(--ink-2)'); };
+$('#cmtAuthor').value = lsGet('matekosprezi.author') || ''; paintAvatar();
+$('#cmtAuthor').addEventListener('input', paintAvatar);
+$('#cmtAuthor').addEventListener('change', e => { const n = e.target.value.trim().slice(0, 40); e.target.value = n; lsSet('matekosprezi.author', n); paintAvatar(); });
+$('#cmtAuthor').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#cmtText').focus(); } });
+$('#cmtPrev').onclick = () => stepOpenComment(-1);
+$('#cmtNext').onclick = () => stepOpenComment(1);
+for (const b of $$('#cmtPanel [data-cflt]')) b.onclick = () => { cmtFilter = b.dataset.cflt; lsSet('matekosprezi.cmtfilter', cmtFilter); renderComments(); };
 $('#cmtText').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); addComment(); } });
 $('#cmtList').addEventListener('click', e => {
   const card = e.target.closest('.cmtcard'); if (!card) return;
@@ -2749,7 +2984,8 @@ $('#cmtList').addEventListener('click', e => {
   if (act?.dataset.cact === 'done') { c.done = !c.done; commit(); renderComments(); return; }
   if (act?.dataset.cact === 'reply') {
     const inp = card.querySelector('.cin'), t = inp.value.trim(); if (!t) { inp.focus(); return; }
-    (c.replies ||= []).push({text: t, at: Date.now()}); commit(); renderComments(); focusCard(id); return;
+    const by = cmtAuthor(); if (!by) return;
+    (c.replies ||= []).push({text: t, by, at: Date.now()}); commit(); renderComments(); focusCard(id); return;
   }
   if (e.target.closest('input')) return;
   focusCard(id); showCommentPlace(id);
@@ -2899,9 +3135,17 @@ const CTX_ICONS = [[/^Kivágás/, 'cut'], [/^Beillesztés/, 'paste'], [/^Mindent
   [/^Új dia/, 'plus'], [/^Sablonszerkesztő/, 'master']];
 const ctxIcon = label => (CTX_ICONS.find(([re]) => re.test(label)) || [0, 'para'])[1];
 function duplicateSel() {
-  const o = selObj(); if (!o) return;
-  const c = clone(o); const re = q => { q.id = uid(); delete q.cmt; if (q.children) q.children.forEach(re); }; re(c);
-  moveObject(c, 20, 20); delete c.placeholder; delete c.locked; tgt().objects.push(c); setSel([c.id]); commit();
+  if (editing) exitEdit();
+  const S = tgt(), objs = selIds.map(objById).filter(Boolean); if (!objs.length) return;
+  const ids = [];
+  for (const o of objs) {
+    const c = clone(o), map = new Map(); reid(c, map);          // new ids; comments stay with the original
+    moveObject(c, 20, 20); delete c.placeholder; delete c.locked;
+    const g = groupOf(o.id); (g ? g.children : S.objects).push(c); if (g) fitGroup(g);
+    if (mode === 'slides' && S.anims) S.anims.push(...S.anims.filter(a => map.has(a.target)).map(a => ({...clone(a), id: uid(), target: map.get(a.target)})));
+    ids.push(c.id);
+  }
+  setSel(ids); commit();
 }
 async function pasteFromClipboard(plain) {
   try {
@@ -3042,9 +3286,14 @@ function findRegex() { const q = $('#findIn').value; if (!q) return null; return
 function findAll() {
   const re = findRegex(), out = []; if (!re) return out;
   doc.slides.forEach((sl, si) => { for (const o of flatObjects(sl.objects)) if (isTextLike(o) && !o.field) {
-    let n = 0; (function walk(x) { if (x.type === 'text') for (const _ of x.text.matchAll(re)) out.push({si, id: o.id, n: n++}); (x.content || []).forEach(walk); })(o.doc || {}); } });
+    // text matches: n = index among the box's text matches; formulas: mk = index among the box's formulas (their TeX code is searched)
+    let n = 0, k = 0; (function walk(x) {
+      if (x.type === 'text') for (const _ of x.text.matchAll(re)) out.push({si, id: o.id, n: n++});
+      else if (x.type === 'math') { if (String(x.attrs?.tex ?? '').search(re) >= 0) out.push({si, id: o.id, mk: k}); k++; }
+      (x.content || []).forEach(walk); })(o.doc || {}); } });
   return out;
 }
+const mathTexs = json => { const out = []; (function walk(x) { if (x.type === 'math') out.push(String(x.attrs?.tex ?? '')); (x.content || []).forEach(walk); })(json || {}); return out; };
 function findNext() {
   if (editing) syncEditor();
   const all = findAll(); if (!all.length) { $('#findInfo').textContent = 'Nincs találat.'; return; }
@@ -3053,25 +3302,32 @@ function findNext() {
   if (mode !== 'slides') return;
   if (cur !== m.si) { if (editing) exitEdit(); gotoSlide(m.si); }
   if (editing !== m.id) { if (editing) exitEdit(); select(m.id); enterEdit(m.id); }
+  if (m.mk != null) {                                           // inside a formula: shown, never replaced
+    let k = 0, at = null;
+    ed.state.doc.descendants((node, pos) => { if (at == null && node.type.name === 'math' && k++ === m.mk) at = pos; });
+    if (at != null) { ed.commands.setNodeSelection(at); ed.commands.scrollIntoView(); }
+    $('#findInfo').textContent += ' – képletben (a csere a képleteket nem módosítja)';
+    drawFind(); return;
+  }
   const re = findRegex(); let n = 0, hit = null;
   ed.state.doc.descendants((node, pos) => { if (hit || !node.isText) return; for (const x of node.text.matchAll(re)) { if (n++ === m.n) { hit = {from: pos + x.index, to: pos + x.index + x[0].length}; break; } } });
   if (hit) { ed.commands.setTextSelection(hit); ed.commands.scrollIntoView(); }
   drawFind();
 }
 function replaceOne() {
-  const re = findRegex(); if (!re || !editing || !ed) { findNext(); return; }
+  const re = findRegex(); if (!re || !editing || !ed || ed.state.selection instanceof NodeSelection) { findNext(); return; }
   const {from, to} = ed.state.selection, txt = ed.state.doc.textBetween(from, to);
   if (from !== to && new RegExp('^(?:' + re.source + ')$', re.flags.replace('g', '')).test(txt)) { ed.chain().focus().insertContentAt({from, to}, $('#replIn').value).run(); syncEditor(); findPos--; }
   findNext();
 }
 function replaceAll() {
   const re = findRegex(); if (!re) return; if (editing) exitEdit();
-  let count = 0; const rep = $('#replIn').value;
+  let count = 0; const rep = $('#replIn').value, inMath = findAll().filter(m => m.mk != null).length;
   const fix = list => { for (const o of flatObjects(list)) if (isTextLike(o) && !o.field && o.doc) (function walk(x) {
     if (x.type === 'text') { const t = x.text.replace(re, () => { count++; return rep; }); if (t !== x.text) x.text = t; } (x.content || []).forEach(walk);
     if (x.content) x.content = x.content.filter(c => c.type !== 'text' || c.text); })(o.doc); };
   for (const sl of doc.slides) fix(sl.objects);
-  $('#findInfo').textContent = count ? `${count} csere történt.` : 'Nincs találat.'; findPos = -1;
+  $('#findInfo').textContent = (count ? `${count} csere történt.` : inMath ? 'A szövegben nincs találat.' : 'Nincs találat.') + (inMath ? ` ${inMath} képlet változatlan maradt (bennük csak keresni lehet).` : ''); findPos = -1;
   if (count) commit();
 }
 /** Find: every match on the slide highlighted, the current one stronger (as in Matekos Doksi). */
@@ -3097,6 +3353,13 @@ function drawFind() {
           n++;
         }
       }
+      // formulas whose TeX code matches: the whole formula is marked
+      const fs = [...pm.querySelectorAll('.math')], texs = mathTexs(editing === el.dataset.id && ed ? ed.getJSON() : objById(el.dataset.id)?.doc);
+      if (fs.length === texs.length) fs.forEach((f, k) => {
+        if (texs[k].search(re) < 0) return;
+        const cur_ = curM && curM.id === el.dataset.id && curM.si === (mode === 'slides' ? cur : -1) && curM.mk === k;
+        for (const q of f.getClientRects()) if (q.width) out.push(`<div class="find-hit${cur_ ? ' cur' : ''}" style="left:${q.left - wr.left}px;top:${q.top - wr.top}px;width:${q.width}px;height:${q.height}px"></div>`);
+      });
     }
     layer.innerHTML = out.join('');
   });
@@ -3113,6 +3376,12 @@ let clipboard = null, nudgeT = 0;
 addEventListener('keydown', e => {
   const mod = (e.ctrlKey || e.metaKey) && !e.altKey, k = e.key.toLowerCase();
   if (sh) {
+    // a number and Enter: jump to that slide; Home / End: first / last slide
+    if (/^[0-9]$/.test(k) && !mod && !e.altKey) { e.preventDefault(); sh.num = ((sh.num || '') + k).slice(-4); info(); return; }
+    const num = sh.num; sh.num = '';
+    if (k === 'enter' && num) { e.preventDefault(); loadShowSlide(Math.max(1, Math.min(doc.slides.length, +num)) - 1, 0, true); return; }
+    if (k === 'home' || k === 'end') { e.preventDefault(); loadShowSlide(k === 'home' ? 0 : doc.slides.length - 1, 0, true); return; }
+    if (num) info();
     if (['arrowright', 'arrowdown', ' ', 'pagedown', 'enter'].includes(k)) { e.preventDefault(); showNext(); }
     else if (['arrowleft', 'arrowup', 'pageup', 'backspace'].includes(k)) { e.preventDefault(); showPrev(); }
     else if (k === 'escape') stopShow();
@@ -3122,6 +3391,7 @@ addEventListener('keydown', e => {
   if (isMathEditorOpen() && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'm' && !e.target.closest?.('.ProseMirror')) { e.preventDefault(); applyMathEditor(); return; }
   if (isMathEditorOpen() || !$('#cfm').hidden) return;
   if (!$('#home').hidden) return;
+  if (mod && ['0', '+', '=', '-'].includes(k)) { e.preventDefault(); const pct = Math.round(scale * 100); setZoom(k === '0' ? 'auto' : k === '-' ? pct / 1.25 : pct * 1.25); return; }
   if (mod && k === 's') { e.preventDefault(); doSave(e.shiftKey); return; }
   if (mod && k === 'o') { e.preventDefault(); doOpen(); return; }
   if (k === 'f5') { e.preventDefault(); startShow(cur); return; }
@@ -3138,10 +3408,8 @@ addEventListener('keydown', e => {
   if (mod && k === 'a') { e.preventDefault(); setSel(tgt().objects.filter(q => !q.locked).map(q => q.id)); drawSelection(); renderProps(); updateRibbon(); return; }
   if (mod && k === 'g') { e.preventDefault(); e.shiftKey ? ungroupSelected() : groupSelected(); return; }
   const o = selObj();
-  if (mod && k === 'd' && o) {
-    const c = clone(o); e.preventDefault();
-    const reid = q => { q.id = uid(); if (q.children) q.children.forEach(reid); }; reid(c);
-    moveObject(c, 20, 20); delete c.placeholder; delete c.locked; tgt().objects.push(c); setSel([c.id]); commit(); return;
+  if (mod && k === 'd' && selIds.length) {
+    e.preventDefault(); duplicateSel(); return;
   }
   if ((k === 'delete' || k === 'backspace') && selIds.length) { e.preventDefault(); deleteSelected(); return; }
   if (k === 'escape' || (k === 'enter' && cropping)) { if (cropping) { endCrop(); return; } if (painter) { COMMANDS.painter(); return; } select(null); return; }
@@ -3186,7 +3454,7 @@ addEventListener('beforeunload', e => { if (dirty && !isTauri()) e.preventDefaul
   fitStage(); renderAll();
   if (sessionStorage.getItem('mp.skipHome')) sessionOpen = true; else showHome(true);
   sessionStorage.removeItem('mp.skipHome');
-  fontLoad.then(() => { measureTexts(); drawSelection(); drawBadges(); renderThumbs(); });
+  fontLoad.then(() => { measureTexts(); drawSelection(); drawBadges(); thumbCache.clear(); renderThumbs(); });   // list gaps and tabs were laid out with the fallback font
   mathReady.then(() => setTimeout(() => { measureTexts(); drawSelection(); drawBadges(); }, 100));
   if (isTauri()) {
     try {
@@ -3207,6 +3475,7 @@ addEventListener('beforeunload', e => { if (dirty && !isTauri()) e.preventDefaul
         catch (e) { toast('A sablon nem nyitható meg: ' + (e?.message || e)); }
         return;
       }
+      if (!await okToReplace('A nem mentett módosítások elvesznek. Megnyitod a másik bemutatót?', 'Megnyitás')) return;
       openResult(await openPathFile(path));
     };
     try { const p = await watchOpenedFiles(openSys); if (p) await openSys(p); }

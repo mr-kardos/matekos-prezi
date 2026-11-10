@@ -89,6 +89,7 @@ export const ICONS = {
   comment: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
   tick: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   xmark: '<path d="M6 6l12 12M18 6 6 18"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4.5 20.5c0-4 3.4-6.5 7.5-6.5s7.5 2.5 7.5 6.5"/>',
   panelL: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
   spell: '<path d="M4 15 7.5 5 11 15M5.3 11.5h4.4"/><path d="m13 15 2.5 3L21 11"/>',
   cut: '<circle cx="6" cy="17" r="2.6"/><circle cx="18" cy="17" r="2.6"/><path d="M7.9 15.2 17 4M16.1 15.2 7 4"/>',

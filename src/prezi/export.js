@@ -13,6 +13,7 @@ import 'svg2pdf.js';
 import { familyFiles, fontSet, familyFromCSS } from './fontsets.js';
 import { Anim } from './anim.js';
 import { pieceEls, mathPending, layoutStaticTabs } from './textview.js';
+import { partPieces, partEls } from './parts.js';
 import { PPTX_SKELETON } from './pptx-skeleton.js';
 import { W, H, flatObjects } from './model.js';
 
@@ -118,13 +119,13 @@ function textBody(roots, stop, ox, oy) {
       if (d || bars) body += `<g fill="${cs.color}">${d ? `<path d="${d}"/>` : ''}${bars}</g>`;
     }
     // pictures inside the text (e.g. picture list bullets)
-    for (const im of root.querySelectorAll('img')) {
+    for (const im of root.tagName === 'IMG' ? [root] : root.querySelectorAll('img')) {
       if (im.closest('.math') || !im.src) continue;
       const r = im.getBoundingClientRect(); if (!r.width) continue;
       body += `<image href="${im.src}" xlink:href="${im.src}" x="${n2(r.left - ox)}" y="${n2(r.top - oy)}" width="${n2(r.width)}" height="${n2(r.height)}" preserveAspectRatio="none"/>`;
     }
     // formulas
-    for (const sp of root.querySelectorAll('.math')) {
+    for (const sp of root.matches('.math') ? [root] : root.querySelectorAll('.math')) {
       const color = getComputedStyle(sp).color;
       // a formula that may break into lines is several pictures (one per line piece)
       for (const svg of sp.querySelectorAll('mjx-container > svg')) {
@@ -136,6 +137,15 @@ function textBody(roots, stop, ox, oy) {
   }
   return back + body + lines;
 }
+/** One part of a formula (the drawn elements tagged data-part = k, see parts.js) as SVG, relative to (ox, oy). */
+function formulaPart(svg, k, ox, oy) {
+  const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal; if (!r.width || !vb.width) return '';
+  const color = getComputedStyle(svg.closest('.math') || svg).color, copy = svg.cloneNode(true);
+  for (const n of copy.querySelectorAll('[data-part]')) if (n.getAttribute('data-part') !== String(k)) n.remove();
+  const inner = copy.innerHTML.replace(/ data-[\w-]+="[^"]*"/g, '').replace(/currentColor/g, color);
+  return `<g transform="translate(${n2(r.left - ox)},${n2(r.top - oy)}) scale(${r.width / vb.width},${r.height / vb.height}) translate(${-vb.x},${-vb.y})">${inner}</g>`;
+}
+const topSVG = el => { let s = el.ownerSVGElement; while (s && s.ownerSVGElement) s = s.ownerSVGElement; return s; };
 const wrapSVG = (w, h, body) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${n2(w)}" height="${n2(h)}" viewBox="0 0 ${n2(w)} ${n2(h)}">${body}</svg>`;
 
 /** Pieces of one rendered slide, back to front: {key, name, svg|raster, x, y, w, h, rot}. Groups give their members. */
@@ -157,7 +167,15 @@ function slidePieces(s, el, model) {
     if (o.type === 'shape') { pieces.push({key, name, svg: wrapSVG(o.w, o.h, child.querySelector('svg').innerHTML), x: o.x, y: o.y, w: o.w, h: o.h, rot: o.rot || 0, opacity}); return; }
     const txt = child.querySelector('.txt');
     if (!tpl && o.type === 'text' && Anim.splitsByParagraph(s, o)) {
-      pieceEls(txt).forEach((p, i) => {
+      (txt.dataset.parts ? partPieces(txt) : pieceEls(txt)).forEach((p, i) => {
+        if (p.set) {                                             // a part of a paragraph: some of its text and formula parts
+          const els = partEls(p), rs = els.map(e => e.getBoundingClientRect()).filter(q => q.width || q.height); if (!rs.length) return;
+          const PAD = 4, x0 = Math.min(...rs.map(q => q.left)) - PAD, y0 = Math.min(...rs.map(q => q.top)) - PAD, x1 = Math.max(...rs.map(q => q.right)) + PAD, y1 = Math.max(...rs.map(q => q.bottom)) + PAD;
+          const html = els.filter(e => !e.ownerSVGElement), svgs = [...new Set(els.filter(e => e.ownerSVGElement).map(topSVG))];
+          const body = textBody(html, txt, x0, y0) + svgs.map(v => formulaPart(v, p.part, x0, y0)).join('');
+          pieces.push({key: `${o.id}#${i}`, name: `${name} – ${i + 1}. rész`, svg: wrapSVG(x1 - x0, y1 - y0, body), x: o.x + x0 - ox, y: o.y + y0 - oy, w: x1 - x0, h: y1 - y0, rot: 0, opacity});
+          return;
+        }
         const pr = p.getBoundingClientRect(), y0 = Math.max(0, pr.top - oy - 6), y1 = Math.min(o.h, pr.bottom - oy + 6);
         pieces.push({key: `${o.id}#${i}`, name: `${name} – ${i + 1}. bekezdés`, svg: wrapSVG(o.w, y1 - y0, textBody([p], txt, ox, oy + y0)), x: o.x, y: o.y + y0, w: o.w, h: y1 - y0, rot: 0, opacity});
       });
@@ -316,9 +334,9 @@ export async function buildPptx(doc, renderSlide, layoutOf, onProgress) {
       let rImg, rSvg;
       if (p.video) {
         const vm = p.video.match(/^data:([^;]+);base64,(.*)$/); if (!vm) continue;
-        const vext = VEXT[vm[1]] || 'mp4', vf = `media${++media}.${vext}`; zip.file(`ppt/media/${vf}`, vm[2], {base64: true}); vidTypes.add(vext);
+        const vext = VEXT[vm[1]] || 'mp4', vf = `media${++media}.${vext}`; zip.file(`ppt/media/${vf}`, vm[2], {base64: true, compression: 'STORE'}); vidTypes.add(vext);
         const pm = p.raster && dataUrlParts(p.raster), pf = `img${++media}.${EXT[pm?.mime] || 'png'}`;
-        if (pm && EXT[pm.mime]) zip.file(`ppt/media/${pf}`, pm.b64, {base64: true});
+        if (pm && EXT[pm.mime]) zip.file(`ppt/media/${pf}`, pm.b64, {base64: true, compression: 'STORE'});
         rImg = rel(pf);
         const rVid = 'rId' + ++rid; rels += `<Relationship Id="${rVid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/video" Target="../media/${vf}"/>`;
         const rMed = 'rId' + ++rid; rels += `<Relationship Id="${rMed}" Type="http://schemas.microsoft.com/office/2007/relationships/media" Target="../media/${vf}"/>`;
@@ -333,7 +351,7 @@ export async function buildPptx(doc, renderSlide, layoutOf, onProgress) {
         if (!f) {
           const {mime, b64} = dataUrlParts(p.raster), ext = EXT[mime];
           f = `img${++media}.${ext || 'png'}`;
-          if (ext) zip.file(`ppt/media/${f}`, b64, {base64: true});
+          if (ext) zip.file(`ppt/media/${f}`, b64, {base64: true, compression: 'STORE'});
           else zip.file(`ppt/media/${f}`, await svgToPng(wrapSVG(p.w, p.h, `<image href="${p.raster}" width="${p.w}" height="${p.h}"/>`), p.w, p.h));
           rasterFile.set(p.raster, f);
         }
