@@ -271,7 +271,7 @@ function renderComments() {
   $('#cmtCount').textContent = all.length ? `${nOpen} nyitott / ${all.length}` : '';
   for (const b of $$('#cmtPanel [data-cflt]')) b.classList.toggle('on', b.dataset.cflt === cmtFilter);
   $('#cmtPrev').disabled = $('#cmtNext').disabled = !nOpen;
-  const who = x => x.by ? `<b class="cby">${esc(x.by)}</b>` : '';
+  const who = x => x.by ? `<span class="cav" style="--c:${avatarColor(x.by)}">${svgIcon('user')}</span><b class="cby">${esc(x.by)}</b>` : '';
   const where = p => !p ? 'a helye törölve' : p.si >= 0 ? `${p.si + 1}. dia` : p.tk === 'master' ? 'mester' : (doc.templates[p.tk]?.name || 'diatípus');
   $('#cmtList').innerHTML = list.length ? list.map(c => `<div class="cmtcard${c.done ? ' done' : ''}${c.id === activeCmt ? ' act' : ''}${at[c.id] ? '' : ' lost'}" data-cid="${c.id}">
       <div class="ctop"><span class="cdate">${who(c)}${cmtDate(c.at)} · ${where(at[c.id])}</span>
@@ -2654,13 +2654,27 @@ function setZoom(z, at) {
   drawSelection(); drawBadges(); drawFind();
 }
 $('#popZoom').addEventListener('click', e => { const b = e.target.closest('[data-zoom]'); if (!b) return; closePops(); setZoom(b.dataset.zoom === 'auto' ? 'auto' : +b.dataset.zoom); });
-work.addEventListener('wheel', e => {                           // Ctrl/⌘ + wheel, and pinching on a touchpad
-  if (!(e.ctrlKey || e.metaKey) || sh) return;
-  e.preventDefault();
-  const pct = Math.round(scale * 100); let z = Math.round(pct * Math.exp(-Math.max(-100, Math.min(100, e.deltaY)) * 0.0015));
-  if (z === pct) z += e.deltaY < 0 ? 1 : -1;
-  setZoom(z, {x: e.clientX, y: e.clientY});
-}, {passive: false});
+/* Zoom at the pointer: Ctrl/⌘ + mouse wheel, Ctrl/⌘ + two-finger scroll and pinching on a touchpad.
+   Windows (WebView2) and Chrome report a pinch as a wheel event with Ctrl; the Mac (WebKit) as gesture events. */
+let zoomRun = null;                  // exact (not rounded) zoom while a wheel / pinch sequence lasts
+function zoomBy(factor, at) {
+  const pct = Math.round(scale * 100);
+  if (!zoomRun || zoomRun.shown !== pct) zoomRun = {v: pct};
+  zoomRun.v = Math.max(25, Math.min(400, zoomRun.v * factor));
+  setZoom(zoomRun.v, at); zoomRun.shown = Math.round(scale * 100);
+}
+const zoomable = e => !sh && $('#home').hidden && e.target instanceof Node && work.contains(e.target);
+window.addEventListener('wheel', e => {
+  if (!(e.ctrlKey || e.metaKey) || !zoomable(e)) return;
+  e.preventDefault(); e.stopPropagation();
+  let d = e.deltaY || e.deltaX; if (e.deltaMode === 1) d *= 33; else if (e.deltaMode === 2) d *= 300;
+  if (!d) return;
+  zoomBy(Math.abs(d) >= 50 ? (d < 0 ? 1.1 : 1 / 1.1) : Math.exp(-d * 0.01), {x: e.clientX, y: e.clientY});   // a wheel notch: 10%; a touchpad: smooth
+}, {passive: false, capture: true});
+let pinch = null;
+window.addEventListener('gesturestart', e => { if (!zoomable(e)) return; e.preventDefault(); pinch = Math.round(scale * 100); }, {passive: false, capture: true});
+window.addEventListener('gesturechange', e => { if (pinch == null) return; e.preventDefault(); setZoom(pinch * (e.scale || 1), {x: e.clientX, y: e.clientY}); }, {passive: false, capture: true});
+window.addEventListener('gestureend', e => { if (pinch != null) e.preventDefault(); pinch = null; }, {passive: false, capture: true});
 $('#bExport').onclick = e => showPop('popExport', e.currentTarget);
 let titleBusy = false;
 $('#docTitle').addEventListener('keydown', async e => {
@@ -2951,8 +2965,12 @@ setCmtHidden(cmtHidden);
 $('#cmtAdd').addEventListener('mousedown', e => e.preventDefault());
 $('#cmtText').addEventListener('focus', () => { cmtSel = editing && ed && !ed.state.selection.empty ? {oid: editing, from: ed.state.selection.from, to: ed.state.selection.to} : null; });
 $('#cmtAdd').addEventListener('click', addComment);
-$('#cmtAuthor').value = lsGet('matekosprezi.author') || '';
-$('#cmtAuthor').addEventListener('change', e => { const n = e.target.value.trim().slice(0, 40); e.target.value = n; lsSet('matekosprezi.author', n); });
+/** Every reviewer has a colour of their own (from the name), shown behind the profile icon. */
+function avatarColor(name) { let h = 0; for (const ch of String(name).trim().toLowerCase()) h = (h * 31 + ch.codePointAt(0)) % 360; return `hsl(${h} 55% 45%)`; }
+const paintAvatar = () => { const a = $('#cmtAvatar'), n = $('#cmtAuthor').value.trim(); a.innerHTML = svgIcon('user'); a.style.setProperty('--c', n ? avatarColor(n) : 'var(--ink-2)'); };
+$('#cmtAuthor').value = lsGet('matekosprezi.author') || ''; paintAvatar();
+$('#cmtAuthor').addEventListener('input', paintAvatar);
+$('#cmtAuthor').addEventListener('change', e => { const n = e.target.value.trim().slice(0, 40); e.target.value = n; lsSet('matekosprezi.author', n); paintAvatar(); });
 $('#cmtAuthor').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#cmtText').focus(); } });
 $('#cmtPrev').onclick = () => stepOpenComment(-1);
 $('#cmtNext').onclick = () => stepOpenComment(1);

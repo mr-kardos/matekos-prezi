@@ -199,16 +199,7 @@ export function renderStatic(host, json, onRendered, kind = 'text') {
   }
   return pm;
 }
-/** Animation pieces of a rendered text box, in order: top-level blocks, list items one by one. */
-export function pieceEls(txt) {
-  const pm = txt.querySelector('.ProseMirror'); if (!pm) return [];
-  const out = [];
-  for (const b of pm.children) {
-    if (b.matches('ul, ol')) out.push(...[...b.children].filter(c => c.tagName === 'LI'));
-    else if (!b.matches('.ProseMirror-gapcursor, img.ProseMirror-separator')) out.push(b);
-  }
-  return out;
-}
+export { pieceEls } from './parts.js';
 export function mathPending(root) { return !!root.querySelector('.math .mpending:not(.merr)'); }
 
 /** Live editor inside a text box. */

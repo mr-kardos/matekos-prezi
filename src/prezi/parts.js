@@ -10,7 +10,17 @@
 // PowerPoint timing) and the rendered formula, where an invisible zero-width marker is put at every place
 // (\class{mpb}{\kern0pt} – it does not change the layout). In the rendered SVG everything after the n-th marker
 // belongs to piece n, so the counts can never disagree.
-import { pieceEls } from './textview.js';
+
+/** Animation pieces of a rendered text box, in order: top-level blocks, list items one by one. */
+export function pieceEls(txt) {
+  const pm = txt.querySelector('.ProseMirror'); if (!pm) return [];
+  const out = [];
+  for (const b of pm.children) {
+    if (b.matches('ul, ol')) out.push(...[...b.children].filter(c => c.tagName === 'LI'));
+    else if (!b.matches('.ProseMirror-gapcursor, img.ProseMirror-separator')) out.push(b);
+  }
+  return out;
+}
 
 export const PART_MARK = '\\class{mpb}{\\kern0pt}';
 const ARROWS = new Set(['Rightarrow', 'implies', 'Longrightarrow', 'Leftrightarrow', 'iff', 'Longleftrightarrow', 'Leftarrow', 'impliedby', 'Longleftarrow']);

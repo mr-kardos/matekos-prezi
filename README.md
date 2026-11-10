@@ -1,4 +1,4 @@
-# Matekos Prezi 1.4.8
+# Matekos Prezi 1.4.9
 
 Presentation editor with live inline TeX, the twin of **Matekos Doksi**. Built with **TipTap**
 (text editor), **MathJax 4** (formulas), **MathLive** (visual formula editor) and **Tauri 2**
@@ -111,6 +111,9 @@ Browser test version: `npm run build:web` → one self-contained `dist-web/index
   `\iff`, …). Exported to PowerPoint / PDF as one picture per part with the chosen effect; the in-app preview
   fades the parts in. Slideshow: Home / End jump to the first / last slide, a number + Enter to that slide.
   Slide thumbnails are redrawn only when their slide changed.
+* 1.4.9: zooming with Ctrl/⌘ + two-finger scroll and with a touchpad pinch (Windows and Mac); a profile icon in the
+  reviewer's own colour before the names in the comments. Automated tests (`npm test`, in `tests/`): where formulas
+  are cut into parts and that the markers do not change their layout, animation order, automatic drafts and recovery.
 
 ## Export
 

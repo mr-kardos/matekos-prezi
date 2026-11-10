@@ -1,12 +1,13 @@
 {
   "name": "matekos-prezi",
   "private": true,
-  "version": "1.4.8",
+  "version": "1.4.9",
   "type": "module",
   "scripts": {
     "dev": "node scripts/copy-mathjax.mjs && vite",
     "build": "node scripts/copy-mathjax.mjs && vite build",
     "build:web": "vite build --mode web",
+    "test": "node --test",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -44,6 +45,8 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.11.5",
+    "fake-indexeddb": "6.2.8",
+    "jsdom": "31.0.0",
     "vite": "7.3.6",
     "vite-plugin-singlefile": "2.3.3"
   }
