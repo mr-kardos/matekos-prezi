@@ -91,6 +91,15 @@ export const ICONS = {
   xmark: '<path d="M6 6l12 12M18 6 6 18"/>',
   panelL: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
   spell: '<path d="M4 15 7.5 5 11 15M5.3 11.5h4.4"/><path d="m13 15 2.5 3L21 11"/>',
+  cut: '<circle cx="6" cy="17" r="2.6"/><circle cx="18" cy="17" r="2.6"/><path d="M7.9 15.2 17 4M16.1 15.2 7 4"/>',
+  paste: '<rect x="5" y="4.5" width="14" height="16" rx="2"/><path d="M9 4.5V3h6v1.5M9 10h6M9 14h4"/>',
+  selAll: '<rect x="4" y="4" width="16" height="16" rx="1.5" stroke-dasharray="3 2"/><path d="M8 9h8M8 12h8M8 15h5"/>',
+  fileNew: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M12 11v6M9 14h6"/>',
+  folderOpen: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1"/><path d="M3 7v11a1 1 0 0 0 1 1h14.5a1 1 0 0 0 1-.8L21.5 11a1 1 0 0 0-1-1H7.2a1 1 0 0 0-1 .8L4 19"/>',
+  fileImport: '<path d="M8 3h7l4 4v14H8"/><path d="M15 3v4h4M3 14h9M9 11l3 3-3 3"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>',
+  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+  home: '<path d="M3.5 11 12 4l8.5 7"/><path d="M6 9.5V20h4.5v-6h3v6H18V9.5"/>',
   eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>'
 };

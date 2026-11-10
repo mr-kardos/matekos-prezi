@@ -14,7 +14,8 @@ import { W, H, uid, clone, emptyDoc, textDoc, tableDoc, T, M, isEmptyText, block
   defaultMaster, defaultTemplates, newSlide as makeSlide, syncPlaceholders as syncPh, migrate,
   flatObjects, findObject, parentGroup, bounds, fitGroup, moveObject, scaleFrom } from './model.js';
 import { renderStatic, pieceEls, mountEditor, setTextHooks, mathPending } from './textview.js';
-import { drawMarks } from '../marks.js';
+import { drawMarks, setCellFilter } from '../marks.js';
+import { checkForUpdate, openLink, APP_VERSION } from '../updates.js';
 import { loadSpell, wordOk, spellReady, suggestions, addToDictionary, ignoreWord, WORD } from '../spell.js';
 import { buildPptx, buildPdf, slideCanvas, setMediaLookup } from './export.js';
 import { PRESETS, PRESET_ORDER, presetFile } from './presets.js';
@@ -645,7 +646,8 @@ function renderThumbs() {
   renderThumbs.mode = mode;
 }
 function renderSlideList() {
-  slidesNav.innerHTML = '<div class="plist" id="plist"></div>';
+  slidesNav.innerHTML = `<div class="phead2 lhead"><b>Diák</b><button class="tb" id="slidesX" title="Bal oldali panel bezárása">${svgIcon('panelL')}</button></div><div class="plist" id="plist"></div>`;
+  $('#slidesX').onclick = () => slidesVisible(false);
   const list = $('#plist');
   doc.slides.forEach((s, i) => {
     const t = thumbFrame(i + 1, i === cur ? 'cur' : ''); t.draggable = true; t.dataset.i = i;
@@ -695,7 +697,7 @@ $('#popNewSlide').onopen = () => {
 $('#lgalNew').addEventListener('click', e => { const b = e.target.closest('[data-k]'); if (!b) return; closePops(); if (editing) exitEdit();
   doc.slides.splice(cur + 1, 0, newSlide(b.dataset.k)); cur++; setSel([]); commit(); });
 function renderTemplateList() {
-  slidesNav.innerHTML = `<div class="plist"><div class="tplbar"><b>Sablonszerkesztő</b><button class="btn primary" id="tClose">Sablonszerkesztő bezárása</button></div>
+  slidesNav.innerHTML = `<div class="phead2 lhead"><b>Sablonszerkesztő</b><button class="tb" id="slidesX" title="Bal oldali panel bezárása">${svgIcon('panelL')}</button></div><div class="plist"><div class="tplbar"><button class="btn primary" id="tClose">Sablonszerkesztő bezárása</button></div>
     <div class="phint" style="margin:0 0 10px">A mester elemei minden elrendezésen megjelennek. Az elrendezésekből készülnek az új diák.</div><div id="tlist"></div></div>`;
   const list = $('#tlist');
   const m = thumbFrame('<span class="tname">Mester</span>', 'master' + (tcur === 'master' ? ' cur' : ''));
@@ -722,6 +724,7 @@ function renderTemplateList() {
   });
   if (tcur === 'master') { const a = document.createElement('div'); a.className = 'slide-actions'; a.innerHTML = `<button class="tb" id="lAdd" title="Új diatípus a sablonba">${svgIcon('plus')}<span>Új dia</span></button>`; list.appendChild(a); }
   $('#tClose').onclick = closeTemplateBuilder;
+  $('#slidesX').onclick = () => slidesVisible(false);
   $('#lAdd').onclick = () => { if (editing) exitEdit(); const k = 'l' + uid(); doc.templates[k] = {name: 'Új dia', ownBg: false, background: null, bgColor: '#ffffff', showMaster: true,
     objects: [ph('title', 60, 40, 1160, 33, '#2f5d8a', true, 'left', TITLE_PROMPT)]}; tcur = k; setSel([]); commit(); };
   $('#lDup') && ($('#lDup').onclick = () => { if (editing) exitEdit(); const k = 'l' + uid(), c = clone(doc.templates[tcur]); c.name += ' (másolat)'; c.objects.forEach(o => o.id = uid());
@@ -1448,7 +1451,6 @@ const slider = (id, label, v, min, max, step = 1, dis = '') => `<div class="sl">
 function panelVisible(v) { mainEl.classList.toggle('noprops', !v); document.body.classList.toggle('noprops-on', !v); lsSet(LS.panel, v ? '1' : '0'); fitStage(); }
 $('#panelOpen').onclick = () => panelVisible(true);
 function slidesVisible(v) { mainEl.classList.toggle('noslides', !v); lsSet('matekosprezi.slides', v ? '1' : '0'); fitStage(); drawComments(); }
-$('#slidesX').onclick = () => slidesVisible(false);
 $('#slidesOpen').onclick = () => slidesVisible(true);
 if (lsGet('matekosprezi.slides') === '0') mainEl.classList.add('noslides');
 let secState = {}; try { secState = JSON.parse(lsGet(LS.sections) || '{}'); } catch (e) { secState = {}; }
@@ -1905,6 +1907,7 @@ $('#sizeIn').addEventListener('change', e => setSize(e.target.value));
 $('#sizeIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); setSize(e.target.value); } });
 
 function updateRibbon() {
+  drawMarksSoon();
   const o = selObj(), edit = inEdit();
   for (const b of $$('[data-k]', ribbon)) {
     const k = b.dataset.k; b.disabled = k === 'any' ? !selIds.length : k === 'text' ? !isTextLike(o) || !!o.locked : !isShape(o) || !!o.locked;
@@ -1952,6 +1955,9 @@ function showPop(id, anchor) {
   p.style.top = top + 'px';
   openPop = p; openAnchor = anchor;
 }
+/* a popup that grows while open (e.g. the transition options) stays inside the window */
+const popRO = new ResizeObserver(es => { for (const en of es) { const p = en.target; if (p.hidden) continue; const r = p.getBoundingClientRect(); if (r.bottom > innerHeight - 8) p.style.top = Math.max(8, innerHeight - r.height - 8) + 'px'; if (r.right > innerWidth - 8) p.style.left = Math.max(8, innerWidth - r.width - 8) + 'px'; } });
+for (const p of $$('.pop')) popRO.observe(p);
 function closePops() { if (openPop) { const p_ = openPop; openPop.hidden = true; openPop = null; openAnchor = null; tblCtx = null; p_.onclose?.(); } }
 document.addEventListener('pointerdown', e => { if (openPop && !openPop.contains(e.target) && !(openAnchor && openAnchor.contains(e.target))) closePops(); }, true);
 for (const p of $$('.pop')) p.addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
@@ -2556,7 +2562,7 @@ let sessionOpen = false;            // a presentation was opened / created / con
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
   try { localStorage.setItem('matekosprezi.theme', t); } catch (e) { /* ignore */ }
-  $('#fTheme').textContent = t === 'dark' ? '☀  Világos mód' : '☾  Sötét mód';   // as in Matekos Doksi
+  $('#fTheme').innerHTML = `<span class="cico">${svgIcon(t === 'dark' ? 'sun' : 'moon')}</span><span class="clbl">${t === 'dark' ? 'Világos mód' : 'Sötét mód'}</span>`;
   if (isTauri()) import('@tauri-apps/api/window').then(m => m.getCurrentWindow().setTheme(t)).catch(() => {});
 }
 applyTheme(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
@@ -2829,6 +2835,15 @@ $('#popSpell').addEventListener('click', e => {
 
 /* eye mode: formatting marks (as in Matekos Doksi), plus objects that would jump at the change of slides */
 let showMarks = lsGet('matekosprezi.marks') === '1', eyeRaf = 0;
+// in an edited table: the paragraph formats of the column the cursor is in
+setCellFilter(td => {
+  if (!editing || !ed || !ed.isActive('table')) return false;
+  const {$from} = ed.state.selection;
+  for (let d = $from.depth; d > 0; d--) if (/^table(Cell|Header)$/.test($from.node(d).type.name)) {
+    const dom = ed.view.nodeDOM($from.before(d)); return !!dom && td.cellIndex === dom.cellIndex && td.closest('table') === dom.closest('table');
+  }
+  return false;
+});
 function drawMarksSoon() { if (eyeRaf) return; eyeRaf = requestAnimationFrame(() => { eyeRaf = 0; drawEye(); }); }
 const sigOf = o => o.type + '|' + (o.placeholder || '') + '|' + (o.type === 'text' || o.type === 'table' ? JSON.stringify(o.doc) + (o.field || '')
   : o.type === 'image' || o.type === 'video' ? o.media : o.type === 'shape' ? [o.shape, o.fill, o.stroke, o.strokeWidth].join() : o.type === 'group' ? o.children.map(sigOf).join(';') : '');
@@ -2857,6 +2872,14 @@ function drawEye() {
 
 /* the app's own right-click menu (the system / web view menu is switched off) */
 let ctxActions = [];
+/** The icon in front of a menu item (by its text). */
+const CTX_ICONS = [[/^Kivágás/, 'cut'], [/^Beillesztés/, 'paste'], [/^Mindent/, 'selAll'], [/^TeX-kód/, 'copy'], [/másolás|^Másolás/i, 'copy'], [/kettőzés/i, 'copy'],
+  [/^Megjegyzés/, 'comment'], [/^Bekezdés/, 'para'], [/^Tabulátor/, 'tabstop'], [/^Formátummásoló/, 'painter'], [/^Szint beljebb/, 'indent'], [/^Szint kijjebb/, 'outdent'],
+  [/Számozás|Kezdő szám/, 'num'], [/beszúrása/, 'tblAdd'], [/^(Sor|Oszlop) törlése/, 'tblDel'], [/egyesítése/, 'merge'], [/törlése$|^Törlés/, 'trash'],
+  [/^Előtérbe/, 'arrFront'], [/^Előrébb/, 'arrForward'], [/^Hátrébb/, 'arrBackward'], [/^Háttérbe/, 'arrBack'], [/^Csoportosítás/, 'group'], [/^Csoport bontása/, 'ungroup'],
+  [/^Zárolás/, 'lock'], [/^Feloldás/, 'unlock'], [/^Szöveg szerkesztése/, 'textbox'], [/^Igazítás/, 'move'], [/^Szerkesztés/, 'sigma'], [/Sortörés|Egy sorban/, 'wrapL'],
+  [/^Új dia/, 'plus'], [/^Sablonszerkesztő/, 'master']];
+const ctxIcon = label => (CTX_ICONS.find(([re]) => re.test(label)) || [0, 'para'])[1];
 function duplicateSel() {
   const o = selObj(); if (!o) return;
   const c = clone(o); const re = q => { q.id = uid(); delete q.cmt; if (q.children) q.children.forEach(re); }; re(c);
@@ -2975,7 +2998,7 @@ document.addEventListener('contextmenu', e => {
   const items = ctxItems(e, t); if (!items.length) return;
   ctxActions = items;
   const m = $('#ctxMenu');
-  m.innerHTML = items.map((it, i) => it.sep ? (it.title ? `<div class="psep"></div><div class="ctitle">${it.title}</div>` : '<div class="psep"></div>') : `<button class="pitem" data-ci="${i}"${it.on ? '' : ' disabled'}><span>${it.label}</span><span class="phint">${it.hint || ''}</span></button>`).join('').replace(/^<div class="psep"><\/div>/, '');
+  m.innerHTML = items.map((it, i) => it.sep ? (it.title ? `<div class="psep"></div><div class="ctitle">${it.title}</div>` : '<div class="psep"></div>') : `<button class="pitem" data-ci="${i}"${it.on ? '' : ' disabled'}><span class="cico">${svgIcon(ctxIcon(it.label))}</span><span class="clbl">${it.label}</span><span class="phint">${it.hint || ''}</span></button>`).join('').replace(/^<div class="psep"><\/div>/, '');
   closePops(); m.hidden = false;
   m.style.left = Math.min(e.clientX, innerWidth - m.offsetWidth - 6) + 'px'; m.style.top = Math.min(e.clientY, innerHeight - m.offsetHeight - 6) + 'px';
   openPop = m; openAnchor = null;
@@ -2983,6 +3006,17 @@ document.addEventListener('contextmenu', e => {
 $('#ctxMenu').addEventListener('mousedown', e => e.preventDefault());
 $('#ctxMenu').addEventListener('click', e => { const b = e.target.closest('[data-ci]'); if (!b) return; const it = ctxActions[+b.dataset.ci]; closePops(); it?.fn?.(); });
 
+/* "a new version is out": checked once at start-up (see src/updates.js and update.json) */
+async function runUpdateCheck(url) {
+  const u = await checkForUpdate(url); if (!u) return false;
+  $('#updVer').textContent = u.version + ` (most: ${APP_VERSION})`;
+  $('#updMsg').innerHTML = esc(u.message || '').replace(/\n/g, '<br>');
+  $('#updBox').hidden = false;
+  $('#updLater').onclick = () => { $('#updBox').hidden = true; };
+  $('#updGo').onclick = () => { $('#updBox').hidden = true; if (u.url) openLink(u.url); };
+  return true;
+}
+setTimeout(() => runUpdateCheck(), 2500);
 /* ================================================================== find & replace */
 let findPos = -1;
 function findRegex() { const q = $('#findIn').value; if (!q) return null; return new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $('#findCase').checked ? 'g' : 'gi'); }
@@ -3164,6 +3198,6 @@ addEventListener('beforeunload', e => { if (dirty && !isTauri()) e.preventDefaul
 
 // hooks for automated tests
 setMediaLookup(k => media[k]);
-window.mprezi = {insertVideo: (data, name) => insertVideo({data, name}), dbgRender: (o, cb) => renderForImport(o, cb), importBuffer: (data, name) => importPowerPoint({data, name}), snapshotTest: async () => { const c = await slideCanvas(doc, tgt(), renderSlide, layoutOf); return [...c.getContext('2d').getImageData(640, 5, 1, 1).data]; }, get doc() { return doc; }, get media() { return media; }, get editor() { return ed; }, get sel() { return sel; }, set sel(v) { select(v); }, get selIds() { return selIds; }, setSel: ids => { setSel(ids); drawSelection(); renderProps(); updateRibbon(); }, groupSelected, ungroupSelected, addShape, addTable, toggleLock,
+window.mprezi = {runUpdateCheck, insertVideo: (data, name) => insertVideo({data, name}), dbgRender: (o, cb) => renderForImport(o, cb), importBuffer: (data, name) => importPowerPoint({data, name}), snapshotTest: async () => { const c = await slideCanvas(doc, tgt(), renderSlide, layoutOf); return [...c.getContext('2d').getImageData(640, 5, 1, 1).data]; }, get doc() { return doc; }, get media() { return media; }, get editor() { return ed; }, get sel() { return sel; }, set sel(v) { select(v); }, get selIds() { return selIds; }, setSel: ids => { setSel(ids); drawSelection(); renderProps(); updateRibbon(); }, groupSelected, ungroupSelected, addShape, addTable, toggleLock,
   gotoSlide, enterEdit, exitEdit, commit, renderAll, buildPptx: () => buildPptx(doc, renderSlide, layoutOf, () => {}),
   buildPdf: m => buildPdf(doc, renderSlide, layoutOf, m, () => {}), renderSlide, packMprezi, unpackMprezi, loadDocument, Anim};

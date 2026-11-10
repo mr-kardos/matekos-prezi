@@ -78,6 +78,7 @@
 .txt{ padding:8px; line-height:1.25; outline:none; white-space:pre-wrap; overflow-wrap:break-word; cursor:default; caret-color:#111; }
 .txt p{ margin:0 0 .4em; }
 .txt p:last-child{ margin-bottom:0; }
+.txt li > p{ margin-bottom:0; }        /* list items: the same gap between every item and level */
 .txt .m{ display:inline-block; white-space:nowrap; }
 .txt[contenteditable="true"]{ cursor:text; }
 .txt[contenteditable="true"] .m{ cursor:pointer; border-radius:2px; }
@@ -525,7 +526,8 @@ body.painting #stage, body.painting #stage *{ cursor:copy !important; }
 #popSave{ width:240px; }
 /* ---------- 1.1 ---------- */
 /* formula editor: long formulas scroll sideways (dark scroll bar), letters fit the box height */
-.md-fwrap{ border:1.5px solid var(--accent); border-radius:10px; background:var(--chrome-2); overflow:hidden; }
+.md-fwrap{ border:1.5px solid var(--accent); border-radius:10px; background:#fff; overflow:hidden; }
+.md-fwrap #mdField{ background:#fff; color:#111; }
 .md-fscroll{ height:100%; overflow-x:auto; overflow-y:hidden; }
 .md-fwrap #mdField{ border:0; border-radius:0; width:max-content; min-width:100%; height:100%; display:flex; align-items:center; }
 .md-wrapchk{ font-size:12.5px; color:var(--ink-2); display:inline-flex; align-items:center; gap:6px; }
@@ -753,3 +755,24 @@ span.tab .tab-sp{ display:inline-block; height:1px; }
 .slide-actions{ flex-wrap:wrap; }
 /* the close button of the left panel: bottom corner, never over a slide */
 .slidesx{ top:auto; bottom:10px; }
+/* ---------- 1.4.2 ---------- */
+.cfm-card.upd{ max-width:420px; }
+.cfm-card.upd .updhead{ font-weight:600; margin-bottom:6px; }
+.cfm-card.upd .updmsg{ color:var(--ink-2); line-height:1.45; margin-bottom:14px; }
+.pop{ max-height:calc(100vh - 16px); overflow-y:auto; }
+/* the options under the selected slide: exactly as wide as the slide */
+.slide-actions{ box-sizing:border-box; width:calc(var(--tk) * 1280px); max-width:none; margin-left:22px; flex-wrap:wrap; justify-content:space-between; }
+/* left panel header (as on the right) */
+#slides{ display:flex; flex-direction:column; }
+.lhead{ flex:none; }
+.lhead .tb svg{ width:18px; height:18px; }
+.main.tplmode .lhead{ background:transparent; }
+.ctxmenu{ width:270px; }
+.ctxmenu .pitem{ justify-content:flex-start; align-items:center; }
+.ctxmenu .pitem .cico{ display:inline-flex; width:18px; flex:none; color:var(--ink-2); }
+.ctxmenu .pitem .cico svg{ width:16px; height:16px; }
+.ctxmenu .pitem .clbl{ flex:1; }
+/* file menu: icons in front, like the right-click menu */
+#popFile .mitem{ display:flex; justify-content:flex-start; align-items:center; gap:10px; }
+#popFile .mitem .cico{ display:inline-flex; width:18px; flex:none; color:var(--ink-2); }
+#popFile .mitem .cico svg{ width:16px; height:16px; }

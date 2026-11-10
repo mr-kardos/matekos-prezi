@@ -32,8 +32,6 @@
   <div class="ribbon" id="ribbon">
     <div class="grp">
       <button class="tb" data-cmd="painter" data-icon="painter" title="Formátummásoló: a kijelölt objektum formázását (szöveg, kitöltés, körvonal, animációk) átviszi a következőre, amelyre kattintasz. Esc: mégse"></button>
-    </div>
-    <div class="grp">
       <button class="tb fontbtn" data-pop="popFont" data-k="text" title="Betűtípus – szerkesztés közben a kijelölt szövegre, egyébként az egész dobozra"><span id="fontLabel">Betűtípus</span></button>
       <span class="sizebox"><input id="sizeIn" class="sel size" inputmode="decimal" title="Betűméret (pt)" aria-label="Betűméret" value="24"><button class="tb mini sizedd" data-pop="popSize" data-k="text" data-icon="chev" title="Betűméretek"></button></span>
     </div>
@@ -156,7 +154,6 @@
     </section>
   </aside>
   <button class="tb panelopen" id="panelOpen" data-icon="panel" title="Jobb oldali panel megnyitása"></button>
-  <button class="tb slidesx" id="slidesX" data-icon="panelL" title="Bal oldali panel bezárása"></button>
   <button class="tb slidesopen" id="slidesOpen" data-icon="panelL" title="Bal oldali panel megnyitása"></button>
 </div>
 
@@ -251,6 +248,8 @@
 </div>
 <div class="pop" id="popSpell" hidden><div class="ptitle">Helyesírás: <span id="spellWord"></span></div><div id="spellList"></div><div class="psep"></div><button class="pitem" id="spellAdd">Hozzáadás a szótárhoz</button><button class="pitem" id="spellIgnore">Kihagyás ebben a munkamenetben</button></div>
 <div class="pop ctxmenu" id="ctxMenu" hidden></div>
+<div class="cfm" id="updBox" hidden role="dialog" aria-modal="true"><div class="cfm-card upd"><p class="updhead">Új verzió érhető el: <b id="updVer"></b></p><p class="updmsg" id="updMsg"></p>
+  <div class="cfm-btns"><button class="btn" id="updLater">Később</button><button class="btn primary" id="updGo">Letöltés</button></div></div></div>
 <div class="pop" id="popFind" hidden>
   <div class="ptitle">Keresés és csere</div>
   <div class="frow"><input id="findIn" type="text" placeholder="Keresett szöveg" spellcheck="false"></div>
@@ -290,12 +289,12 @@
 
 </div>
 <div class="pop" id="popFile" hidden>
-  <button class="pitem" id="fNew">Új bemutató</button>
-  <button class="pitem" id="fOpen">Megnyitás…</button>
-  <button class="pitem" id="fImport">PowerPoint importálása (.pptx)…</button>
+  <button class="pitem mitem" id="fNew"><span class="cico" data-icon="fileNew"></span><span class="clbl">Új bemutató</span></button>
+  <button class="pitem mitem" id="fOpen"><span class="cico" data-icon="folderOpen"></span><span class="clbl">Megnyitás…</span></button>
+  <button class="pitem mitem" id="fImport"><span class="cico" data-icon="fileImport"></span><span class="clbl">PowerPoint importálása (.pptx)…</span></button>
   <div class="psep"></div>
-  <button class="pitem" id="fTheme"></button>
-  <button class="pitem" id="fHome">Kezdőképernyő</button>
+  <button class="pitem mitem" id="fTheme"></button>
+  <button class="pitem mitem" id="fHome"><span class="cico" data-icon="home"></span><span class="clbl">Kezdőképernyő</span></button>
 </div>
 <div class="pop" id="popExport" hidden>
   <button class="pitem" id="expPptx2">PowerPoint-bemutató (.pptx) – animációkkal</button>
@@ -326,7 +325,7 @@
   <div class="home-card">
     <img class="home-logo-img" src="/app-icon.png" alt="" width="84" height="84">
     <h1>Matekos Prezi</h1>
-    <p class="home-sub home-ver">v1.4.1</p>
+    <p class="home-sub home-ver">v1.4.2</p>
     <div class="home-btns">
       <button class="hbtn primary" id="homeNew"><span class="hico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span>Új bemutató</button>
       <button class="hbtn" id="homeOpen"><span class="hico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 10h18"/></svg></span>Meglévő megnyitása</button>

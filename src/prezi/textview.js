@@ -11,7 +11,7 @@ import Highlight from '@tiptap/extension-highlight';
 import Subscript from '@tiptap/extension-subscript';
 import Superscript from '@tiptap/extension-superscript';
 import { ListItem } from '@tiptap/extension-list';
-import { ParaFormat, KvBulletList, KvOrderedList, ListMarkers, KvTable, KvTableRow, KvTableCell, KvTableHeader, MathNode, ListItemAttrs, ListJoin, CommentMark, TabNode, ordinal, listDefaults } from '../editor/extensions.js';
+import { ParaFormat, KvBulletList, KvOrderedList, ListMarkers, KvTable, KvTableRow, KvTableCell, KvTableHeader, MathNode, ListItemAttrs, ListJoin, CommentMark, TabNode, MathCaret, ordinal, listDefaults } from '../editor/extensions.js';
 import { layoutTabs } from '../tabs.js';
 import { renderInto, mathStyleOf } from '../math.js';
 import { emptyDoc } from './model.js';
@@ -120,7 +120,7 @@ function extensions(kind = 'text') {
       ...(table ? {document: false} : {})
     }),
     ...(table ? [Document.extend({content: 'table'}), KvTable, KvTableRow, KvTableHeader, KvTableCell] : []),
-    ListItem, KvBulletList, KvOrderedList, ListMarkers, ListItemAttrs, ListJoin, CommentMark, TabNode.configure({getScale: () => hooks.getScale?.() || 1}),
+    ListItem, KvBulletList, KvOrderedList, ListMarkers, ListItemAttrs, ListJoin, CommentMark, TabNode.configure({getScale: () => hooks.getScale?.() || 1}), MathCaret,
     TextStyle, Color, FontSize, FontFamily, LetterSpacing, TextCase, InlineMathOnly, ListHang,
     Highlight.configure({multicolor: true}),
     TextAlign.configure({types: table ? ['paragraph'] : ['heading', 'paragraph']}),

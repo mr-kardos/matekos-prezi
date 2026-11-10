@@ -8,7 +8,7 @@ You only do this once per new version.
 2. Click **+** (top right) → **New repository**. Name it `matekos-prezi`.
    Choose **Public** (then your peers can download without an account), and click **Create repository**.
 3. On the next page click **uploading an existing file**.
-4. Unzip `matekos-prezi-1.4.1-source.zip`, open the `matekos-prezi` folder, select **everything inside it**
+4. Unzip `matekos-prezi-1.4.2-source.zip`, open the `matekos-prezi` folder, select **everything inside it**
    and drag it into the browser window. Wait until all files are listed, then click **Commit changes**.
 
 ## 2. Add the build recipe
@@ -25,8 +25,8 @@ Folders starting with a dot are often hidden, so add this one by hand:
 
 ## 4. Share
 Open **Releases** (right side of the repository's main page). The newest release has:
-* `Matekos.Prezi_1.4.1_x64-setup.exe` – Windows installer wizard
-* `Matekos.Prezi_1.4.1_universal.dmg` – Mac (Apple Silicon and Intel)
+* `Matekos.Prezi_1.4.2_x64-setup.exe` – Windows installer wizard
+* `Matekos.Prezi_1.4.2_universal.dmg` – Mac (Apple Silicon and Intel)
 
 Send your peers the link to that Releases page. The installation steps are written there in Hungarian and English.
 
@@ -37,3 +37,16 @@ Change `"version"` in `src-tauri/tauri.conf.json` (e.g. to `0.1.1`), upload the 
 The app is not yet "signed", so Windows and macOS show a one-time warning on first launch.
 That's normal for small projects. To remove it you need a code-signing certificate
 (Apple Developer Program: 99 USD/year; Windows: a code-signing certificate from a provider).
+
+
+## Telling users about a new version
+
+`update.json` (in the repository root) is read by the app at start-up. When its `version` is newer than the
+installed app, a window shows `message` with a "Letöltés" button that opens `url`.
+
+1. Once: in `src/updates.js` replace `FELHASZNALONEV` in `UPDATE_URL` with your GitHub user name (and the
+   repository name if it is not `matekos-prezi`). Do the same in `update.json` (`url`). Until then the app does
+   not check anything.
+2. For every new release: after the release is published, edit `update.json` on GitHub – set `version` to the new
+   version number and write the `message` (use `\n` for a new line). Commit. That's all; users see it the next
+   time they open the app.

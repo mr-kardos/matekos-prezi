@@ -10,18 +10,20 @@ export function drawMarks(layer, editorDom, stackEl, scale, styles = null, famLa
   const sr = stackEl.getBoundingClientRect();
   const X = v => (v - sr.left) / scale, Y = v => (v - sr.top) / scale;
   const out = [];
-  const put = (cls, x, y, txt, extra = '') => out.push(`<span class="mk-${cls}" style="left:${x.toFixed(1)}px;top:${y.toFixed(1)}px;${extra}">${txt}</span>`);
+  // the marks grow with the text they belong to (fs: the text's font size in px)
+  const put = (cls, x, y, txt, extra = '', fs = 0) => out.push(`<span class="mk-${cls}" style="left:${x.toFixed(1)}px;top:${y.toFixed(1)}px;${fs ? `font-size:${(fs * ({sp: 1.15, nb: 1.15, par: 1, br: 1, tab: .85}[cls] || 1)).toFixed(1)}px;` : ''}${extra}">${txt}</span>`);
+  const fsOf = el => parseFloat(getComputedStyle(el).fontSize) || 16;
   const range = document.createRange();
   // spaces
   const tw = document.createTreeWalker(editorDom, NodeFilter.SHOW_TEXT, { acceptNode: t => t.parentElement && t.parentElement.closest(SKIP) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
   while (tw.nextNode()) {
-    const n = tw.currentNode, d = n.data;
+    const n = tw.currentNode, d = n.data; let nfs = 0;
     for (let i = 0; i < d.length; i++) {
       const c = d[i];
       if (c !== ' ' && c !== '\u00a0') continue;
       range.setStart(n, i); range.setEnd(n, i + 1);
       const r = range.getBoundingClientRect(); if (!r.width && !r.height) continue;
-      put(c === ' ' ? 'sp' : 'nb', X(r.left + r.width / 2), Y(r.top + r.height / 2), c === ' ' ? '·' : '°');
+      put(c === ' ' ? 'sp' : 'nb', X(r.left + r.width / 2), Y(r.top + r.height / 2), c === ' ' ? '·' : '°', '', nfs ||= fsOf(n.parentElement));
     }
   }
   // tabs: "tab" and where they end (cm from the left margin)
@@ -29,7 +31,7 @@ export function drawMarks(layer, editorDom, stackEl, scale, styles = null, famLa
   for (const t of editorDom.querySelectorAll('span.tab')) {
     const r = t.getBoundingClientRect(), h = parseFloat(getComputedStyle(t.parentElement).fontSize) || 16;
     const end = t.dataset.stop ? String(+t.dataset.stop).replace('.', ',') : cm((r.right - col.left) / scale);
-    put('tab', X(r.left), Y(r.bottom) - h * 0.45, `<s>tab</s><b>${end}</b>`, `width:${Math.max(18, r.width / scale)}px`);
+    put('tab', X(r.left), Y(r.bottom) - h * 0.45, `<s>tab</s><b>${end}</b>`, `width:${Math.max(18, r.width / scale)}px;`, h);
   }
   // table cells with hidden borders: dashed lines
   for (const c of editorDom.querySelectorAll('td,th')) {
@@ -49,7 +51,7 @@ export function drawMarks(layer, editorDom, stackEl, scale, styles = null, famLa
     const prev = br.previousSibling;
     if (prev && prev.nodeType === 3 && prev.data.length) { range.setStart(prev, prev.data.length - 1); range.setEnd(prev, prev.data.length); const q = range.getClientRects(); r = q[q.length - 1]; if (r) r = { left: r.right, top: r.top, height: r.height }; }
     if (!r) { const q = br.getClientRects()[0] || br.getBoundingClientRect(); r = { left: q.left, top: q.top, height: q.height || 16 }; }
-    put('br', X(r.left) + 1, Y(r.top + r.height / 2), '↵');
+    put('br', X(r.left) + 1, Y(r.top + r.height / 2), '↵', '', fsOf(br.parentElement));
   }
   for (const b of editorDom.querySelectorAll('p,h1,h2,h3')) {
     if (b.closest('.hf')) continue;
@@ -58,9 +60,15 @@ export function drawMarks(layer, editorDom, stackEl, scale, styles = null, famLa
     const rects = Array.from(range.getClientRects()).filter(q => q.width > 0 || q.height > 0);
     const last = rects[rects.length - 1], br = b.getBoundingClientRect(), cs = getComputedStyle(b);
     let x, y;
-    if (last && b.textContent.length) { x = X(last.right) + 1; y = Y(last.top + last.height / 2); }
+    // a formula at the end of the paragraph: the sign goes after it (its picture is not part of the text rects)
+    let lastKid = b.lastChild;
+    while (lastKid && ((lastKid.nodeType === 3 && !lastKid.data.length) || (lastKid.nodeType === 1 && (lastKid.matches('br.ProseMirror-trailingBreak, img.ProseMirror-separator, .math-caret') || (lastKid.matches('br') && false))))) lastKid = lastKid.previousSibling;
+    const mathEnd = lastKid && lastKid.nodeType === 1 && (lastKid.matches('.math') ? lastKid : null);
+    const msvg = mathEnd ? [...mathEnd.querySelectorAll('svg')].pop() : null;
+    if (msvg) { const q = msvg.getBoundingClientRect(); x = X(q.right) + 1; y = Y(q.top + q.height / 2); }
+    else if (last && b.textContent.length) { x = X(last.right) + 1; y = Y(last.top + last.height / 2); }
     else { x = X(br.left + (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.textIndent) || 0)); y = Y(br.top + (parseFloat(cs.paddingTop) || 0)) + (parseFloat(cs.lineHeight) || 20) / 2; }
-    put('par', x, y, '¶');
+    put('par', x, y, '¶', '', parseFloat(cs.fontSize) || 16);
     // in a table: indents and spacing only in the column being worked in (otherwise they would cover the table)
     const cellEl = b.closest('td,th');
     if (cellEl && !(cellFilter && cellFilter(cellEl))) continue;

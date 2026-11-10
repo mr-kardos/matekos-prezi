@@ -966,3 +966,62 @@ export const ListJoin = Extension.create({
     })];
   }
 });
+
+/* ---------- formulas: the cursor goes before / after them, and a drag can select a formula at the end of a line --- */
+function mathEdgePos(view, el, x) {
+  let pos; try { pos = view.posAtDOM(el, 0); } catch (e) { return null; }
+  const n = view.state.doc.nodeAt(pos); if (!n || n.type.name !== 'math') return null;
+  const r = el.getBoundingClientRect(), f = (x - r.left) / (r.width || 1);
+  return {pos, node: n, before: pos, after: pos + n.nodeSize, side: f < 0.3 ? 'before' : f > 0.7 ? 'after' : 'mid', center: r.left + r.width / 2};
+}
+/** The formula a point is on or just to the right of (on the same line, past the end of the text). */
+function mathNear(view, x, y) {
+  const el = document.elementFromPoint(x, y)?.closest?.('.math');
+  if (el && view.dom.contains(el)) return {el, over: true};
+  const block = document.elementFromPoint(x, y)?.closest?.('p, h1, h2, h3, li');
+  const scope = block && view.dom.contains(block) ? block : null; if (!scope) return null;
+  let best = null;
+  for (const m of scope.querySelectorAll('.math')) { const r = m.getBoundingClientRect(); if (y >= r.top - 4 && y <= r.bottom + 4 && x >= r.right && (!best || r.right > best.r.right)) best = {el: m, r}; }
+  return best ? {el: best.el, over: false} : null;
+}
+export const MathCaret = Extension.create({
+  name: 'mathCaret',
+  addProseMirrorPlugins() {
+    let drag = null;
+    const setSel = (view, anchor, head) => { try { view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, anchor, head))); } catch (e) { /* out of range */ } };
+    return [new Plugin({
+      key: new PluginKey('mathCaret'),
+      props: {
+        handleDOMEvents: {
+          mousedown(view, e) {
+            if (e.button !== 0 || e.detail > 1 || e.shiftKey) return false;
+            const near = mathNear(view, e.clientX, e.clientY); if (!near) return false;
+            const m = mathEdgePos(view, near.el, e.clientX); if (!m) return false;
+            if (near.over && m.side === 'mid') return false;                 // the middle: the formula itself (double click edits)
+            const at = near.over && m.side === 'before' ? m.before : m.after;
+            e.preventDefault(); view.focus(); setSel(view, at, at);
+            drag = {anchor: at};
+            const move = ev => {
+              if (!drag) return;
+              const n2 = mathNear(view, ev.clientX, ev.clientY), m2 = n2 && mathEdgePos(view, n2.el, ev.clientX);
+              const head = m2 ? (ev.clientX > m2.center ? m2.after : m2.before) : view.posAtCoords({left: ev.clientX, top: ev.clientY})?.pos;
+              if (head != null) setSel(view, drag.anchor, head);
+            };
+            const up = () => { drag = null; removeEventListener('mousemove', move); removeEventListener('mouseup', up); };
+            addEventListener('mousemove', move); addEventListener('mouseup', up);
+            return true;
+          },
+          // a normal drag that reaches a formula at the end of a line: the formula is included
+          mousemove(view, e) {
+            if (drag || !(e.buttons & 1)) return false;
+            const near = mathNear(view, e.clientX, e.clientY); if (!near) return false;
+            const m = mathEdgePos(view, near.el, e.clientX); if (!m || e.clientX <= m.center) return false;
+            const sel = view.state.selection; if (sel.empty && sel.from !== m.before && sel.from !== m.after) return false;
+            if (sel.head < m.after && sel.anchor <= m.before) setTimeout(() => setSel(view, view.state.selection.anchor, m.after), 0);
+            return false;
+          }
+        }
+      }
+    })];
+  }
+});
