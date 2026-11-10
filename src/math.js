@@ -54,7 +54,12 @@ function docFor(key) {
     if (!MJ._.output.fonts?.[name]) await MJ.loader.load(`[${name}]/svg`);
     const FontClass = Object.values(MJ._.output.fonts[name].svg_ts)[0];
     const out = new MJ._.output.svg_ts.SVG({fontData: FontClass, fontCache: 'none', linebreaks: {inline: false}, dynamicPrefix: `[${name}]/svg/dynamic`});
-    const input = new MJ._.input.tex_ts.TeX({...MJ.config.tex});
+    // TeX extensions the main document already loaded on demand (e.g. \boldsymbol for bold formulas) must be named
+    // here: a second document's autoload would find them "already loaded" and leave the command undefined (red)
+    try { await MJ.loader.load('[tex]/boldsymbol'); } catch (e) { /* optional */ }
+    const EXT = ['boldsymbol', 'cancel', 'color', 'mathtools', 'braket', 'bbox', 'enclose', 'extpfeil', 'upgreek', 'cases', 'centernot', 'textcomp', 'unicode'];
+    const have = EXT.filter(k => MJ._.input.tex?.[k]);
+    const input = new MJ._.input.tex_ts.TeX({...MJ.config.tex, packages: [...new Set([...(MJ.config.tex.packages || []), ...have])]});
     const doc = MJ._.mathjax.mathjax.document(document, {InputJax: input, OutputJax: out});
     return {doc, out, queue: Promise.resolve()};
   });

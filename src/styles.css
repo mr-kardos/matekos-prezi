@@ -92,12 +92,17 @@ button,input,select,textarea{ font-family:inherit; }
 .ProseMirror h3{ font-size:1.12em; line-height:1.3; font-weight:700; --sb:.4em; --sa:.3em; }
 .ProseMirror .shaded{ background-color:var(--shade); }
 
-.ProseMirror ul,.ProseMirror ol{ margin:0; padding:0 0 0 1.8em; list-style:none; }
-.ProseMirror li{ position:relative; }
+.ProseMirror ul,.ProseMirror ol{ margin:0; padding:0; list-style:none; }
+/* list text starts where the next level's symbol stands (0,8 cm after the symbol, like in Matekos Doksi) */
+.ProseMirror li{ position:relative; padding-left:var(--gap,0.8cm); }
+.ProseMirror li[data-ghost] > p:first-child{ height:0; padding:0 !important; margin:0 !important; overflow:hidden; }
+/* list items: the same spacing whatever their position or level (it does not change when items move or go) */
 .ProseMirror li > p{ --sa:2pt; }
-.ProseMirror li:last-child > p:last-child{ --sa:var(--after,6pt); }
-.ProseMirror li li:last-child > p:last-child{ --sa:2pt; }
-.lm{ position:absolute; left:auto; transform:translateX(calc(-100% - .45em)); white-space:nowrap; user-select:none; pointer-events:none; text-indent:0; font-style:normal; font-weight:normal; text-decoration:none; }
+.ProseMirror > ul, .ProseMirror > ol{ margin-bottom:calc(var(--after,6pt) - 2pt); }
+/* the symbol stands in the room before the text (0,8 cm); a symbol wider than that (big letters, "10.") pushes the
+   first line's text on, like PowerPoint moves it to the next stop – it never covers the text */
+.lm{ display:inline-flex; justify-content:flex-start; box-sizing:border-box; min-width:var(--gap,0.8cm); padding-right:.3em; margin-left:calc(-1 * var(--gap,0.8cm)); vertical-align:baseline; white-space:nowrap; user-select:none; pointer-events:none; text-indent:0; font-style:normal; font-weight:normal; text-decoration:none; }
+.lm.lm-b{ font-weight:700; }
 .lm img{ vertical-align:-0.1em; }
 mark{ color:inherit; padding:0; }
 .ProseMirror .tableWrapper{ padding:0 0 var(--after,6pt); overflow-x:auto; }
@@ -299,7 +304,7 @@ code.k{ font:12px ui-monospace, Menlo, Consolas, monospace; background:var(--hov
 .mk .fr b{ display:block; width:100%; min-width:.9em; border-top:1px solid currentColor; }
 .mk .fr i{ font-style:italic; }
 .mk .col{ font-size:.66em; line-height:1.05; border-left:1px solid currentColor; border-right:1px solid currentColor; border-radius:5px; padding:0 3px; }
-#mdField{ display:block; margin-top:8px; font-size:30px; padding:14px 16px; min-height:84px; border:1.5px solid var(--accent); border-radius:10px; background:var(--chrome-2); color:var(--ink); --caret-color:#d14; --selection-background-color:#cfe0fb; --smart-fence-color:#888; }
+#mdField{ display:block; margin-top:8px; font-size:30px; padding:14px 16px; min-height:84px; border:1.5px solid var(--accent); border-radius:10px; background:#fff; color:#111; --caret-color:#d14; --selection-background-color:#cfe0fb; --smart-fence-color:#888; }
 #mdField::part(menu-toggle),#mdField::part(virtual-keyboard-toggle){ display:none; }
 .md-tex{ margin-top:8px; font-size:12.5px; color:var(--ink-2); }
 .md-tex summary{ cursor:pointer; }

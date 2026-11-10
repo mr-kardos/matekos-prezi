@@ -23,7 +23,7 @@ function layouts(c, o = {}) {
 
 export const PRESETS = {
   ures: {
-    label: 'Üres', note: 'Fehér diák, díszítés nélkül – minden új bemutató így indul.',
+    label: 'Sima', note: 'Fehér diák, díszítés nélkül – minden új bemutató így indul.',
     build: () => {
       const c = {title: '#1a1a1a', subtitle: '#4a5866', body: '#1a1a1a'};
       return {font: null, master: {background: null, bgColor: '#ffffff', objects: []}, templates: layouts(c),
