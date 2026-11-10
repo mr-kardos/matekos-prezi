@@ -2192,12 +2192,30 @@ $('#popPara').onopen = () => {
   lineOpen();
   const a = ed ? (ed.isActive('heading') ? ed.getAttributes('heading') : ed.getAttributes('paragraph')) : {};
   for (const inp of $$('#popPara [data-pf]')) { const k = inp.dataset.pf; if (inp.type === 'checkbox') inp.checked = !!a[k]; else inp.value = a[k] ?? (k === 'lineHeight' ? 1.25 : 0); }
-  const hang = a.hang || (a.firstLine < 0 ? -a.firstLine : 0);
+  let hang = a.hang || (a.firstLine < 0 ? -a.firstLine : 0);
+  // in a list: the hanging indent is the room after the symbol (as wide as the list's widest symbol needs)
+  const L = inEdit() && ed.isActive('listItem') ? listDomAtCursor() : null;
+  if (L) hang = Math.round((gapCmOf(L) + (+a.hang || 0)) * 100) / 100;
   $('#pfFirstKind').value = hang ? 'hang' : a.firstLine > 0 ? 'first' : 'none';
-  $('#pfFirstVal').value = hang || a.firstLine || '';
+  $('#pfFirstVal').value = hang ? String(hang) : (a.firstLine || '');
+  $('#pfFirstVal').title = L ? 'A listajel utáni hely (a szöveg minden sora innen indul); legalább akkora, amekkora a lista legszélesebb jelének kell.' : '';
 };
+/** The innermost list around the cursor: {dom, pos, node}. */
+function listDomAtCursor() {
+  const {$from} = ed.state.selection;
+  for (let d = $from.depth; d > 0; d--) { const n = $from.node(d); if (n.type.name === 'bulletList' || n.type.name === 'orderedList') { const pos = $from.before(d); return {dom: ed.view.nodeDOM(pos), pos, node: n}; } }
+  return null;
+}
+const gapCmOf = L => { const v = getComputedStyle(L.dom).getPropertyValue('--gap').trim(); const n = parseFloat(v) || 0; return v.endsWith('cm') ? n : n / (96 / 2.54); };
 function applyFirstLine() {
   const kind = $('#pfFirstKind').value, v = Math.max(0, parseFloat(String($('#pfFirstVal').value).replace(',', '.')) || 0);
+  // in a list, a hanging indent is the list's room after the symbol (for the whole list, every line)
+  if (inEdit() && ed.isActive('listItem') && kind !== 'first') {
+    const L = listDomAtCursor(); if (!L) return;
+    const tr = ed.state.tr.setNodeMarkup(L.pos, undefined, {...L.node.attrs, gap: kind === 'none' || !v ? null : Math.round(v * 100) / 100});
+    ed.state.doc.nodesBetween(L.pos, L.pos + L.node.nodeSize, (n, pos) => { if ((n.type.name === 'paragraph' || n.type.name === 'heading') && n.attrs.hang) tr.setNodeMarkup(pos, undefined, {...n.attrs, hang: null}); });
+    ed.view.dispatch(tr); setTimeout(() => $('#popPara').onopen?.(), 80); return;
+  }
   withEditor(() => {
     const {state} = ed, tr = state.tr, {from, to} = state.selection;
     state.doc.nodesBetween(from, to, (n, pos) => {

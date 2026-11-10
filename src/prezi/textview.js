@@ -11,7 +11,7 @@ import Highlight from '@tiptap/extension-highlight';
 import Subscript from '@tiptap/extension-subscript';
 import Superscript from '@tiptap/extension-superscript';
 import { ListItem } from '@tiptap/extension-list';
-import { ParaFormat, KvBulletList, KvOrderedList, ListMarkers, KvTable, KvTableRow, KvTableCell, KvTableHeader, MathNode, ListItemAttrs, ListJoin, CommentMark, TabNode, MathCaret, ordinal, listDefaults } from '../editor/extensions.js';
+import { ParaFormat, KvBulletList, KvOrderedList, ListMarkers, KvTable, KvTableRow, KvTableCell, KvTableHeader, MathNode, ListItemAttrs, ListJoin, CommentMark, TabNode, MathCaret, ListGapFit, fitListGapsDOM, ordinal, listDefaults } from '../editor/extensions.js';
 import { layoutTabs } from '../tabs.js';
 import { renderInto, mathStyleOf } from '../math.js';
 import { emptyDoc } from './model.js';
@@ -120,7 +120,7 @@ function extensions(kind = 'text') {
       ...(table ? {document: false} : {})
     }),
     ...(table ? [Document.extend({content: 'table'}), KvTable, KvTableRow, KvTableHeader, KvTableCell] : []),
-    ListItem, KvBulletList, KvOrderedList, ListMarkers, ListItemAttrs, ListJoin, CommentMark, TabNode.configure({getScale: () => hooks.getScale?.() || 1}), MathCaret,
+    ListItem, KvBulletList, KvOrderedList, ListMarkers, ListItemAttrs, ListJoin, CommentMark, TabNode.configure({getScale: () => hooks.getScale?.() || 1}), MathCaret, ListGapFit.configure({getScale: () => hooks.getScale?.() || 1}),
     TextStyle, Color, FontSize, FontFamily, LetterSpacing, TextCase, InlineMathOnly, ListHang,
     Highlight.configure({multicolor: true}),
     TextAlign.configure({types: table ? ['paragraph'] : ['heading', 'paragraph']}),
@@ -169,6 +169,7 @@ function addMarkers(root, depth = 0) {
 }
 /** Tabs of a drawn (not edited) text: their widths once the box is on the page. */
 export function layoutStaticTabs(root) {
+  for (const pm of root.querySelectorAll('.txt .ProseMirror')) if (pm.querySelector('ul, ol') && pm.isConnected && pm.offsetWidth) fitListGapsDOM(pm, pm.getBoundingClientRect().width / pm.offsetWidth || 1);
   for (const pm of root.querySelectorAll('.txt .ProseMirror')) {
     if (!pm.querySelector('span.tab') || !pm.isConnected || !pm.offsetWidth) continue;
     layoutTabs(pm, pm.getBoundingClientRect().width / pm.offsetWidth || 1);
@@ -188,6 +189,7 @@ export function renderStatic(host, json, onRendered, kind = 'text') {
     if (!hasContent) b.appendChild(document.createElement('br'));
   }
   host.innerHTML = ''; host.appendChild(pm);         // first in place, so each formula can see the text around it
+  if (pm.querySelector('ul, ol')) requestAnimationFrame(() => { if (pm.isConnected && pm.offsetWidth) fitListGapsDOM(pm, pm.getBoundingClientRect().width / pm.offsetWidth || 1); });
   if (pm.querySelector('span.tab')) requestAnimationFrame(() => { if (pm.isConnected && pm.offsetWidth) layoutTabs(pm, pm.getBoundingClientRect().width / pm.offsetWidth || 1); });
   for (const sp of pm.querySelectorAll('span.math')) {
     sp.contentEditable = 'false';
