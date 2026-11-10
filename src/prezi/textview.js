@@ -226,7 +226,7 @@ export function mountEditor(host, json, {onUpdate, onSelection, onFocus, onBlur}
         dragstart: (view, e) => { if (e.target?.closest?.('td,th')) { e.preventDefault(); return true; } return false; }
       }
     },
-    onUpdate: () => onUpdate?.(),
+    onUpdate: ({transaction}) => onUpdate?.(transaction),
     onSelectionUpdate: () => onSelection?.(),
     onTransaction: () => onSelection?.(),
     onFocus: () => onFocus?.(),

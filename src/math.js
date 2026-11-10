@@ -57,7 +57,8 @@ function docFor(key) {
     // TeX extensions the main document already loaded on demand (e.g. \boldsymbol for bold formulas) must be named
     // here: a second document's autoload would find them "already loaded" and leave the command undefined (red)
     try { await MJ.loader.load('[tex]/boldsymbol'); } catch (e) { /* optional */ }
-    const EXT = ['boldsymbol', 'cancel', 'color', 'mathtools', 'braket', 'bbox', 'enclose', 'extpfeil', 'upgreek', 'cases', 'centernot', 'textcomp', 'unicode'];
+    try { await MJ.loader.load('[tex]/html'); } catch (e) { /* optional – \\class marks the formula parts (prezi/parts.js) */ }
+    const EXT = ['html', 'boldsymbol', 'cancel', 'color', 'mathtools', 'braket', 'bbox', 'enclose', 'extpfeil', 'upgreek', 'cases', 'centernot', 'textcomp', 'unicode'];
     const have = EXT.filter(k => MJ._.input.tex?.[k]);
     const input = new MJ._.input.tex_ts.TeX({...MJ.config.tex, packages: [...new Set([...(MJ.config.tex.packages || []), ...have])]});
     const doc = MJ._.mathjax.mathjax.document(document, {InputJax: input, OutputJax: out});

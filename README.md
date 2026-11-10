@@ -1,4 +1,4 @@
-# Matekos Prezi 1.4.4
+# Matekos Prezi 1.4.8
 
 Presentation editor with live inline TeX, the twin of **Matekos Doksi**. Built with **TipTap**
 (text editor), **MathJax 4** (formulas), **MathLive** (visual formula editor) and **Tauri 2**
@@ -93,6 +93,24 @@ Browser test version: `npm run build:web` → one self-contained `dist-web/index
 * Formulas may break into lines at the edge of their text box (per formula; MathJax inline line breaking).
 * PowerPoint import: charts, SmartArt and EMF/WMF pictures become marked boxes of the same size and position.
 * Slideshow preview inside the app.
+* Safety (1.4.5): every window keeps its own automatic draft (pictures and videos are stored once, not with every
+  change); unsaved presentations of windows that are no longer running can be restored from the home screen; saving
+  writes a temporary file first and then swaps it in, so an interrupted save cannot damage the previous version.
+  The home screen lists the recently used presentations (desktop app).
+* Reviewing (1.4.6): comments and replies carry the reviewer's name (typed once in the comments panel, kept by the
+  app); the panel can list only the open comments and step to the next / previous open one; slide thumbnails show the
+  number of open comments (a click opens the first one); copies of slides and objects never share comments with the original.
+* Editing (1.4.7): snapping also when resizing and when moving several or rotated objects (Alt switches it off);
+  Ctrl/⌘+D duplicates every selected object together with its animations; grouping / ungrouping asks before
+  animations are removed; find also looks into the TeX code of formulas (search only – replace never changes a formula);
+  zoom with Ctrl/⌘ + wheel or a touchpad pinch and Ctrl/⌘ + plus / minus / 0 (fit); typing in a text box makes undo
+  steps of its own, so Ctrl/⌘+Z after leaving the box goes back step by step.
+* Formulas part by part (1.4.8): an animation of a text box can also reveal its formulas in parts ("Képletek
+  részenként is" in the animation's settings) – a new step starts at every new row (`\\`) of a multi-line formula,
+  after a wide space (`\quad`, `\qquad`) and after an implication arrow (⇒, ⇔; `\Rightarrow`, `\implies`,
+  `\iff`, …). Exported to PowerPoint / PDF as one picture per part with the chosen effect; the in-app preview
+  fades the parts in. Slideshow: Home / End jump to the first / last slide, a number + Enter to that slide.
+  Slide thumbnails are redrawn only when their slide changed.
 
 ## Export
 

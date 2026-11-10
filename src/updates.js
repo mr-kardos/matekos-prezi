@@ -2,7 +2,7 @@
 // the version in it is newer than this app's, shows the message with a download button. Nothing is sent about the
 // user; without internet (or without the file) the app simply starts as usual.
 // To announce an update: edit update.json in the GitHub repository (version, message, url).
-export const UPDATE_URL = 'https://raw.githubusercontent.com/FELHASZNALONEV/matekos-prezi/main/update.json';
+export const UPDATE_URL = 'https://raw.githubusercontent.com/mr-kardos/matekos-prezi/main/update.json';
 export const APP_VERSION = __APP_VERSION__;
 
 const parts = v => String(v || '').replace(/^v/i, '').split(/[.\-+]/).map(x => parseInt(x, 10) || 0);
