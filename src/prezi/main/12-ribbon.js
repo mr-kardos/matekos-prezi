@@ -14,13 +14,26 @@ function allMarked(json, t) {
   eachInline(json, n => { if (n.type === 'text' && !n.text.trim()) return; any = true; if (!hasMark(n, t)) all = false; });
   return any && all;
 }
-function boxOrMark(mark, boxKey) {
+/* Several objects selected: a text formatting step runs on every selected text box, as one undo step. */
+const multiTexts = () => !editing && selIds.length > 1 ? selIds.map(objById).filter(o => o && isTextLike(o) && !o.locked) : [];
+function onEachText(run) {
+  if (multiRun) return false;
+  const list = multiTexts(); if (!list.length) return false;
+  const keep = [...selIds]; multiRun = true;
+  try { list.forEach((o, i) => { sel = o.id; selIds = [o.id]; run(i); if (editing) exitEdit(); }); }
+  finally { multiRun = false; selIds = keep; sel = null; }
+  pushHistory(); renderAll();
+  return true;
+}
+function boxOrMark(mark, boxKey, force) {
+  let all; if (onEachText(i => { if (!i) { const f = selObj(); all = !(f[boxKey] || allMarked(f.doc, mark)); } boxOrMark(mark, boxKey, all); })) return;   // every box like the first one
   const o = selObj(); if (!isTextLike(o)) return;
   if (inEdit()) { const fn = 'toggle' + mark[0].toUpperCase() + mark.slice(1); ed.chain().focus()[fn]().run(); return; }
-  const on = !(o[boxKey] || allMarked(o.doc, mark));          // all of it, or none of it
+  const on = force ?? !(o[boxKey] || allMarked(o.doc, mark));  // all of it, or none of it
   stripMark(o.doc, mark); o[boxKey] = on || undefined; styled(o); commit();
 }
 function setAlign(a) {
+  if (onEachText(() => setAlign(a))) return;
   const o = selObj(); if (!isTextLike(o)) return;
   if (inEdit()) { ed.chain().focus().setTextAlign(a).run(); return; }
   o.align = a; styled(o);
@@ -34,6 +47,7 @@ function unwrapLists(json, type) {
   return {...json, content: flat(json.content || [])};
 }
 function listCmd(type) {
+  if (onEachText(() => listCmd(type))) return;
   const o = selObj(); if (!isTextLike(o) || o.locked || o.field) return;
   const toggle = type === 'bulletList' ? 'toggleBulletList' : 'toggleOrderedList';
   if (inEdit()) {
@@ -69,8 +83,9 @@ const COMMANDS = {
   superscript: () => withEditor(c => c.toggleSuperscript().run()), subscript: () => withEditor(c => c.toggleSubscript().run()),
   alignLeft: () => setAlign('left'), alignCenter: () => setAlign('center'), alignRight: () => setAlign('right'), alignJustify: () => setAlign('justify'),
   bulletList: () => listCmd('bulletList'), orderedList: () => listCmd('orderedList'),
-  indent: () => withEditor(c => ed.isActive('listItem') ? c.sinkListItem('listItem').run() : c.shiftIndent(1).run()),
-  outdent: () => withEditor(c => ed.isActive('listItem') ? c.liftListItem('listItem').run() : c.shiftIndent(-1).run()),
+  // in a list the buttons do exactly what Tab / Shift+Tab do
+  indent: () => withEditor(c => { if (!ed.isActive('listItem')) c.shiftIndent(1).run(); else if (!changeListLevel(ed.view, 1)) c.sinkListItem('listItem').run(); }),
+  outdent: () => withEditor(c => { if (!ed.isActive('listItem')) c.shiftIndent(-1).run(); else if (!changeListLevel(ed.view, -1)) c.liftListItem('listItem').run(); }),
   text: addText, math: () => openMath(null, null), image: () => pickImage(null), video: () => insertVideo(),
   rect: () => addShape('rect'), ellipse: () => addShape('ellipse'), triangle: () => addShape('triangle'), arrow: () => addShape('arrow'), line: () => addShape('line'),
   painter: () => {
@@ -82,13 +97,14 @@ const COMMANDS = {
     toast('Kattints arra az objektumra, amelyre a formázást át szeretnéd vinni (Esc: mégse).');
   },
   upper: () => {
+    let up; if (onEachText(i => { const f = selObj(); if (!i) up = !f.upper; f.upper = up || undefined; styled(f); })) return;
     const o = selObj(); if (!isTextLike(o)) return;
     if (inEdit() && !ed.state.selection.empty) { (ed.getAttributes('textStyle').textTransform === 'uppercase' ? ed.chain().focus().unsetUppercase() : ed.chain().focus().setUppercase()).run(); updateRibbon(); return; }
     o.upper = !o.upper || undefined; styled(o); commit();
   },
   delete: () => { if (editing) { const id = editing; exitEdit(); if (!objById(id)) return; } deleteSelected(); },
   spell: () => { spellOn = !spellOn; lsSet('matekosprezi.spell', spellOn ? '1' : '0'); drawSpellSoon(); updateRibbon(); },
-  marks: () => { showMarks = !showMarks; lsSet('matekosprezi.marks', showMarks ? '1' : '0'); drawMarksSoon(); updateRibbon(); }
+  marks: () => { showMarks = !showMarks; lsSet('matekosprezi.marks', showMarks ? '1' : '0'); drawMarksSoon(); eyeThumbsSoon(); updateRibbon(); }
 };
 const ribbon = $('#ribbon');
 ribbon.addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
@@ -108,14 +124,15 @@ function currentFamily() {
   return o.font || '';
 }
 $('#popFont').onopen = () => { const f = currentFamily(); for (const b of $$('#popFont [data-fam]')) b.classList.toggle('on', b.dataset.fam === f); };
-$('#popFont').addEventListener('click', e => {
-  const b = e.target.closest('[data-fam]'); if (!b) return; closePops();
-  const o = selObj(), fam = b.dataset.fam; if (!isTextLike(o)) return;
+$('#popFont').addEventListener('click', e => { const b = e.target.closest('[data-fam]'); if (!b) return; closePops(); setFamily(b.dataset.fam); });
+function setFamily(fam) {
+  if (onEachText(() => setFamily(fam))) return;
+  const o = selObj(); if (!isTextLike(o)) return;
   if (inEdit() && !ed.state.selection.empty) { (fam ? ed.chain().focus().setFontFamily('MP ' + fam) : ed.chain().focus().unsetFontFamily()).run(); updateRibbon(); return; }
   const strip = n => { (n.marks || []).forEach(m => { if (m.type === 'textStyle' && m.attrs) m.attrs.fontFamily = null; }); (n.content || []).forEach(strip); };
   if (inEdit()) ed.commands.setContent((j => (strip(j), j))(ed.getJSON()), {emitUpdate: false}); else strip(o.doc);
   o.font = fam || undefined; styled(o); commit();
-});
+}
 /** Remove explicit font sizes from the text (they would override the box size – e.g. on pasted text and formulas). */
 function stripFontSizes(json) {
   const walk = n => { if (n.marks) { n.marks.forEach(m => { if (m.type === 'textStyle' && m.attrs) m.attrs.fontSize = null; });
@@ -124,6 +141,7 @@ function stripFontSizes(json) {
   walk(json); return json;
 }
 const setSize = v => {
+  if (onEachText(() => setSize(v))) return;
   const p = parseFloat(String(v).replace(',', '.')), o = selObj(); if (!isTextLike(o) || !(p > 0 && p < 400)) return;
   if (inEdit() && !ed.state.selection.empty) { ed.chain().focus().setFontSize(p + 'pt').run(); return; }
   if (inEdit()) { ed.commands.setContent(stripFontSizes(ed.getJSON()), {emitUpdate: false}); }
@@ -135,7 +153,7 @@ $('#sizeIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preve
 
 function updateRibbon() {
   drawMarksSoon();
-  const o = selObj(), edit = inEdit();
+  const o = selObj() || multiTexts()[0] || null, edit = inEdit();     // several selected: the text buttons show the first text box
   for (const b of $$('[data-k]', ribbon)) {
     const k = b.dataset.k; b.disabled = k === 'any' ? !selIds.length : k === 'text' ? !isTextLike(o) || !!o.locked : !isShape(o) || !!o.locked;
   }
@@ -269,7 +287,8 @@ async function eyedrop(done) {
   };
 }
 const TEXT_COLORS = ['#111111', '#5d6875', '#c0392b', '#d35400', '#b7950b', '#1e8449', '#117a65', '#1f5f74', '#2e4a9e', '#7d3c98', '#ad1457'];
-swatches($('#swText'), TEXT_COLORS, c => {
+swatches($('#swText'), TEXT_COLORS, function textColor(c) {
+  if (onEachText(() => textColor(c))) return;
   const o = selObj(); if (!isTextLike(o)) return;
   if (inEdit() && !ed.state.selection.empty) { ed.chain().focus().setColor(c).run(); return; }
   eachInline(o.doc, n => (n.marks || []).forEach(m => { if (m.type === 'textStyle' && m.attrs) m.attrs.color = null; }));

@@ -255,8 +255,10 @@ function showHome(show) {
   if (show) {
     const f = currentFileName();
     // also an unsaved presentation that came back from the last session can be continued
-    $('#homeResume').hidden = !(sessionOpen || f || dirty);
-    $('#homeResume').textContent = f ? `Folytatás: ${f}${dirty ? ' (nem mentett módosításokkal)' : ''}` : sessionOpen ? 'Vissza a megnyitott bemutatóhoz' : `Nem mentett bemutató folytatása: ${doc.title || 'Névtelen bemutató'}`;
+    $('#homeResumeBox').hidden = !(sessionOpen || f || dirty);
+    $('#homeResume b').textContent = f ? f.replace(/\.mprezi$/i, '') : (doc.title || 'Névtelen bemutató');
+    $('#homeResume span').textContent = dirty ? (f ? 'nem mentett módosításokkal' : 'még nincs fájlba mentve') : sessionOpen ? 'megnyitva' : 'legutóbb megnyitva';
+    $('#homeResumeBox').classList.toggle('unsaved', !!dirty);
     renderHomeLists();
   }
   else fitStage();

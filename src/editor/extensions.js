@@ -1,4 +1,4 @@
-import { Extension, Node, Mark, mergeAttributes } from '@tiptap/core';
+import { Extension, Node, Mark, mergeAttributes, wrappingInputRule } from '@tiptap/core';
 import { Fragment } from '@tiptap/pm/model';
 import { Plugin, PluginKey, NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
@@ -87,6 +87,8 @@ function legacyBullet(el) {
   try { return JSON.parse(v.trim().replace(/^'|'$/g, '"')); } catch (e) { return v.replace(/["']/g, ''); }
 }
 export const KvBulletList = BulletList.extend({
+  // typing "- " at the start of a line starts a list; "+ " and "* " do not (they are ordinary signs in maths)
+  addInputRules() { return [wrappingInputRule({find: /^\s*(-)\s$/, type: this.type})]; },
   addAttributes() {
     return {
       ...this.parent?.(),
@@ -164,6 +166,13 @@ export const ListMarkers = Extension.create({
               let allBold = false;
               if (first && first.isTextblock && first.textContent.trim()) { allBold = true; first.descendants(c => { if (c.isText && c.text.trim() && !c.marks.some(m => m.type.name === 'bold')) allBold = false; }); }
               mk.bold = allBold;
+              // the size and colour the item's text starts with (set on that text itself): the symbol takes them
+              if (first && first.isTextblock) for (let k = 0; k < first.childCount; k++) {
+                const c = first.child(k); if (c.isText && !c.text.trim()) continue;
+                const ts = c.marks.find(m => m.type.name === 'textStyle');
+                if (ts) { mk.fs = ts.attrs.fontSize || ''; mk.col = ts.attrs.color || ''; }
+                break;
+              }
               // an item that starts with an empty line and a list: the nested list's first item shares the line
               const sameLine = !!item.attrs.sameLine && first && first.isTextblock && !first.content.size && item.childCount > 1 && /List$/.test(item.child(1).type.name);
               if (sameLine) {
@@ -178,11 +187,13 @@ export const ListMarkers = Extension.create({
                     const s = document.createElement('span');
                     s.className = 'lm' + (m.up ? ' lm-up' : '') + (m.bold ? ' lm-b' : '');
                     if (m.up) s.style.setProperty('--up', m.up);
+                    if (m.fs) s.style.fontSize = m.fs;
+                    if (m.col) s.style.color = m.col;
                     s.contentEditable = 'false';
                     if (m.img) { const im = document.createElement('img'); im.src = m.img; im.alt = ''; im.style.height = m.size + 'em'; s.appendChild(im); }
                     else s.textContent = m.text;
                     return s;
-                  }, { side: -1, key: m.key + '|' + m.up + (m.bold ? 'b' : ''), ignoreSelection: true }));
+                  }, { side: -1, key: m.key + '|' + m.up + (m.bold ? 'b' : '') + '|' + (m.fs || '') + '|' + (m.col || ''), ignoreSelection: true }));
                 }
               }
               walk(item, ipos, depth + 1, null);

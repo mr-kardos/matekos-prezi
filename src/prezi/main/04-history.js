@@ -31,6 +31,7 @@ function pushHistory() {
 }
 function commit() {
   syncEditor();
+  if (multiRun) return;                // formatting several text boxes: one undo step and one redraw at the end
   pushHistory();
   renderAll();
 }

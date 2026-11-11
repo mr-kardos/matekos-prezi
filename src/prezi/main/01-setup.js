@@ -45,6 +45,7 @@ let showBadges = lsGet(LS.badges) !== '0';
 const tgt = () => mode === 'slides' ? doc.slides[cur] : tcur === 'master' ? doc.master : doc.templates[tcur];
 const objById = id => id ? findObject(tgt().objects, id) : null;
 const selObj = () => sel && objById(sel);
+let multiRun = false;               // true while a formatting step runs on several selected text boxes (12-ribbon.js)
 const isText = o => o?.type === 'text', isShape = o => o?.type === 'shape', isTable = o => o?.type === 'table';
 const isTextLike = o => isText(o) || isTable(o);
 const kindOf = o => isTable(o) ? 'table' : 'text';

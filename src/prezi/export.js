@@ -13,7 +13,7 @@ import 'svg2pdf.js';
 import { familyFiles, fontSet, familyFromCSS } from './fontsets.js';
 import { Anim } from './anim.js';
 import { pieceEls, mathPending, layoutStaticTabs } from './textview.js';
-import { partPieces, partEls } from './parts.js';
+import { partPieces, partEls, PART_MARK } from './parts.js';
 import { PPTX_SKELETON } from './pptx-skeleton.js';
 import { W, H, flatObjects } from './model.js';
 
@@ -66,6 +66,10 @@ function decorations(node, stop) {
   return {u, s};
 }
 
+/* The words of the text being drawn, for the invisible text layer of the PDF (searching, selecting, copying):
+   {t, x, y (baseline), size, w} relative to the same (ox, oy) as the drawing; a formula is its TeX code. */
+let TEXTS = null;
+function withTexts(draw) { TEXTS = []; try { return [draw(), TEXTS]; } finally { TEXTS = null; } }
 /** SVG body for everything inside `roots` (elements), relative to (ox, oy). */
 function textBody(roots, stop, ox, oy) {
   let back = '', body = '', lines = '';
@@ -99,7 +103,8 @@ function textBody(roots, stop, ox, oy) {
     for (let nd = walker.nextNode(); nd; nd = walker.nextNode()) {
       const cs = getComputedStyle(nd.parentElement), size = parseFloat(cs.fontSize), font = fontsFor(cs)[fontKey(cs)], upper = cs.textTransform === 'uppercase';
       const asc = ascentOffset(cs), dec = decorations(nd, stop), upm = font.unitsPerEm;
-      let off = 0, d = '', bars = '';
+      let off = 0, d = '', bars = '', word = null;
+      const endWord = () => { if (word && TEXTS) TEXTS.push({t: word.t, x: word.x, y: word.y, size, w: word.x2 - word.x}); word = null; };
       for (const ch of nd.data) {
         const len = ch.length; range.setStart(nd, off); range.setEnd(nd, off + len); off += len;
         if (ch === '\u200b' || ch === '\n' || ch === '\ufeff') continue;
@@ -108,14 +113,18 @@ function textBody(roots, stop, ox, oy) {
         let rect = null; for (const r of range.getClientRects()) if (!rect || r.width > rect.width) rect = r;
         if (!rect || (!rect.width && ch.trim())) continue;
         const x = rect.left - ox, base = rect.top + asc - oy;
+        if (!ch.trim()) endWord();
         if (ch.trim()) {
           const g = upper ? ch.toUpperCase() : ch;
+          if (word && Math.abs(word.y - base) > 1) endWord();              // the word goes on in the next line
+          if (word) { word.t += g; word.x2 = x + rect.width; } else word = {t: g, x, y: base, x2: x + rect.width};
           d += cmdsToD((g.length > 1 ? font.getPath(g, x, base, size) : font.charToGlyph(g).getPath(x, base, size)).commands);
         }
         const th = Math.max(0.6, 0.06 * size);
         if (dec.u) bars += `<rect x="${n2(x)}" y="${n2(base - font.tables.post.underlinePosition / upm * size - th / 2)}" width="${n2(rect.width)}" height="${n2(th)}"/>`;
         if (dec.s) bars += `<rect x="${n2(x)}" y="${n2(base - (font.tables.os2.yStrikeoutPosition || 0.29 * upm) / upm * size - th / 2)}" width="${n2(rect.width)}" height="${n2(th)}"/>`;
       }
+      endWord();
       if (d || bars) body += `<g fill="${cs.color}">${d ? `<path d="${d}"/>` : ''}${bars}</g>`;
     }
     // pictures inside the text (e.g. picture list bullets)
@@ -127,9 +136,12 @@ function textBody(roots, stop, ox, oy) {
     // formulas
     for (const sp of root.matches('.math') ? [root] : root.querySelectorAll('.math')) {
       const color = getComputedStyle(sp).color;
+      let texDone = false;
       // a formula that may break into lines is several pictures (one per line piece)
       for (const svg of sp.querySelectorAll('mjx-container > svg')) {
         const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal; if (!r.width || !vb.width) continue;
+        if (TEXTS && !texDone) { texDone = true; const tex = (sp.getAttribute('data-tex') || '').split(PART_MARK).join('').replace(/\s+/g, ' ').trim();
+          if (tex) { const size = Math.max(4, Math.min(r.height * 0.7, 16)); TEXTS.push({t: tex, x: r.left - ox, y: r.top - oy + r.height / 2 + size * 0.35, size, w: r.width}); } }
         const inner = svg.innerHTML.replace(/ data-[\w-]+="[^"]*"/g, '').replace(/currentColor/g, color);
         body += `<g transform="translate(${n2(r.left - ox)},${n2(r.top - oy)}) scale(${r.width / vb.width},${r.height / vb.height}) translate(${-vb.x},${-vb.y})">${inner}</g>`;
       }
@@ -172,16 +184,18 @@ function slidePieces(s, el, model) {
           const els = partEls(p), rs = els.map(e => e.getBoundingClientRect()).filter(q => q.width || q.height); if (!rs.length) return;
           const PAD = 4, x0 = Math.min(...rs.map(q => q.left)) - PAD, y0 = Math.min(...rs.map(q => q.top)) - PAD, x1 = Math.max(...rs.map(q => q.right)) + PAD, y1 = Math.max(...rs.map(q => q.bottom)) + PAD;
           const html = els.filter(e => !e.ownerSVGElement), svgs = [...new Set(els.filter(e => e.ownerSVGElement).map(topSVG))];
-          const body = textBody(html, txt, x0, y0) + svgs.map(v => formulaPart(v, p.part, x0, y0)).join('');
-          pieces.push({key: `${o.id}#${i}`, name: `${name} – ${i + 1}. rész`, svg: wrapSVG(x1 - x0, y1 - y0, body), x: o.x + x0 - ox, y: o.y + y0 - oy, w: x1 - x0, h: y1 - y0, rot: 0, opacity});
+          const [tb, texts] = withTexts(() => textBody(html, txt, x0, y0)), body = tb + svgs.map(v => formulaPart(v, p.part, x0, y0)).join('');
+          pieces.push({key: `${o.id}#${i}`, name: `${name} – ${i + 1}. rész`, svg: wrapSVG(x1 - x0, y1 - y0, body), texts, x: o.x + x0 - ox, y: o.y + y0 - oy, w: x1 - x0, h: y1 - y0, rot: 0, opacity});
           return;
         }
         const pr = p.getBoundingClientRect(), y0 = Math.max(0, pr.top - oy - 6), y1 = Math.min(o.h, pr.bottom - oy + 6);
-        pieces.push({key: `${o.id}#${i}`, name: `${name} – ${i + 1}. bekezdés`, svg: wrapSVG(o.w, y1 - y0, textBody([p], txt, ox, oy + y0)), x: o.x, y: o.y + y0, w: o.w, h: y1 - y0, rot: 0, opacity});
+        const [body, texts] = withTexts(() => textBody([p], txt, ox, oy + y0));
+        pieces.push({key: `${o.id}#${i}`, name: `${name} – ${i + 1}. bekezdés`, svg: wrapSVG(o.w, y1 - y0, body), texts, x: o.x, y: o.y + y0, w: o.w, h: y1 - y0, rot: 0, opacity});
       });
     } else {
       const pad = o.type === 'table' ? 4 : 0;            // table borders reach half a line width outside the box
-      pieces.push({key, name, svg: wrapSVG(o.w + 2 * pad, o.h + 2 * pad, textBody([txt], txt, ox - pad, oy - pad)), x: o.x - pad, y: o.y - pad, w: o.w + 2 * pad, h: o.h + 2 * pad, rot: o.rot || 0, opacity});
+      const [body, texts] = withTexts(() => textBody([txt], txt, ox - pad, oy - pad));
+      pieces.push({key, name, svg: wrapSVG(o.w + 2 * pad, o.h + 2 * pad, body), texts, x: o.x - pad, y: o.y - pad, w: o.w + 2 * pad, h: o.h + 2 * pad, rot: o.rot || 0, opacity});
     }
   };
   for (const child of clip.children) visit(child, false);
@@ -417,6 +431,25 @@ export async function buildPdf(doc, renderSlide, layoutOf, mode, onProgress) {
   const slides = await collect(doc, renderSlide, layoutOf, (i, n) => onProgress?.(`Diák előkészítése… ${i}/${n}`));
   const PW = W * 0.75, PH = H * 0.75;                    // 960 × 540 pt = 13.33 × 7.5 in, like PowerPoint 16:9
   const pdf = new jsPDF({unit: 'pt', format: [PW, PH], orientation: 'landscape', compress: true});
+  // The text is drawn as outlines (exactly as on the slide); over it goes the same text invisibly, word by word, so
+  // the PDF can be searched and its text selected and copied. A formula's hidden text is its TeX code.
+  let hidden = false;
+  try {
+    const bytes = new Uint8Array((await familyFiles(fontSet('bonum').text)).r); let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    pdf.addFileToVFS('mp-text.ttf', btoa(bin)); pdf.addFont('mp-text.ttf', 'mptext', 'normal'); hidden = true;
+  } catch (e) { /* no text layer: the PDF is still complete */ }
+  const textLayer = (pieces, st) => {
+    pdf.setFont('mptext', 'normal');
+    for (const p of pieces) {
+      if (st.vis[p.key] === false || !p.texts || p.rot || st.grow[p.key]) continue;      // rotated / enlarged pieces: picture only
+      for (const t of p.texts) {
+        pdf.setFontSize(t.size * 0.75);
+        const tw = pdf.getTextWidth(t.t); if (!(tw > 0) || !(t.w > 0)) continue;
+        pdf.text(t.t, (p.x + t.x) * 0.75, (p.y + t.y) * 0.75, {renderingMode: 'invisible', horizontalScale: Math.max(0.1, Math.min(10, t.w * 0.75 / tw))});
+      }
+    }
+  };
   let first = true;
   for (const [si, {s, pieces, bg}] of slides.entries()) {
     onProgress?.(`PDF írása… ${si + 1}/${slides.length}`);
@@ -426,6 +459,7 @@ export async function buildPdf(doc, renderSlide, layoutOf, mode, onProgress) {
       const holder = document.createElement('div'); holder.style.cssText = 'position:fixed;left:-20000px;top:0';
       holder.innerHTML = pageSVG(pieces, bg, st); document.body.appendChild(holder);
       try { await pdf.svg(holder.firstChild, {x: 0, y: 0, width: PW, height: PH}); } finally { holder.remove(); }
+      if (hidden) { try { textLayer(pieces, st); } catch (e) { /* this page stays without the text layer */ } }
     }
   }
   return pdf.output('blob');

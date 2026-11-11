@@ -1,7 +1,7 @@
 // Text boxes use the Matekos Doksi editor: the same TipTap extensions, formula node ($…$ typing,
 // pasted TeX, formula editor), tables and lists. A box that is not being edited is drawn from the same
 // document with the same HTML, CSS and MathJax rendering, so it looks exactly like the live editor.
-import { Editor, Extension, generateHTML } from '@tiptap/core';
+import { Editor, Extension, InputRule, generateHTML } from '@tiptap/core';
 import { Plugin } from '@tiptap/pm/state';
 import Document from '@tiptap/extension-document';
 import StarterKit from '@tiptap/starter-kit';
@@ -15,6 +15,7 @@ import { ParaFormat, KvBulletList, KvOrderedList, ListMarkers, KvTable, KvTableR
 import { layoutTabs } from '../tabs.js';
 import { renderInto, mathStyleOf } from '../math.js';
 import { emptyDoc } from './model.js';
+import { cleanPastedHTML } from './paste.js';
 
 const hooks = {onEdit: null, onRendered: null, onPreview: null, getScale: null};
 
@@ -35,39 +36,27 @@ const TextCase = Extension.create({
     };
   }
 });
-/** Text pasted from other programs: plain text, keeping only bold, italic, underline and links. */
-const escH = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-export function cleanPastedHTML(html) {
-  if (/data-pm-slice/.test(html)) return html.replace(/(font-size|line-height)\s*:[^;"']*;?/gi, '');   // copied inside the app: keep it
-  const d = new DOMParser().parseFromString(html, 'text/html'), out = [];
-  let cur = '';
-  const flush = () => { if (cur.trim()) out.push('<p>' + cur.trim() + '</p>'); cur = ''; };
-  const BLOCK = /^(P|DIV|H[1-6]|LI|TR|BLOCKQUOTE|PRE|UL|OL|TABLE|SECTION|ARTICLE|HEADER|FOOTER|DT|DD)$/;
-  (function walk(n, st) {
-    for (const c of n.childNodes) {
-      if (c.nodeType === 3) {
-        let t = escH(c.data.replace(/[\s\u00a0]+/g, ' ')); if (!t) continue;
-        if (st.u) t = `<u>${t}</u>`; if (st.i) t = `<em>${t}</em>`; if (st.b) t = `<strong>${t}</strong>`;
-        if (st.a) t = `<a href="${st.a.replace(/"/g, '&quot;')}">${t}</a>`;
-        cur += t; continue;
-      }
-      if (c.nodeType !== 1 || /^(SCRIPT|STYLE|HEAD|TITLE|META|LINK|NOSCRIPT)$/.test(c.tagName)) continue;
-      if (c.tagName === 'BR') { flush(); continue; }
-      const s2 = {...st}, cs = c.style, fw = cs && cs.fontWeight;
-      if (/^(B|STRONG)$/.test(c.tagName)) s2.b = !(fw === 'normal' || (fw && +fw < 600));
-      if (fw === 'bold' || +fw >= 600) s2.b = true; else if (fw === 'normal' || (fw && +fw < 600)) s2.b = false;
-      if (/^(I|EM)$/.test(c.tagName) || (cs && cs.fontStyle === 'italic')) s2.i = true;
-      if (c.tagName === 'U' || (cs && /underline/.test(cs.textDecoration || cs.textDecorationLine || ''))) s2.u = true;
-      if (c.tagName === 'A' && c.getAttribute('href')) s2.a = c.getAttribute('href');
-      const block = BLOCK.test(c.tagName);
-      if (block) flush();
-      walk(c, s2);
-      if (block) flush();
-    }
-  })(d.body, {});
-  flush();
-  return out.join('') || '<p></p>';
-}
+export { cleanPastedHTML };
+
+/** Typing corrections: Hungarian quotation marks („ ”) for ", and a dash (–) for two hyphens. Never inside a formula
+ *  that is being typed ($…), and Backspace right after a correction brings back what was typed. */
+const HunTyping = Extension.create({
+  name: 'hunTyping',
+  addInputRules() {
+    const before = (state, pos) => { const $p = state.doc.resolve(pos); return $p.parent.textBetween(0, $p.parentOffset, undefined, '\ufffc'); };
+    const inFormula = t => (t.split('$').length - 1) % 2 === 1;
+    return [
+      new InputRule({find: /"$/, handler: ({state, range}) => {
+        const t = before(state, range.from); if (inFormula(t)) return null;
+        state.tr.insertText(!t || /[\s(\[{„–—-]$/.test(t) ? '„' : '”', range.from, range.to);
+      }}),
+      new InputRule({find: /--$/, handler: ({state, range}) => {
+        const t = before(state, range.from); if (inFormula(t) || /-$/.test(t)) return null;
+        state.tr.insertText('–', range.from, range.to);
+      }})
+    ];
+  }
+});
 /** Slides never use display (centred, own-line) formulas – pasted $$…$$ / \\[…\\] stay in the line. */
 const InlineMathOnly = Extension.create({
   name: 'inlineMathOnly',
@@ -121,7 +110,7 @@ function extensions(kind = 'text') {
     }),
     ...(table ? [Document.extend({content: 'table'}), KvTable, KvTableRow, KvTableHeader, KvTableCell] : []),
     ListItem, KvBulletList, KvOrderedList, ListMarkers, ListItemAttrs, ListJoin, CommentMark, TabNode.configure({getScale: () => hooks.getScale?.() || 1}), MathCaret, ListGapFit.configure({getScale: () => hooks.getScale?.() || 1}),
-    TextStyle, Color, FontSize, FontFamily, LetterSpacing, TextCase, InlineMathOnly, ListHang,
+    TextStyle, Color, FontSize, FontFamily, LetterSpacing, TextCase, InlineMathOnly, ListHang, HunTyping,
     Highlight.configure({multicolor: true}),
     TextAlign.configure({types: table ? ['paragraph'] : ['heading', 'paragraph']}),
     Subscript, Superscript,
@@ -143,6 +132,18 @@ const firstLineBold = p => {
   for (let n = tw.nextNode(); n; n = tw.nextNode()) if (n.data.trim() && !n.parentElement.closest('.math') && !n.parentElement.closest('strong, b')) return false;
   return true;
 };
+/** Size and colour the item's text starts with (set on that text itself): its symbol takes them, as in PowerPoint. */
+function firstRunLook(p) {
+  const tw = document.createTreeWalker(p, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+  let at = null;
+  for (let n = tw.nextNode(); n && !at; n = tw.nextNode()) {
+    if (n.nodeType === 1) { if (n.matches('span.math')) at = n.parentElement; }
+    else if (n.data.trim() && !n.parentElement.closest('.math, .lm')) at = n.parentElement;
+  }
+  const look = {size: '', color: ''};
+  for (let e = at; e && e !== p; e = e.parentElement) { if (!look.size && e.style.fontSize) look.size = e.style.fontSize; if (!look.color && e.style.color) look.color = e.style.color; }
+  return look;
+}
 function addMarkers(root, depth = 0) {
   const ends = {};                                  // last number per numbering style on this level (continued lists)
   for (const list of root.querySelectorAll(':scope > ul, :scope > ol, :scope > li > ul, :scope > li > ol')) {
@@ -156,6 +157,7 @@ function addMarkers(root, depth = 0) {
       const first = li.firstElementChild;
       if (!li.hasAttribute('data-ghost') && first && /^(P|H[1-3])$/.test(first.tagName)) {
         const s = document.createElement('span'); s.className = 'lm' + (firstLineBold(first) ? ' lm-b' : ''); s.contentEditable = 'false';
+        const look = firstRunLook(first); if (look.size) s.style.fontSize = look.size; if (look.color) s.style.color = look.color;
         if (ordered) s.textContent = ordinal(start + Math.max(0, real), sty);
         else if (list.getAttribute('data-bullet-img')) {
           const im = document.createElement('img'); im.src = list.getAttribute('data-bullet-img'); im.alt = '';

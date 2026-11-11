@@ -90,6 +90,7 @@ function renderSlideList() {
     }
   });
   thumbCache = keep;
+  if (showMarks) eyeThumbsSoon();
   $('#sNew').onclick = e => showPop('popNewSlide', e.currentTarget);
   $('#sTrans').onclick = e => showPop('popTrans', e.currentTarget);
   $('#sDup').onclick = () => { if (editing) exitEdit(); const s = clone(tgt()); const ids = {};

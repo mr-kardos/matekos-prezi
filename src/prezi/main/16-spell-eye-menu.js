@@ -61,38 +61,145 @@ $('#popSpell').addEventListener('click', e => {
 /* eye mode: formatting marks (as in Matekos Doksi), plus objects that would jump at the change of slides */
 let showMarks = lsGet('matekosprezi.marks') === '1', eyeRaf = 0;
 // in an edited table: the paragraph formats of the column the cursor is in
-setCellFilter(td => {
+function inCursorColumn(td) {
   if (!editing || !ed || !ed.isActive('table')) return false;
   const {$from} = ed.state.selection;
   for (let d = $from.depth; d > 0; d--) if (/^table(Cell|Header)$/.test($from.node(d).type.name)) {
     const dom = ed.view.nodeDOM($from.before(d)); return !!dom && td.cellIndex === dom.cellIndex && td.closest('table') === dom.closest('table');
   }
   return false;
-});
+}
+setCellFilter(inCursorColumn);
 function drawMarksSoon() { if (eyeRaf) return; eyeRaf = requestAnimationFrame(() => { eyeRaf = 0; drawEye(); }); }
 const sigOf = o => o.type + '|' + (o.placeholder || '') + '|' + (o.type === 'text' || o.type === 'table' ? JSON.stringify(o.doc) + (o.field || '')
   : o.type === 'image' || o.type === 'video' ? o.media : o.type === 'shape' ? [o.shape, o.fill, o.stroke, o.strokeWidth].join() : o.type === 'group' ? o.children.map(sigOf).join(';') : '');
-/** Objects of the slide that stand on the slide before / after too – but a few pixels away (they would jump). */
-function jumpers() {
-  if (mode !== 'slides' || !doc.slides[cur]) return [];
-  const out = [];
-  for (const si of [cur - 1, cur + 1]) {
+const FMT_NAMES = {size: 'betűméret', color: 'szín', bold: 'félkövér', italic: 'dőlt', underline: 'aláhúzás', strike: 'áthúzás', align: 'igazítás', letterSpacing: 'betűköz', upper: 'nagybetűs', font: 'betűtípus'};
+/** What the eye mode reports on slide i compared with the slides before / after it:
+ *    kind 'pos' – the same object stands a few pixels away there (it would jump at the change of slides); also a
+ *                 placeholder of the same layout that was nudged, and the members of a group;
+ *    kind 'fmt' – the same text at the same place, but with a different look (size, colour, font, …).
+ *  Each entry: {o, q (the object on the other slide), si, kind, d | keys, ox, oy, qx, qy (origins: the groups), ph}. */
+function slideIssues(i, sigs = new Map()) {
+  const s = doc.slides[i]; if (mode !== 'slides' || !s) return [];
+  const sg = o => { let v = sigs.get(o); if (v === undefined) sigs.set(o, v = sigOf(o)); return v; };
+  const out = [], seen = new Set();
+  const add = it => { const k = it.o.id + it.kind; if (!seen.has(k)) { seen.add(k); out.push(it); } };
+  const cmp = (o, q, si, ox, oy, qx, qy, ph) => {
+    const d = Math.max(Math.abs((o.x - ox) - (q.x - qx)), Math.abs((o.y - oy) - (q.y - qy)), Math.abs(o.w - q.w), ph ? 0 : Math.abs(o.h - q.h), Math.abs((o.rot || 0) - (q.rot || 0)));
+    if (d > 0.5 && d <= 12) add({o, q, si, kind: 'pos', d: Math.round(d * 10) / 10, ox, oy, qx, qy, ph});
+    else if (d <= 0.5 && !ph && isTextLike(o)) { const keys = TEXT_KEYS.filter(k => (o[k] ?? null) !== (q[k] ?? null)); if (keys.length) add({o, q, si, kind: 'fmt', keys}); }
+    if (o.type === 'group' && q.type === 'group' && o.children.length === q.children.length) o.children.forEach((c, k) => cmp(c, q.children[k], si, o.x, o.y, q.x, q.y, false));
+  };
+  for (const si of [i - 1, i + 1]) {
     const nb = doc.slides[si]; if (!nb) continue;
-    for (const o of doc.slides[cur].objects) {
-      const s1 = sigOf(o), q = nb.objects.find(x => sigOf(x) === s1); if (!q) continue;
-      const d = Math.max(Math.abs(o.x - q.x), Math.abs(o.y - q.y), Math.abs(o.w - q.w), Math.abs(o.h - q.h), Math.abs((o.rot || 0) - (q.rot || 0)));
-      if (d > 0.5 && d <= 12) out.push({o, q, si, d: Math.round(d * 10) / 10});
+    for (const o of s.objects) {
+      if (o.hidden) continue;
+      let q = nb.objects.find(x => sg(x) === sg(o)), ph = false;
+      // a placeholder with other text on the neighbouring slide: its place is still expected to be the same
+      if (!q && o.placeholder && s.template === nb.template) { q = nb.objects.find(x => x.placeholder === o.placeholder && x.type === o.type); ph = !!q; }
+      if (q) cmp(o, q, si, 0, 0, 0, 0, ph);
     }
   }
   return out;
 }
+/** The sides on which the text of a drawn text box leaves its slide ('' = none). slideEl: the drawn slide. */
+function textOff(objEl_, slideEl) {
+  const pm = objEl_.querySelector('.ProseMirror'); if (!pm) return '';
+  const sr = slideEl.getBoundingClientRect(); if (!sr.width) return '';
+  const tol = 1.5 * sr.width / W; let L = Infinity, T = Infinity, R = -Infinity, B = -Infinity;
+  const take = q => { if (!q.width || !q.height) return; L = Math.min(L, q.left); T = Math.min(T, q.top); R = Math.max(R, q.right); B = Math.max(B, q.bottom); };
+  const tw = document.createTreeWalker(pm, NodeFilter.SHOW_TEXT), rg = document.createRange();
+  for (let n = tw.nextNode(); n; n = tw.nextNode()) { if (!n.data.trim() || n.parentElement.closest('.math, .lm')) continue; rg.selectNodeContents(n); for (const q of rg.getClientRects()) take(q); }
+  for (const e of pm.querySelectorAll('.math svg, img')) take(e.getBoundingClientRect());
+  if (L === Infinity) return '';
+  return [L < sr.left - tol && 'bal oldalon', R > sr.right + tol && 'jobb oldalon', T < sr.top - tol && 'felül', B > sr.bottom + tol && 'alul'].filter(Boolean).join(', ');
+}
+/** Text boxes of a drawn slide whose text leaves the slide: [{o, sides}]. */
+function overflowing(s, slideEl) {
+  const out = [];
+  for (const o of flatObjects(s.objects)) {
+    if (!isTextLike(o) || o.hidden) continue;
+    const el = slideEl.querySelector(`.obj[data-id="${o.id}"]`); if (!el) continue;
+    const sides = textOff(el, slideEl); if (sides) out.push({o, sides});
+  }
+  return out;
+}
+/** Green labels at the right edge of every selected text box, paragraph by paragraph: space before / after that is
+ *  not 0 (whatever sets it), and a line spacing that differs from the template's (the style the box follows).
+ *  In a table that is being edited: the paragraphs of the column the cursor is in, inside their cells. */
+function spacingLabels() {
+  const objs = flatObjects([...new Set([...selIds, ...(editing ? [editing] : [])])].map(objById).filter(Boolean)).filter(o => isTextLike(o) && !o.hidden);
+  if (!objs.length) return '';
+  const sr = stage.getBoundingClientRect(), X = v => (v - sr.left) / scale, Y = v => (v - sr.top) / scale;
+  const num = v => String(Math.round(v * 10) / 10).replace('.', ',');
+  let html = '';
+  for (const o of objs) {
+    const el = stage.querySelector(`.obj[data-id="${o.id}"]`), pm = el?.querySelector('.ProseMirror'); if (!pm) continue;
+    const right = X(el.getBoundingClientRect().right), inside = right > W - 110;      // no room beside the slide's edge: inside the box
+    const tplLine = +(stylesOf()[roleOf(o) || 'body']?.line) || 1.25;
+    for (const b of pm.querySelectorAll('p, h1, h2, h3')) {
+      const cell = b.closest('td, th');
+      if (cell && !inCursorColumn(cell)) continue;               // in a table: only the column the cursor is in
+      const cs = getComputedStyle(b), before = (parseFloat(cs.paddingTop) || 0) * PT, after = (parseFloat(cs.paddingBottom) || 0) * PT;
+      const line = +b.getAttribute('data-lh') || +o.lineHeight || 1.25, notes = [];
+      if (Math.abs(before) > 0.05) notes.push(`előtte ${num(before)} pt`);
+      if (Math.abs(after) > 0.05) notes.push(`utána ${num(after)} pt`);
+      if (Math.abs(line - tplLine) > 0.001) notes.push(`sorköz ${String(Math.round(line * 100) / 100).replace('.', ',')}`);
+      if (!notes.length) continue;
+      const br = b.getBoundingClientRect(), y = Math.abs(after) > 0.05 ? Y(br.bottom) - 14 : Y(br.top) + 1;
+      const cr = cell ? X(cell.getBoundingClientRect().right) : 0;                       // a cell's labels stand inside the cell, at its right edge
+      html += `<span class="mk-dev${cell || inside ? ' in' : ''}" style="left:${cell ? cr - 3 : inside ? right - 3 : right + 6}px;top:${Math.max(Y(br.top) + 1, y)}px">${notes.join(' · ')}</span>`;
+    }
+  }
+  return html;
+}
+let eyeIssues = [];
 function drawEye() {
   let layer = stage.querySelector(':scope > #marksLayer'); if (!layer) { layer = document.createElement('div'); layer.id = 'marksLayer'; stage.appendChild(layer); }
+  eyeIssues = [];
   if (!showMarks || sh) { layer.innerHTML = ''; return; }
   let html = '';
   for (const pm of stage.querySelectorAll('.obj .ProseMirror')) { const tmp = document.createElement('div'); try { drawMarks(tmp, pm, stage, scale); } catch (e) { /* skip */ } html += tmp.innerHTML; }
-  for (const j of jumpers()) html += `<span class="mk-jump" style="left:${j.o.x}px;top:${j.o.y}px;width:${j.o.w}px;height:${j.o.h}px"><i>${String(j.d).replace('.', ',')} px eltérés a(z) ${j.si + 1}. diához képest – ugrani fog</i></span>`;
+  const box = o => { const b = bounds(o); return `left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px`; };
+  eyeIssues = slideIssues(cur);
+  eyeIssues.forEach((j, k) => {
+    const txt = j.kind === 'pos' ? `${String(j.d).replace('.', ',')} px eltérés a(z) ${j.si + 1}. diához képest – ugrani fog` : `Más a formázása, mint a(z) ${j.si + 1}. dián (${j.keys.map(x => FMT_NAMES[x] || x).join(', ')})`;
+    html += `<span class="mk-jump${j.kind === 'fmt' ? ' mk-fmt' : ''}" style="${box(j.o)}"><i data-fix="${k}" title="Kattints: ${j.kind === 'pos' ? 'az objektum pontosan oda kerül, ahol a másik dián áll' : 'a formázása olyan lesz, mint a másik dián'}">${txt} · javítás</i></span>`;
+  });
+  html += spacingLabels();
+  if (mode === 'slides' && doc.slides[cur]) for (const v of overflowing(doc.slides[cur], stage)) html += `<span class="mk-over" style="${box(v.o)}"><i>A szöveg lelóg a diáról (${v.sides})</i></span>`;
   layer.innerHTML = html;
+}
+/** A click on a mark's "javítás": the object takes the place / the look it has on the neighbouring slide. */
+function fixIssue(k) {
+  const j = eyeIssues[k]; if (!j) return;
+  if (editing) exitEdit();
+  const {o, q} = j;
+  if (j.kind === 'fmt') { for (const key of j.keys) { if (q[key] == null) delete o[key]; else o[key] = q[key]; } styled(o); }
+  else {
+    moveObject(o, (q.x - j.qx) - (o.x - j.ox), (q.y - j.qy) - (o.y - j.oy));
+    if (o.type !== 'group') { o.w = q.w; if (!j.ph && !isText(o)) o.h = q.h; if (q.rot) o.rot = q.rot; else delete o.rot; }
+    const g = groupOf(o.id); if (g) fitGroup(g);
+  }
+  commit(); toast(j.kind === 'fmt' ? 'A formázás egységes lett.' : 'Az objektum a helyére került.');
+}
+addEventListener('pointerdown', e => {
+  const b = e.target instanceof Element && e.target.closest('#marksLayer [data-fix]'); if (!b) return;
+  e.preventDefault(); e.stopPropagation(); fixIssue(+b.dataset.fix);
+}, true);
+/* the same reports as a number on the slide thumbnails (while the eye mode is on) */
+let eyeThumbT = 0;
+function eyeThumbsSoon() { clearTimeout(eyeThumbT); eyeThumbT = setTimeout(eyeThumbs, 300); }
+function eyeThumbs() {
+  for (const m of $$('#plist .eyemark')) m.remove();
+  if (!showMarks || mode !== 'slides') return;
+  const sigs = new Map();
+  for (const t of $$('#plist .thumb[data-i]')) {
+    const i = +t.dataset.i, s = doc.slides[i], sl = t.querySelector('.slide'); if (!s || !sl) continue;
+    const js = slideIssues(i, sigs), ov = overflowing(s, sl), n = js.length + ov.length; if (!n) continue;
+    const what = [js.some(j => j.kind === 'pos') && 'ugró objektum', js.some(j => j.kind === 'fmt') && 'eltérő formázás', ov.length && 'a diáról lelógó szöveg'].filter(Boolean).join(', ');
+    t.querySelector('.frame').insertAdjacentHTML('beforeend', `<span class="eyemark" title="${n} jelzés: ${what}">${svgIcon('eye')}${n}</span>`);
+  }
 }
 
 /* the app's own right-click menu (the system / web view menu is switched off) */
@@ -207,7 +314,7 @@ function ctxItems(e, t) {
     sep();
     add('Megjegyzés hozzáadása', openComment);
     if (o && isTextLike(o) && !o.locked) add('Szöveg szerkesztése', () => enterEdit(o.id), 'Enter');
-    for (const j of jumpers().filter(j => j.o.id === o?.id)) add(`Igazítás a(z) ${j.si + 1}. dián lévőhöz`, () => { Object.assign(o, {x: j.q.x, y: j.q.y, w: j.q.w, h: j.q.h, rot: j.q.rot}); commit(); }, `${String(j.d).replace('.', ',')} px`);
+    for (const j of slideIssues(cur).filter(j => j.o.id === o?.id)) add(j.kind === 'pos' ? `Igazítás a(z) ${j.si + 1}. dián lévőhöz` : `Formázás, mint a(z) ${j.si + 1}. dián`, () => { eyeIssues = [j]; fixIssue(0); }, j.kind === 'pos' ? `${String(j.d).replace('.', ',')} px` : '');
     return items;
   }
   add('Beillesztés', () => pasteFromClipboard(false), 'Ctrl/⌘+V');

@@ -1,4 +1,4 @@
-# Matekos Prezi 1.5.0
+# Matekos Prezi 1.5.3
 
 Presentation editor with live inline TeX, the twin of **Matekos Doksi**. Built with **TipTap**
 (text editor), **MathJax 4** (formulas), **MathLive** (visual formula editor) and **Tauri 2**
@@ -119,6 +119,21 @@ Browser test version: `npm run build:web` → one self-contained `dist-web/index
   files, …). `src/prezi/main.js` lists them and `vite.config.js` joins them into one module when building, so
   they still share one scope. `npm test` also checks that no part is forgotten and that no file uses a name that
   does not exist (ESLint).
+* 1.5.1 – text and checking:
+  * lists: the symbol takes the size and colour its item's text starts with; the indent buttons do what Tab /
+    Shift+Tab do; only `- ` starts a list while typing (`+ ` and `* ` do not); lists pasted from Word, PowerPoint
+    or the web stay lists, with their levels (`src/prezi/paste.js`);
+  * text formatting (font, size, colour, bold…, alignment, lists, spacing) works on every selected text box at once;
+  * typing: `"` becomes „ or ”, `--` becomes – (not inside a `$…` formula; Backspace undoes the correction);
+  * eye mode: also reports nudged placeholders, members of groups and the same text with a different look; a click
+    on a report fixes it; text that leaves the slide is marked in red; the thumbnails show the number of reports;
+  * PDF export: an invisible text layer over the outlines – the text can be searched, selected and copied (a
+    formula's hidden text is its TeX code);
+  * home screen: "continue" looks like the recent files; the "new version" notice has a red outline.
+* 1.5.2: eye mode – for every selected text box, green labels at the end of its paragraphs show the space before /
+  after that is not 0 and a line spacing that differs from the template's; formula editor – the "Egyéb" tab holds
+  Space, Nagy space (`\quad`), Óriás space (`\qquad`) and the frame (`\boxed`).
+* 1.5.3: the spacing labels also appear in tables, for the column the cursor is in.
 
 ## Export
 

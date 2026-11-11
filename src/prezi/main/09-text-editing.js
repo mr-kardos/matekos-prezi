@@ -64,6 +64,7 @@ function exitEdit() {
 }
 /** Run a TipTap command on the selected text box: directly while editing, otherwise on its whole content. */
 function withEditor(fn) {
+  if (onEachText(() => withEditor(fn))) return;
   const o = selObj(); if (!isTextLike(o) || o.locked) return;
   if (o.field) { toast('Automatikus mezőnél csak az egész doboz formázható (betű, szín, igazítás).'); return; }
   if (editing === o.id) { fn(ed.chain().focus()); return; }
