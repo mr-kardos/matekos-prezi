@@ -1,4 +1,4 @@
-# Matekos Prezi 1.4.9
+# Matekos Prezi 1.5.0
 
 Presentation editor with live inline TeX, the twin of **Matekos Doksi**. Built with **TipTap**
 (text editor), **MathJax 4** (formulas), **MathLive** (visual formula editor) and **Tauri 2**
@@ -114,6 +114,11 @@ Browser test version: `npm run build:web` → one self-contained `dist-web/index
 * 1.4.9: zooming with Ctrl/⌘ + two-finger scroll and with a touchpad pinch (Windows and Mac); a profile icon in the
   reviewer's own colour before the names in the comments. Automated tests (`npm test`, in `tests/`): where formulas
   are cut into parts and that the markers do not change their layout, animation order, automatic drafts and recovery.
+* 1.5.0 (no change in the app itself – the built app is byte for byte the same as it would be without the split): the
+  editor's code, formerly one 250 KB file, is in `src/prezi/main/`, one file per topic (rendering, pointer, ribbon,
+  files, …). `src/prezi/main.js` lists them and `vite.config.js` joins them into one module when building, so
+  they still share one scope. `npm test` also checks that no part is forgotten and that no file uses a name that
+  does not exist (ESLint).
 
 ## Export
 
