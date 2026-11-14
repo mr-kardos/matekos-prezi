@@ -10,6 +10,7 @@ import { tableContext, changeListLevel } from '../editor/extensions.js';
 import { svg as svgIcon } from '../icons.js';
 import { saveTemplateFile, updateTemplateFile, openTemplateFile, templateFilePath, renameCurrentFile, currentFileExists, pickFile, isTauri, savePresentation, saveExport, openPresentation, openPathFile, watchOpenedFiles, setCurrentPath, getCurrentPath, getCurrentHandle, setCurrentHandle, currentFileName, autosave, loadAutosave, recoverableDrafts, takeDraft, dropDraft, shelveDraft, recentFiles, forgetRecent } from '../files.js';
 import { Anim } from './anim.js';
+import { splitSlide, mergeRun, findRuns, clicksOf } from './steps.js';
 import { partCount, markDoc, partPieces, partEls, setPartVis, refreshParts } from './parts.js';
 import { W, H, uid, clone, emptyDoc, textDoc, tableDoc, T, M, isEmptyText, blockCount, makeBackground, phName, ph, TITLE_PROMPT,
   defaultMaster, defaultTemplates, newSlide as makeSlide, syncPlaceholders as syncPh, migrate,

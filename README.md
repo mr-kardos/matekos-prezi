@@ -1,4 +1,4 @@
-# Matekos Prezi 1.5.3
+# Matekos Prezi 1.5.5
 
 Presentation editor with live inline TeX, the twin of **Matekos Doksi**. Built with **TipTap**
 (text editor), **MathJax 4** (formulas), **MathLive** (visual formula editor) and **Tauri 2**
@@ -134,6 +134,21 @@ Browser test version: `npm run build:web` → one self-contained `dist-web/index
   after that is not 0 and a line spacing that differs from the template's; formula editor – the "Egyéb" tab holds
   Space, Nagy space (`\quad`), Óriás space (`\qquad`) and the frame (`\boxed`).
 * 1.5.3: the spacing labels also appear in tables, for the column the cursor is in.
+* 1.5.4: formula editor – the Space and Óriás space buttons show their names.
+* 1.5.5:
+  * "⋯ További funkciók" (end of the ribbon): "Minden lépés külön diára" and "A lépések egy diára, animációval" – the
+    click steps of the slides become slides of their own (no slide transition between them; a step's effects start
+    when its slide appears), or consecutive slides that are steps of one another become one slide with click
+    animations. Asked first; one undo step. The slideshow looks the same either way (checked screen by screen; only
+    the slide / step counter differs). Slides with a video are left as they are. Code: `src/prezi/steps.js`, with
+    two additions to the animation model: `pieces` (only some pieces of a box revealed in parts) and `pre` (applied
+    before the slide is shown);
+  * ribbon as in Matekos Doksi: one alignment button with a menu (its icon shows the alignment in effect, highlighted
+    for every alignment but left), then paragraph, tab stops, the lists, and the two indent buttons;
+  * left panel: the transition button is the size of the others, without an arrow, with a clearer icon; the four
+    buttons stay in one row;
+  * no extra empty line under a list at the end of a text box (files saved before lose the one that was added);
+  * the eye button is called "Lektor mód".
 
 ## Export
 

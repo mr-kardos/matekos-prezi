@@ -48,18 +48,15 @@
       <button class="tb cbtn" data-pop="popHi" data-k="text" data-icon="marker" title="Kijelölt szöveg kiemelése"><i class="cbar" style="background:#fff176"></i></button>
     </div>
     <div class="grp">
-      <button class="tb" data-cmd="alignLeft" data-k="text" data-icon="alignL" title="Balra igazítás"></button>
-      <button class="tb" data-cmd="alignCenter" data-k="text" data-icon="alignC" title="Középre zárás"></button>
-      <button class="tb" data-cmd="alignRight" data-k="text" data-icon="alignR" title="Jobbra igazítás"></button>
-      <button class="tb" data-cmd="alignJustify" data-k="text" data-icon="alignJ" title="Sorkizárt"></button>
-    </div>
-    <div class="grp">
+      <button class="tb aligndd" data-pop="popAlign" data-k="text" id="bAlign" title="Igazítás: balra, középre, jobbra, sorkizárt"><span class="alignico" id="alignIco"></span></button>
+      <button class="tb" data-pop="popPara" data-k="text" data-icon="para" title="Bekezdés: sorköz, behúzások és bekezdésköz"></button>
+      <button class="tb" data-pop="popTabs" data-k="text" data-icon="tabstop" title="Tabulátorok"></button>
       <button class="tb" data-cmd="bulletList" data-k="text" data-icon="bul" title="Felsorolás"></button>
       <button class="tb mini" data-pop="popBullet" data-k="text" data-icon="chev" title="Felsorolásjel: szimbólum vagy kép"></button>
       <button class="tb" data-cmd="orderedList" data-k="text" data-icon="num" title="Számozott lista"></button>
       <button class="tb mini" data-pop="popNum" data-k="text" data-icon="chev" title="Számozás stílusa"></button>
-      <button class="tb" data-pop="popPara" data-k="text" data-icon="para" title="Bekezdés: sorköz, behúzások és bekezdésköz"></button>
-      <button class="tb" data-pop="popTabs" data-k="text" data-icon="tabstop" title="Tabulátorok"></button>
+      <button class="tb" data-cmd="outdent" data-k="text" data-icon="outdent" title="Behúzás csökkentése (listában Shift+Tab)"></button>
+      <button class="tb" data-cmd="indent" data-k="text" data-icon="indent" title="Behúzás növelése (listában Tab)"></button>
     </div>
     <div class="grp">
       <button class="tb" data-cmd="text" data-icon="textbox" title="Szöveg (T)"><span class="lbl">Szöveg</span></button>
@@ -78,11 +75,14 @@
     <div class="grp">
       <button class="tb" data-pop="popFind" data-icon="search" title="Keresés és csere (Ctrl/⌘+F)"></button>
       <button class="tb" data-cmd="spell" data-icon="spell" title="Helyesírás-ellenőrzés (magyar) be / ki"></button>
-      <button class="tb" data-cmd="marks" data-icon="eye" title="Rejtett formázás mutatása (és a diaváltáskor ugró objektumok jelölése)"></button>
+      <button class="tb" data-cmd="marks" data-icon="eye" title="Lektor mód: rejtett formázás, térközök, a diáról lelógó szöveg és a diaváltáskor ugró objektumok jelölése"></button>
       <button class="tb tplonly" data-pop="popPh" data-icon="placeholder" title="Helykitöltő hozzáadása az elrendezéshez"><span class="lbl">Helykitöltő, mező</span></button>
     </div>
     <div class="grp">
       <button class="tb" data-cmd="delete" data-k="any" data-icon="trash" title="Törlés (Delete)"></button>
+    </div>
+    <div class="grp">
+      <button class="tb" data-pop="popMore" data-icon="dots" title="További funkciók"></button>
     </div>
 
   </div>
@@ -310,6 +310,16 @@
 </div>
 <div class="pop" id="popSave" hidden>
   <button class="pitem" id="fSaveAs">Mentés másként…</button>
+</div>
+<div class="pop menu" id="popAlign" hidden>
+  <button class="pitem mitem" data-align="left"><span class="cico" data-icon="alignL"></span><span class="clbl">Balra igazítás</span></button>
+  <button class="pitem mitem" data-align="center"><span class="cico" data-icon="alignC"></span><span class="clbl">Középre zárás</span></button>
+  <button class="pitem mitem" data-align="right"><span class="cico" data-icon="alignR"></span><span class="clbl">Jobbra igazítás</span></button>
+  <button class="pitem mitem" data-align="justify"><span class="cico" data-icon="alignJ"></span><span class="clbl">Sorkizárt</span></button>
+</div>
+<div class="pop menu" id="popMore" hidden>
+  <button class="pitem mitem" data-more="split"><span class="cico" data-icon="stepsSplit"></span><span class="clbl">Minden lépés külön diára</span></button>
+  <button class="pitem mitem" data-more="merge"><span class="cico" data-icon="stepsMerge"></span><span class="clbl">A lépések egy diára, animációval</span></button>
 </div>
 <div class="pop" id="popTrans" hidden>
   <div class="ptitle">Diaváltás erre a diára</div>

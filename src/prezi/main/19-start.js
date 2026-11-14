@@ -56,3 +56,6 @@ setMediaLookup(k => media[k]);
 window.mprezi = {runUpdateCheck, insertVideo: (data, name) => insertVideo({data, name}), dbgRender: (o, cb) => renderForImport(o, cb), importBuffer: (data, name) => importPowerPoint({data, name}), snapshotTest: async () => { const c = await slideCanvas(doc, tgt(), renderSlide, layoutOf); return [...c.getContext('2d').getImageData(640, 5, 1, 1).data]; }, get doc() { return doc; }, get media() { return media; }, get editor() { return ed; }, get sel() { return sel; }, set sel(v) { select(v); }, get selIds() { return selIds; }, setSel: ids => { setSel(ids); drawSelection(); renderProps(); updateRibbon(); }, groupSelected, ungroupSelected, addShape, addTable, toggleLock,
   gotoSlide, enterEdit, exitEdit, commit, renderAll, buildPptx: () => buildPptx(doc, renderSlide, layoutOf, () => {}),
   buildPdf: m => buildPdf(doc, renderSlide, layoutOf, m, () => {}), renderSlide, packMprezi, unpackMprezi, loadDocument, Anim};
+// for the tests that run the app in a browser (tests/app.e2e.mjs)
+Object.assign(window.mprezi, {startShow, showNext, stopShow, splitAllSteps, mergeAllSteps, commit: () => commit()});
+Object.defineProperty(window.mprezi, 'slideCount', {get: () => doc.slides.length});

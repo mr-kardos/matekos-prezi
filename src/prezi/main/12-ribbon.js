@@ -169,8 +169,11 @@ function updateRibbon() {
   ribbon.querySelector('[data-cmd=subscript]').classList.toggle('on', edit && ed.isActive('subscript'));
   ribbon.querySelector('[data-cmd=bulletList]').classList.toggle('on', edit && ed.isActive('bulletList'));
   ribbon.querySelector('[data-cmd=orderedList]').classList.toggle('on', edit && ed.isActive('orderedList'));
-  for (const [c, a] of [['alignLeft', 'left'], ['alignCenter', 'center'], ['alignRight', 'right'], ['alignJustify', 'justify']])
-    ribbon.querySelector(`[data-cmd=${c}]`).classList.toggle('on', isTextLike(o) && (edit && ed.isActive({textAlign: a}) || (!edit || !['left', 'center', 'right', 'justify'].some(x => ed.isActive({textAlign: x}))) && o.align === a));
+  // alignment: one button; its icon is the alignment in effect, and it is highlighted for every alignment but "left"
+  { const al = !isTextLike(o) ? 'left' : (edit && ['left', 'center', 'right', 'justify'].find(x => ed.isActive({textAlign: x}))) || o.align || 'left';
+    if ($('#bAlign').dataset.al !== al) { $('#bAlign').dataset.al = al; $('#alignIco').innerHTML = svgIcon({left: 'alignL', center: 'alignC', right: 'alignR', justify: 'alignJ'}[al] || 'alignL'); }
+    $('#bAlign').classList.toggle('on', isTextLike(o) && al !== 'left');
+    for (const b of $$('#popAlign [data-align]')) b.classList.toggle('on', b.dataset.align === al); }
   if (isTextLike(o)) {
     let size = o.size * PT, color = o.color;
     if (edit) { try { const d = ed.view.domAtPos(ed.state.selection.from), el = d.node.nodeType === 1 ? d.node : d.node.parentElement; if (el && ed.view.dom.contains(el)) { const cs = getComputedStyle(el); size = parseFloat(cs.fontSize) * PT; color = cs.color; } } catch (e) { /* ignore */ } }
@@ -503,3 +506,43 @@ $('#popPh').addEventListener('click', e => {
 });
 $('#bTpl').onclick = () => { if (cmtMode) commentsOn(false); mode === 'template' ? closeTemplateBuilder() : openTemplateBuilder(); };
 
+
+/* alignment menu */
+$('#alignIco').innerHTML = svgIcon('alignL');
+$('#popAlign').addEventListener('mousedown', e => e.preventDefault());
+$('#popAlign').addEventListener('click', e => {
+  const b = e.target.closest('[data-align]'); if (!b) return; closePops();
+  COMMANDS['align' + b.dataset.align[0].toUpperCase() + b.dataset.align.slice(1)]();
+  updateRibbon();
+});
+/* "További funkciók" */
+$('#popMore').addEventListener('mousedown', e => e.preventDefault());
+$('#popMore').addEventListener('click', e => {
+  const b = e.target.closest('[data-more]'); if (!b) return; closePops();
+  if (b.dataset.more === 'split') splitAllSteps(); else if (b.dataset.more === 'merge') mergeAllSteps();
+});
+/* Steps: every click step on its own slide ⇄ the steps of a slide as its animations (src/prezi/steps.js). The
+   slideshow looks the same either way. Always asked first; one undo step. */
+const hasVideo = s => flatObjects(s.objects).some(o => o.type === 'video');
+async function splitAllSteps() {
+  if (editing) exitEdit();
+  const todo = doc.slides.filter(s => clicksOf(s) > 0), skip = todo.filter(hasVideo), go = todo.filter(s => !hasVideo(s));
+  if (!go.length) { toast(skip.length ? 'A kattintásra induló animációk videót tartalmazó diákon vannak – ezek nem bonthatók szét (a videó minden lépésnél elölről indulna).' : 'Nincs kattintásra induló animáció: minden lépés már külön dián van.'); return; }
+  const add = go.reduce((t, s) => t + clicksOf(s), 0);
+  if (!await confirmBox(`${go.length} dia lépései ${add} új diára kerülnek: minden kattintás egy új dia lesz, diaváltás nélkül, és a lépés animációi a dia megjelenésekor indulnak. A diavetítés ugyanúgy néz ki.${skip.length ? ` (${skip.length} videót tartalmazó dia marad, ahogy van.)` : ''} Folytatod?`, 'Szétbontás')) return;
+  const h = {uid, reid: (o, map) => reid(o, map)}, curId = tgt()?.id;
+  doc.slides = doc.slides.flatMap(s => go.includes(s) ? splitSlide(s, h) : [s]);
+  cur = Math.max(0, doc.slides.findIndex(s => s.id === curId)); setSel([]); commit();
+  toast(`Kész: ${add} új dia. Visszavonás: Ctrl/⌘+Z.`);
+}
+async function mergeAllSteps() {
+  if (editing) exitEdit();
+  const runs = findRuns(doc.slides, sigOf).filter(r => !r.some(i => hasVideo(doc.slides[i])));
+  if (!runs.length) { toast('Nincs egymás lépéseiként egy diára vonható diasor (a dia a következőn ugyanott, változatlanul folytatódik, diaváltás nélkül).'); return; }
+  const n = runs.reduce((t, r) => t + r.length, 0), cmts = runs.some(r => r.slice(1).some(i => { const s = doc.slides[i]; return s.cmt?.length || flatObjects(s.objects).some(o => o.cmt?.length); }));
+  if (!await confirmBox(`${n} dia ${runs.length} diává áll össze: a lépései kattintásra induló animációk lesznek. A diavetítés ugyanúgy néz ki.${cmts ? ' A később következő diák megjegyzései elvesznek.' : ''} Folytatod?`, 'Összevonás')) return;
+  const curId = tgt()?.id;
+  for (const r of [...runs].reverse()) doc.slides.splice(r[0], r.length, mergeRun(r.map(i => doc.slides[i]), {uid, sigOf}));
+  cur = Math.max(0, doc.slides.findIndex(s => s.id === curId)); if (cur < 0) cur = 0; setSel([]); commit();
+  toast(`Kész: ${n} diából ${runs.length} lett. Visszavonás: Ctrl/⌘+Z.`);
+}

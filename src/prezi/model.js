@@ -148,6 +148,11 @@ export function migrate(d) {
   }
   for (const g of [d.master, ...Object.values(d.templates), ...d.slides]) {
     g.objects.forEach(migrateObject);
+    // up to 1.5.4 an empty line was added under a list at the end of a text box: it goes
+    for (const o of g.objects) {
+      const c = o.type === 'text' && o.doc?.content;
+      if (c && c.length > 1 && /List$/.test(c[c.length - 2].type) && c[c.length - 1].type === 'paragraph' && !c[c.length - 1].content?.length) c.pop();
+    }
     // version 0.1: tables lived inside text boxes – they become table objects below the text
     for (const o of [...g.objects]) {
       if (o.type !== 'text' || !o.doc?.content?.some(b => b.type === 'table')) continue;

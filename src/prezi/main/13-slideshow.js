@@ -27,8 +27,11 @@ function loadShowSlide(i, step, animateAuto, withTransition) {
   let wait = 0;
   if (t && t.type && t.type !== 'none') { old.classList.add('leaving'); show.append(el); wait = playTransition(old, el, t); }
   else { old?.remove(); show.prepend(el); }
-  const list = Anim.expand(doc.slides[i]), groups = Anim.groups(list);
+  const all = Anim.expand(doc.slides[i]), list = all.filter(a => !a.pre), groups = Anim.groups(list);
   for (const k of Anim.initiallyHidden(list)) { const e = keyEl(el, k); if (e) setVis(e, 'hidden'); }
+  // effects applied before the slide is seen (a slide of one step: what the steps before it already did)
+  for (const a of all) if (a.pre) { const e = keyEl(el, a.key); if (!e) continue; const c = Anim.EFFECTS[a.effect].cls;
+    if (c === 'exit') setVis(e, 'hidden'); else if (c === 'entr') setVis(e, 'visible'); else if (a.effect === 'grow' && !e.set) e.style.transform = 'scale(1.5)'; }
   const offset = groups[0]?.auto ? 1 : 0;
   Object.assign(sh, {i, step, el, groups, offset, busy: null});
   const instant = grp => grp.chains.flat().forEach(a => { const e = keyEl(el, a.key); if (!e) return; const c = Anim.EFFECTS[a.effect].cls;
@@ -131,7 +134,7 @@ function showNext() {
 }
 function showPrev() {
   if (sh.step > 0) loadShowSlide(sh.i, sh.step - 1, false);
-  else if (sh.i > 0) { const g = Anim.groups(Anim.expand(doc.slides[sh.i - 1])); loadShowSlide(sh.i - 1, g.length - (g[0]?.auto ? 1 : 0), false); }
+  else if (sh.i > 0) { const g = Anim.groups(Anim.expand(doc.slides[sh.i - 1]).filter(a => !a.pre)); loadShowSlide(sh.i - 1, g.length - (g[0]?.auto ? 1 : 0), false); }
 }
 show.addEventListener('click', () => sh && showNext());
 addEventListener('resize', () => { fitStage(); if (sh) showScale(sh.el); closePops(); });

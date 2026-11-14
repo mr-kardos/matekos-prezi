@@ -65,8 +65,13 @@ export const Anim = (() => {
     for (const a of slide.anims) {
       const o = slide.objects.find(q => q.id === a.target); if (!o) continue;
       const keys = pieceKeys(slide, o);
+      // pieces: the animation drives only these pieces of a box revealed in parts (one slide per step, steps.js)
+      const only = Array.isArray(a.pieces) && keys.length > 1 ? new Set(a.pieces) : null;
+      let first = true;
       keys.forEach((key, i) => {
-        const trigger = i === 0 ? a.trigger : a.byParagraph ? a.trigger : 'with';
+        if (only && !only.has(i)) return;
+        const trigger = first ? a.trigger : a.byParagraph ? a.trigger : 'with';
+        first = false;
         out.push({...a, key, trigger, src: a.id, part: keys.length > 1 ? i : null});
       });
     }
@@ -105,7 +110,7 @@ export const Anim = (() => {
   /** keys hidden before any animation runs (their first effect is an entrance) */
   function initiallyHidden(list) {
     const first = {};
-    for (const a of list) if (!(a.key in first)) first[a.key] = a.effect;
+    for (const a of list) if (!(a.key in first) && !a.pre) first[a.key] = a.effect;     // pre: applied before the slide is shown (steps.js)
     return new Set(Object.keys(first).filter(k => EFFECTS[first[k]].cls === 'entr'));
   }
   /** Older files: object-level "byParagraph" flag. */

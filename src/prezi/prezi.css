@@ -761,7 +761,7 @@ span.tab .tab-sp{ display:inline-block; height:1px; }
 .cfm-card.upd .updmsg{ color:var(--ink-2); line-height:1.45; margin-bottom:14px; }
 .pop{ max-height:calc(100vh - 16px); overflow-y:auto; }
 /* the options under the selected slide: exactly as wide as the slide */
-.slide-actions{ box-sizing:border-box; width:calc(var(--tk) * 1280px); max-width:none; margin-left:22px; flex-wrap:wrap; justify-content:space-between; }
+.slide-actions{ box-sizing:border-box; width:max-content; min-width:calc(var(--tk) * 1280px); max-width:none; margin-left:22px; flex-wrap:nowrap; justify-content:space-between; }   /* the four buttons always in one row */
 /* left panel header (as on the right) */
 #slides{ display:flex; flex-direction:column; }
 .lhead{ flex:none; }
@@ -828,3 +828,14 @@ span.tab .tab-sp{ display:inline-block; height:1px; }
 /* eye mode: space before / after and line spacing of the selected text boxes, at the end of their paragraphs */
 #marksLayer .mk-dev{ font:700 11px/1 var(--ui); background:#fff; color:#00a53c; border:1.5px solid #00b140; border-radius:4px; padding:2px 5px; text-shadow:none; }
 #marksLayer .mk-dev.in{ transform:translateX(-100%); opacity:.95; }
+
+/* ribbon: the alignment button (its icon follows the alignment) and the menus with icons (as in Matekos Doksi) */
+.tb.aligndd{ display:inline-flex; align-items:center; justify-content:center; }
+.tb.aligndd .alignico{ display:inline-flex; align-items:center; justify-content:center; }
+.pop.menu{ min-width:240px; padding:6px; }
+.pop.menu .mitem{ display:flex; justify-content:flex-start; align-items:center; gap:10px; }
+.pop.menu .mitem .cico{ display:inline-flex; width:18px; flex:none; color:var(--ink-2); }
+.pop.menu .mitem .cico svg{ width:16px; height:16px; }
+.pop.menu .mitem .clbl{ flex:1; }
+.pop.menu .mitem.on{ background:var(--hover, rgba(127,127,127,.15)); }
+.pop.menu .mitem.on .cico{ color:var(--accent); }

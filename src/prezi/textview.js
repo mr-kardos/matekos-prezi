@@ -106,6 +106,7 @@ function extensions(kind = 'text') {
     StarterKit.configure({
       heading: table ? false : {levels: [1, 2, 3]}, code: false, codeBlock: false, blockquote: false, horizontalRule: false,
       link: {openOnClick: false, autolink: true, linkOnPaste: true, HTMLAttributes: {rel: 'noopener', target: '_blank'}}, bulletList: false, orderedList: false, listItem: false, dropcursor: {color: '#2f6fdb', width: 2},
+      trailingNode: false,                       // no extra empty line under a final list
       ...(table ? {document: false} : {})
     }),
     ...(table ? [Document.extend({content: 'table'}), KvTable, KvTableRow, KvTableHeader, KvTableCell] : []),
