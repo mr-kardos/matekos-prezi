@@ -81,12 +81,13 @@ export function drawMarks(layer, editorDom, stackEl, scale, styles = null, famLa
     // indentation: from the margin to where the text starts, at the height of the text; labels in the margins
     const ml = parseFloat(cs.marginLeft) || 0, mr = parseFloat(cs.marginRight) || 0, ti = parseFloat(cs.textIndent) || 0, hang = parseFloat(b.getAttribute('data-hang')) || 0;
     const pl = parseFloat(cs.paddingLeft) || 0;
+    const LF = `--lf:${Math.max(10, Math.min(40, (parseFloat(cs.fontSize) || 16) * 0.4)).toFixed(1)}px;`;   // labels follow the size of their text
     const first = rects[0], mid = first ? Y(first.top + first.height / 2) : Y(br.top + (parseFloat(cs.paddingTop) || 0)) + (parseFloat(cs.lineHeight) || 20) / 2;
     const second = rects.find(q => first && q.top > first.bottom - 1), mid2 = second ? Y(second.top + second.height / 2) : mid;
-    if (ml > 0.5) out.push(`<span class="mk-ind lft" style="left:${X(br.left) - ml}px;top:${(ti < -0.5 || hang) ? mid2 : mid}px;width:${ml}px"><i>behúzás ${cm(ml)}</i></span>`);
-    if (mr > 0.5) out.push(`<span class="mk-ind rgt" style="left:${X(br.right)}px;top:${mid}px;width:${mr}px"><i>jobb behúzás ${cm(mr)}</i></span>`);
-    if (Math.abs(ti) > 0.5) out.push(`<span class="mk-ind lft fl" style="left:${X(br.left) + pl + Math.min(0, ti)}px;top:${mid}px;width:${Math.abs(ti)}px"><i>${ti < 0 ? 'függő ' : 'első sor '}${cm(Math.abs(ti))}</i></span>`);
-    if (hang > 0) out.push(`<span class="mk-ind lft fl" style="left:${X(br.left)}px;top:${mid2}px;width:${pl}px"><i>függő ${cm(pl)}</i></span>`);
+    if (ml > 0.5) out.push(`<span class="mk-ind lft" style="${LF}left:${X(br.left) - ml}px;top:${(ti < -0.5 || hang) ? mid2 : mid}px;width:${ml}px"><i>behúzás ${cm(ml)}</i></span>`);
+    if (mr > 0.5) out.push(`<span class="mk-ind rgt" style="${LF}left:${X(br.right)}px;top:${mid}px;width:${mr}px"><i>jobb behúzás ${cm(mr)}</i></span>`);
+    if (Math.abs(ti) > 0.5) out.push(`<span class="mk-ind lft fl" style="${LF}left:${X(br.left) + pl + Math.min(0, ti)}px;top:${mid}px;width:${Math.abs(ti)}px"><i>${ti < 0 ? 'függő ' : 'első sor '}${cm(Math.abs(ti))}</i></span>`);
+    if (hang > 0) out.push(`<span class="mk-ind lft fl" style="${LF}left:${X(br.left)}px;top:${mid2}px;width:${pl}px"><i>függő ${cm(pl)}</i></span>`);
     // differences from the template's paragraph style
     if (styles) {
       const inCell = !!b.closest('td,th');
@@ -104,7 +105,7 @@ export function drawMarks(layer, editorDom, stackEl, scale, styles = null, famLa
       const own = (v, k) => v != null && st && Math.abs(+v - (+st[k] || 0)) > 0.01;
       if (Math.abs(csb) > 0.05) (own(sb, 'spaceBefore') ? notes : same).push('előtte ' + fmt(csb) + ' pt');
       if (Math.abs(csa) > 0.05) (own(sa, 'spaceAfter') ? notes : same).push('utána ' + fmt(csa) + ' pt');
-      if (notes.length || same.length) out.push(`<span class="mk-devs${inCell ? ' incell' : ''}" style="left:${inCell ? X(br.right) - 2 : X(br.right) + 22}px;top:${Y(br.top) + 1}px">${notes.length ? `<span class="mk-dev">${notes.join(' · ')}</span>` : ''}${same.length ? `<span class="mk-same">${same.join(' · ')}</span>` : ''}</span>`);
+      if (notes.length || same.length) out.push(`<span class="mk-devs${inCell ? ' incell' : ''}" style="${LF}left:${inCell ? X(br.right) - 2 : X(br.right) + 22}px;top:${Y(br.top) + 1}px">${notes.length ? `<span class="mk-dev">${notes.join(' · ')}</span>` : ''}${same.length ? `<span class="mk-same">${same.join(' · ')}</span>` : ''}</span>`);
       // text runs with their own font, size or letter spacing
       if (st && !inCell) for (const sp of b.querySelectorAll('span[style]')) {
         if (sp.closest(SKIP)) continue;
@@ -114,7 +115,8 @@ export function drawMarks(layer, editorDom, stackEl, scale, styles = null, famLa
         if (ss.letterSpacing && ss.letterSpacing !== 'normal') { const v = parseFloat(ss.letterSpacing); if (Math.abs(v - (+st.letter || 0)) > 0.01) n2.push('betűköz ' + String(v).replace('.', ',') + ' pt'); }
         if (!n2.length) continue;
         const rs = Array.from(sp.getClientRects()).filter(q => q.width > 0);
-        rs.forEach((q, k) => out.push(`<span class="mk-run" style="left:${X(q.left)}px;top:${Y(q.top)}px;width:${q.width / scale}px;height:${q.height / scale}px">${k === 0 ? `<i>${n2.join(' · ')}</i>` : ''}</span>`));
+        const rf = `--lf:${Math.max(10, Math.min(40, (parseFloat(getComputedStyle(sp).fontSize) || 16) * 0.4)).toFixed(1)}px;`;
+        rs.forEach((q, k) => out.push(`<span class="mk-run" style="${rf}left:${X(q.left)}px;top:${Y(q.top)}px;width:${q.width / scale}px;height:${q.height / scale}px">${k === 0 ? `<i>${n2.join(' · ')}</i>` : ''}</span>`));
       }
     }
   }

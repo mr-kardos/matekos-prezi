@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Anim } from '../src/prezi/anim.js';
+import { blockPieceCounts } from '../src/prezi/parts.js';
 import { splitSlide, mergeRun, findRuns, slideStates, slideStatesBefore, clicksOf } from '../src/prezi/steps.js';
 
 let n = 0;
@@ -18,8 +19,10 @@ const A = (target, effect, trigger, extra = {}) => ({ id: uid(), target, effect,
 const stepEffects = s => { const g = Anim.groups(Anim.expand(s).filter(a => !a.pre)); return g.map(x => x.chains.flat().map(a => [a.effect, a.key, a.trigger, Anim.durOf(a), Anim.delayOf(a), a.dir || ''].join())); };
 const norm = st => ({ vis: Object.fromEntries(Object.entries(st.vis).filter(([, v]) => v)), grow: Object.fromEntries(Object.entries(st.grow).filter(([, v]) => v)) });
 /** What is seen, per object of the original slide: its pieces shown / grown (a whole-object key stands for all its pieces). */
-const seen = (orig, st) => Object.fromEntries(orig.objects.map(o => { const ks = Anim.pieceKeys(orig, o);
-  return [o.id, ks.map(k => [!!(st.vis[k] ?? st.vis[o.id]), !!(st.grow[k] ?? st.grow[o.id])].map(Number).join('')).join(' ')]; }));
+// `slide`: the slide the state belongs to – a copy of a box there may have fewer paragraphs (the later ones are not seen)
+const seen = (orig, st, slide = orig) => Object.fromEntries(orig.objects.map(o => { const ks = Anim.pieceKeys(orig, o), mine = slide.objects.find(q => q.id === o.id);
+  const by = Anim.splitMode(orig, o)?.mode === 'parts', have = mine && mine.type === 'text' ? blockPieceCounts(mine, by).reduce((x, y) => x + y, 0) : ks.length;
+  return [o.id, ks.map((k, i) => i >= have ? '00' : [!!(st.vis[k] ?? st.vis[o.id]), !!(st.grow[k] ?? st.grow[o.id])].map(Number).join('')).join(' ')]; }));
 
 const SAMPLE = () => ({
   id: 's1', template: 'body', transition: { type: 'fade' },
@@ -40,10 +43,12 @@ test('one slide per step: every slide starts as the step before ended and plays 
   parts.forEach((p, j) => {
     assert.equal(clicksOf(p), 0, 'a step slide has no clicks');
     const present = st => ({ vis: Object.fromEntries(Object.entries(st.vis).filter(([k]) => p.objects.some(o => o.id === k.split('#')[0]))), grow: st.grow });
-    if (j > 0) assert.deepEqual(seen(s, present(slideStatesBefore(p))), seen(s, states[j - 1]), `slide ${j} starts as step ${j - 1} ended`);
-    assert.deepEqual(seen(s, present(slideStates(p).at(-1))), seen(s, states[j]), `slide ${j} ends as step ${j}`);
+    if (j > 0) assert.deepEqual(seen(s, present(slideStatesBefore(p)), p), seen(s, states[j - 1]), `slide ${j} starts as step ${j - 1} ended`);
+    assert.deepEqual(seen(s, present(slideStates(p).at(-1)), p), seen(s, states[j]), `slide ${j} ends as step ${j}`);
     const own = stepEffects(p)[0] || [], orig = j === 0 ? (eff[0] || []) : eff[j - (Anim.groups(Anim.expand(s))[0].auto ? 0 : 1)];
-    assert.deepEqual(own.map(x => x.split(',').filter((_, i) => i !== 2)), (orig || []).map(x => x.split(',').filter((_, i) => i !== 2)), `slide ${j} plays the same effects`);
+    // a key of a box that is not cut into pieces on the copy (it has one paragraph left) is the whole box there
+    const nk = x => { const f = x.split(','); const id = f[1].split('#')[0], o = p.objects.find(q => q.id === id); if (o && Anim.pieceKeys(p, o).length === 1) f[1] = id; return f.filter((_, i) => i !== 2).join(); };
+    assert.deepEqual(own.map(nk), (orig || []).map(nk), `slide ${j} plays the same effects`);
   });
 });
 
@@ -77,4 +82,30 @@ test('slides that are not steps of one another are not merged', () => {
   const m = mergeRun([a, e], { uid, sigOf });
   assert.equal(clicksOf(m), 1); assert.equal(m.objects.length, 2);
   assert.deepEqual(Anim.expand(m).map(x => [x.effect, x.trigger]), [['appear', 'click']]);
+});
+
+test('split: the copies of a box shown paragraph by paragraph have only the paragraphs they show', () => {
+  const parts = splitSlide(SAMPLE(), keep);
+  const lens = parts.map(p => { const t = p.objects.find(o => o.id === 'T'); return t ? t.doc.content.length : 0; });
+  assert.deepEqual(lens, [0, 1, 2, 2, 3, 3, 3].slice(0, parts.length));
+});
+
+test('merge: the same text box growing paragraph by paragraph becomes one box revealed by paragraphs', () => {
+  const T = (...ps) => ({ ...box('T' + ps.length, 40, ...ps.map(P)), h: 60 * ps.length });
+  const slides = [1, 2, 3].map(k => ({ id: 's' + k, template: 'body', objects: [T(...['Első', 'Második', 'Harmadik'].slice(0, k)), shape('R' + k, 700)], anims: [] }));
+  assert.deepEqual(findRuns(slides, sigOf), [[0, 1, 2]]);
+  const m = mergeRun(slides, { uid, sigOf });
+  assert.equal(m.objects.filter(o => o.type === 'text').length, 1, 'one text box');
+  const t = m.objects.find(o => o.type === 'text');
+  assert.equal(t.doc.content.length, 3, 'with all its paragraphs');
+  assert.deepEqual(m.anims.map(a => [a.effect, a.trigger, a.byParagraph, a.pieces]), [['appear', 'click', true, [1, 2]]], 'one "by paragraph" effect');
+  assert.equal(clicksOf(m), 2);
+  assert.deepEqual(slideStates(m).map(st => [0, 1, 2].map(i => st.vis[`${t.id}#${i}`] ? 1 : 0).join('')), ['100', '110', '111']);
+});
+
+test('split and merge back: the box revealed by paragraphs comes back as one box', () => {
+  const s = SAMPLE(), m = mergeRun(splitSlide(s, fresh), { uid, sigOf });
+  const t = m.objects.filter(o => o.type === 'text');
+  assert.equal(t.length, 1); assert.equal(t[0].doc.content.length, 3);
+  assert.equal(clicksOf(m), clicksOf(s));
 });

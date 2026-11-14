@@ -839,3 +839,8 @@ span.tab .tab-sp{ display:inline-block; height:1px; }
 .pop.menu .mitem .clbl{ flex:1; }
 .pop.menu .mitem.on{ background:var(--hover, rgba(127,127,127,.15)); }
 .pop.menu .mitem.on .cico{ color:var(--accent); }
+
+/* Lektor mód: the labels follow the size of the text they belong to (--lf, set with every label) */
+#marksLayer .mk-ind i{ font-size:var(--lf, 10px); top:calc(var(--lf, 10px) * -0.6); padding:calc(var(--lf, 10px) * .1) calc(var(--lf, 10px) * .3); }
+#marksLayer .mk-dev{ font-size:var(--lf, 11px); padding:calc(var(--lf, 11px) * .18) calc(var(--lf, 11px) * .45); }
+#marksLayer .mk-run i, #marksLayer .mk-devs{ font-size:var(--lf, 10px); }

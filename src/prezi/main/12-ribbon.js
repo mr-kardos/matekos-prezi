@@ -84,8 +84,8 @@ const COMMANDS = {
   alignLeft: () => setAlign('left'), alignCenter: () => setAlign('center'), alignRight: () => setAlign('right'), alignJustify: () => setAlign('justify'),
   bulletList: () => listCmd('bulletList'), orderedList: () => listCmd('orderedList'),
   // in a list the buttons do exactly what Tab / Shift+Tab do
-  indent: () => withEditor(c => { if (!ed.isActive('listItem')) c.shiftIndent(1).run(); else if (!changeListLevel(ed.view, 1)) c.sinkListItem('listItem').run(); }),
-  outdent: () => withEditor(c => { if (!ed.isActive('listItem')) c.shiftIndent(-1).run(); else if (!changeListLevel(ed.view, -1)) c.liftListItem('listItem').run(); }),
+  indent: () => withEditor(c => { if (!ed.isActive('listItem')) c.shiftIndent(0.8).run(); else if (!changeListLevel(ed.view, 1)) c.sinkListItem('listItem').run(); }),
+  outdent: () => withEditor(c => { if (!ed.isActive('listItem')) c.shiftIndent(-0.8).run(); else if (!changeListLevel(ed.view, -1)) c.liftListItem('listItem').run(); }),
   text: addText, math: () => openMath(null, null), image: () => pickImage(null), video: () => insertVideo(),
   rect: () => addShape('rect'), ellipse: () => addShape('ellipse'), triangle: () => addShape('triangle'), arrow: () => addShape('arrow'), line: () => addShape('line'),
   painter: () => {

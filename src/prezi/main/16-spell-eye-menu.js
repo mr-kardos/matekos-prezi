@@ -146,9 +146,10 @@ function spacingLabels() {
       if (Math.abs(after) > 0.05) notes.push(`utána ${num(after)} pt`);
       if (Math.abs(line - tplLine) > 0.001) notes.push(`sorköz ${String(Math.round(line * 100) / 100).replace('.', ',')}`);
       if (!notes.length) continue;
-      const br = b.getBoundingClientRect(), y = Math.abs(after) > 0.05 ? Y(br.bottom) - 14 : Y(br.top) + 1;
+      const lf = Math.max(10, Math.min(40, (parseFloat(cs.fontSize) || 16) * 0.4));          // the label follows the size of its text
+      const br = b.getBoundingClientRect(), y = Math.abs(after) > 0.05 ? Y(br.bottom) - lf * 1.45 : Y(br.top) + 1;
       const cr = cell ? X(cell.getBoundingClientRect().right) : 0;                       // a cell's labels stand inside the cell, at its right edge
-      html += `<span class="mk-dev${cell || inside ? ' in' : ''}" style="left:${cell ? cr - 3 : inside ? right - 3 : right + 6}px;top:${Math.max(Y(br.top) + 1, y)}px">${notes.join(' · ')}</span>`;
+      html += `<span class="mk-dev${cell || inside ? ' in' : ''}" style="--lf:${lf.toFixed(1)}px;left:${cell ? cr - 3 : inside ? right - 3 : right + 6}px;top:${Math.max(Y(br.top) + 1, y)}px">${notes.join(' · ')}</span>`;
     }
   }
   return html;

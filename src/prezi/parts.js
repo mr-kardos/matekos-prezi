@@ -103,6 +103,28 @@ function scan(tex) {
 /* ---------- model ---------- */
 const mathBreaks = node => { let k = 0; (function w(x) { if (x.type === 'math') k += markTex(x.attrs?.tex).breaks; (x.content || []).forEach(w); })(node || {}); return k; };
 /** Animation pieces of a text box when its formulas are revealed in parts: paragraphs / list items, plus the formula parts in them. */
+/** The blocks of a text box as its animation pieces come from them: paragraphs, and list items one by one (an empty
+ *  list is one block): [{block, list (the list around it, without its items) | null}]. */
+export function flatBlocks(doc) {
+  const out = [];
+  for (const b of doc?.content ?? []) {
+    if ((b.type === 'bulletList' || b.type === 'orderedList') && b.content?.length) { const {content, ...list} = b; for (const li of content) out.push({block: li, list}); }
+    else out.push({block: b, list: null});
+  }
+  return out;
+}
+/** The number of animation pieces of every block (paragraph by paragraph: 1 each; formulas in parts: 1 + its breaks). */
+export const blockPieceCounts = (o, parts) => flatBlocks(o.doc).map(({block}) => parts ? 1 + mathBreaks(block) : 1);
+/** A text document with only its first n blocks (a list cut after its n-th item). */
+export function firstBlocks(doc, n) {
+  const content = []; let k = 0;
+  for (const b of doc?.content ?? []) {
+    if (k >= n) break;
+    if ((b.type === 'bulletList' || b.type === 'orderedList') && b.content?.length) { const items = b.content.slice(0, n - k); content.push({...b, content: items}); k += items.length; }
+    else { content.push(b); k++; }
+  }
+  return {...doc, content: content.length ? content : [{type: 'paragraph'}]};
+}
 export function partCount(o) {
   if (o.type !== 'text') return 1;
   let n = 0;

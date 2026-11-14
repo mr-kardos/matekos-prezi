@@ -6,6 +6,7 @@
 //   pieces: [i, …]  the animation drives only these pieces of a text box revealed in parts (paragraphs, formula parts);
 //   pre: true       the animation is applied before the slide is shown (a piece already gone, an object already grown).
 import { Anim } from './anim.js';
+import { flatBlocks, blockPieceCounts, firstBlocks } from './parts.js';
 
 const clone = x => JSON.parse(JSON.stringify(x));
 const keyPart = k => { const i = k.indexOf('#'); return i < 0 ? null : +k.slice(i + 1); };
@@ -100,22 +101,71 @@ export function splitSlide(s, h) {
       }
     }
     t.anims = anims;
+    // a text box revealed paragraph by paragraph: this slide's copy has only the paragraphs it shows (up to the last
+    // one seen or animated here) – the later ones come on the later slides
+    for (const [id, by] of Object.entries(splitOf)) {
+      const so = s.objects.find(o => o.id === id), to = t.objects.find(o => o.id === idOf(id)); if (!so || !to || so.type !== 'text') continue;
+      const counts = blockPieceCounts(so, by === 'parts'), keys = Anim.pieceKeys(s, so);
+      if (keys.length !== counts.reduce((a, b) => a + b, 0)) continue;           // the box is not cut into these pieces
+      const used = new Set(items.filter(a => a.target === id && a.part != null).map(a => a.part));
+      let last = -1;
+      keys.forEach((k, i) => { if (start.vis[k] || states[j].vis[k] || used.has(i)) last = i; });
+      if (last < 0) continue;
+      let nb = 0, acc = 0; while (acc <= last) acc += counts[nb++];                // the blocks up to that piece
+      if (nb >= counts.length || !cutSafe(so.doc, nb)) continue;
+      to.doc = firstBlocks(so.doc, nb);
+      // effects of the pieces that are left out go too
+      t.anims = t.anims.filter(a => a.target !== to.id || !Array.isArray(a.pieces) || a.pieces.every(i => i < acc) || (a.pieces = a.pieces.filter(i => i < acc)).length);
+    }
     out.push(t);
   }
   return out;
+}
+/** Cutting the box after block n changes nothing that is seen: a numbered list keeps the room of its widest number. */
+function cutSafe(doc, n) {
+  let k = 0;
+  for (const b of doc?.content ?? []) {
+    const items = (b.type === 'bulletList' || b.type === 'orderedList') && b.content?.length ? b.content.length : 1;
+    if (b.type === 'orderedList' && k < n && n < k + items && String(items).length !== String(n - k).length) return false;
+    k += items;
+  }
+  return true;
 }
 
 /* ---------- one animated slide from the slides of its steps ---------- */
 const near = (a, b) => Math.abs((a ?? 0) - (b ?? 0)) <= 0.5;
 const sameBox = (a, b) => near(a.x, b.x) && near(a.y, b.y) && near(a.w, b.w) && near(a.h, b.h) && near(a.rot, b.rot) && (a.opacity ?? 1) === (b.opacity ?? 1);
-/** Objects of b matched to objects of a: Map(b.id → a.id) – the same content at the same place. */
+/** Is text box b the same as a with paragraphs / list items added after it (same place, width, look)? */
+const looks = o => { const {id, name, doc, h, cmt, ...rest} = o; return JSON.stringify(rest, Object.keys(rest).sort()); };
+function extends_(oa, ob) {
+  if (oa.type !== 'text' || ob.type !== 'text' || looks(oa) !== looks(ob)) return false;
+  const fa = flatBlocks(oa.doc), fb = flatBlocks(ob.doc);
+  if (fa.length >= fb.length) return false;
+  return fa.every((x, i) => JSON.stringify(x) === JSON.stringify(fb[i]));
+}
+/** Objects of b matched to objects of a: Map(b.id → a.id) – the same content at the same place; m.ext: the b ids of
+ *  text boxes that are a's box with paragraphs added. */
 function matchObjects(a, b, sigOf) {
-  const m = new Map(), taken = new Set();
+  const m = new Map(), taken = new Set(); m.ext = new Set();
   for (const ob of b.objects) {
     const oa = a.objects.find(o => !taken.has(o.id) && sigOf(o) === sigOf(ob) && sameBox(o, ob));
     if (oa) { m.set(ob.id, oa.id); taken.add(oa.id); }
   }
+  for (const ob of b.objects) {
+    if (m.has(ob.id)) continue;
+    const oa = a.objects.find(o => !taken.has(o.id) && extends_(o, ob));
+    if (oa) { m.set(ob.id, oa.id); taken.add(oa.id); m.ext.add(ob.id); }
+  }
   return m;
+}
+/** How a box is cut into pieces on its slide: 'parts', true (paragraphs) or null (not cut). */
+const modeOf = (slide, o) => { const x = Anim.splitMode(slide, o); return x ? (x.mode === 'parts' ? 'parts' : true) : null; };
+/** The visibility of every piece of a box (pieces in mode `by`), from a state of its slide; null: cannot be told. */
+function pieceVis(slide, o, state, by) {
+  const n = blockPieceCounts(o, by === 'parts').reduce((a, b) => a + b, 0), mine = modeOf(slide, o);
+  if (!mine) return Array.from({length: n}, () => !!state.vis[o.id]);
+  if (mine !== by) return null;
+  return Array.from({length: n}, (_, i) => !!state.vis[`${o.id}#${i}`]);
 }
 const mapKey = (k, m) => { const id = keyObj(k), p = keyPart(k), n = m.get(id); return n ? (p == null ? n : `${n}#${p}`) : null; };
 /** Can slide b be the next step of slide a? (Then the slideshow could show it on the same slide.) */
@@ -135,6 +185,11 @@ export function isNextStep(a, b, sigOf) {
     if (!inv.has(o.id)) continue;
     const bo = b.objects.find(q => q.id === inv.get(o.id));
     const ka = Anim.pieceKeys(a, o), kb = Anim.pieceKeys(b, bo);
+    if (m.ext.has(bo.id)) {                              // paragraphs added: the pieces must be told apart the same way
+      const by = modeOf(b, bo) || modeOf(a, o) || true;
+      if (!pieceVis(a, o, end, by) || !pieceVis(b, bo, bStart, by) || ka.some(k => end.grow[k]) || kb.some(k => bStart.grow[k])) return null;
+      continue;
+    }
     if (ka.length !== kb.length && ka.length > 1 && kb.length > 1) return null;      // cut into a different number of pieces
     // growing cannot be undone at a step: the grown state must go on
     for (let i = 0; i < Math.max(ka.length, kb.length); i++) { const x = ka[Math.min(i, ka.length - 1)], y = kb[Math.min(i, kb.length - 1)]; if (!!end.grow[x] !== !!bStart.grow[y]) return null; }
@@ -159,6 +214,11 @@ function stepChanges(a, b, m) {
     const aid = m.get(o.id), kb = Anim.pieceKeys(b, o);
     if (!aid) { for (const k of kb) if (st.vis[k]) out.push({bkey: k, show: true}); continue; }
     const ao = a.objects.find(q => q.id === aid), ka = Anim.pieceKeys(a, ao);
+    if (m.ext && m.ext.has(o.id)) {                      // paragraphs added: piece by piece, the new ones were not there
+      const by = modeOf(b, o) || modeOf(a, ao) || true, va = pieceVis(a, ao, end, by), vb = pieceVis(b, o, st, by);
+      vb.forEach((v, i) => { if (!!va[i] !== v) out.push({bkey: `${o.id}#${i}`, show: v, by}); });
+      continue;
+    }
     kb.forEach((k, i) => { const ak = ka[Math.min(i, ka.length - 1)]; const va = !!end.vis[ak], vb = !!st.vis[k]; if (va !== vb) out.push({bkey: k, show: vb}); });
   }
   void inv;
@@ -186,7 +246,17 @@ export function mergeRun(slides, h) {
     let after = null;
     for (const ob of b.objects) {
       const aid = m.get(ob.id);
-      if (aid) { bm.set(ob.id, idMap.get(aid)); after = idMap.get(aid); continue; }
+      if (aid) {
+        const mid = idMap.get(aid); bm.set(ob.id, mid); after = mid;
+        if (m.ext.has(ob.id)) {                          // the same box with paragraphs added: the merged box gets them
+          const mo = merged.objects.find(o => o.id === mid), prevO = prev.objects.find(o => o.id === aid);
+          const by = modeOf(b, ob) || modeOf(prev, prevO) || true, had = blockPieceCounts(mo, by === 'parts').reduce((x, y) => x + y, 0);
+          for (const x of merged.anims) if (x.target === mid && !Array.isArray(x.pieces)) { x.pieces = Array.from({length: had}, (_, i) => i); }
+          mo.doc = clone(ob.doc); mo.h = Math.max(mo.h || 0, ob.h || 0);
+          merged.anims.forEach(x => { if (x.target === mid && x.byParagraph == null && Array.isArray(x.pieces)) x.cutBy = by; });
+        }
+        continue;
+      }
       const no = clone(ob); no.id = h.uid(); delete no.cmt; bm.set(ob.id, no.id);
       const at = after ? merged.objects.findIndex(o => o.id === after) + 1 : 0;
       merged.objects.splice(at, 0, no); after = no.id;
@@ -195,7 +265,7 @@ export function mergeRun(slides, h) {
     const anims = [], splitOf = {};
     for (const x of b.anims) if (x.byParagraph) splitOf[x.target] = x.byParagraph;
     for (const c of stepChanges(prev, b, m)) {
-      const id = bm.get(keyObj(c.bkey)), part = keyPart(c.bkey), by = splitOf[keyObj(c.bkey)];
+      const id = bm.get(keyObj(c.bkey)), part = keyPart(c.bkey), by = c.by || splitOf[keyObj(c.bkey)];
       anims.push({id: h.uid(), target: id, effect: c.show ? 'appear' : 'disappear', trigger: anims.length ? 'with' : 'click', dur: 0, delay: 0,
         ...(by ? {byParagraph: by} : {}), ...(part != null ? {pieces: [part]} : {})});
     }
@@ -209,5 +279,20 @@ export function mergeRun(slides, h) {
     prev = b;
     idMap = new Map([...bm]);
   }
-  return merged;
+  // a box whose earlier effects kept to its first pieces must stay cut into pieces the same way
+  for (const x of merged.anims) if (x.cutBy) { if (!merged.anims.some(y => y.target === x.target && y.byParagraph)) x.byParagraph = x.cutBy; delete x.cutBy; }
+  return compact(merged);
+}
+/** Single-piece effects of one box, each starting its own click, piece after piece: one "by paragraph" effect. */
+function compact(slide) {
+  const out = [];
+  for (const a of slide.anims) {
+    const p = out[out.length - 1];
+    const one = x => Array.isArray(x.pieces) && x.pieces.length >= 1 && x.trigger === 'click' && x.byParagraph;
+    if (p && one(p) && one(a) && a.pieces.length === 1 && p.target === a.target && p.effect === a.effect && p.byParagraph === a.byParagraph
+        && (p.dir ?? null) === (a.dir ?? null) && (p.dur ?? null) === (a.dur ?? null) && (p.delay ?? null) === (a.delay ?? null) && a.pieces[0] === p.pieces[p.pieces.length - 1] + 1
+        && (p.pieces.length > 1 || true)) { p.pieces = [...p.pieces, a.pieces[0]]; continue; }
+    out.push(a);
+  }
+  return {...slide, anims: out};
 }

@@ -1,4 +1,4 @@
-# Matekos Prezi 1.5.5
+# Matekos Prezi 1.5.6
 
 Presentation editor with live inline TeX, the twin of **Matekos Doksi**. Built with **TipTap**
 (text editor), **MathJax 4** (formulas), **MathLive** (visual formula editor) and **Tauri 2**
@@ -149,6 +149,13 @@ Browser test version: `npm run build:web` → one self-contained `dist-web/index
     buttons stay in one row;
   * no extra empty line under a list at the end of a text box (files saved before lose the one that was added);
   * the eye button is called "Lektor mód".
+* 1.5.6:
+  * steps: a text box revealed paragraph by paragraph is cut up too – every step slide has the box with only the
+    paragraphs / list items it shows; the other way round, the same text box growing paragraph by paragraph on
+    consecutive slides becomes one box with one "by paragraph" effect (checked screen by screen in the slideshow,
+    both ways);
+  * the indent buttons move by 0.8 cm;
+  * Lektor mód: the labels of indents, spacing and line spacing follow the size of the text they belong to.
 
 ## Export
 
