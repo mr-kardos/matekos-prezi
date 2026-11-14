@@ -1,6 +1,6 @@
 // Animation model – shared by the editor (badges, timeline), the slideshow preview and the PPTX exporter.
 import { blockCount } from "./model.js";
-import { partCount } from "./parts.js";
+import { partCount, deepCount } from "./parts.js";
 
 export const Anim = (() => {
   // cls: entr = belépő, emph = kiemelés, exit = kilépő. id/sub = PowerPoint preset ids.
@@ -46,9 +46,10 @@ export const Anim = (() => {
    *  byParagraph: true = paragraph by paragraph; 'parts' = also the parts of its formulas (rows, after \quad and ⇒). */
   function splitMode(slide, o) {
     if (o.type !== 'text' || o.rot) return null;
-    let para = false, parts = false;
-    for (const a of slide.anims) if (a.target === o.id && a.byParagraph) { para = true; if (a.byParagraph === 'parts') parts = true; }
+    let para = false, parts = false, deep = false;
+    for (const a of slide.anims) if (a.target === o.id && a.byParagraph) { para = true; if (a.byParagraph === 'parts') parts = true; if (a.byParagraph === 'deep') deep = true; }
     if (!para) return null;
+    if (deep) { const n = deepCount(o); return n > 1 ? {mode: 'deep', n} : null; }      // every paragraph, also inside list items
     const nb = blockCount(o), np = parts ? partCount(o) : nb;
     if (np > nb) return {mode: 'parts', n: np};
     return nb > 1 ? {mode: 'para', n: nb} : null;

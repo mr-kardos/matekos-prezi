@@ -92,6 +92,7 @@ function objEl(o, rmode, tpl = false, ox = 0, oy = 0) {
     txtStyle(t, o); r.appendChild(t);
     const parts = rmode === 'show' && !tpl && partsSlide && Anim.splitMode(partsSlide, o)?.mode === 'parts';   // formulas revealed part by part
     if (parts) t.dataset.parts = '1';
+    { const sl = !tpl && (partsSlide || (rmode === 'edit' && mode === 'slides' ? tgt() : null)); if (sl && Anim.splitMode(sl, o)?.mode === 'deep') t.dataset.deep = '1'; }   // every paragraph a piece
     renderStatic(t, parts ? markDoc(o.doc) : o.doc, rmode === 'edit' ? onMathRendered : null, kindOf(o));
   } else if (o.type === 'shape') r.innerHTML = shapeSVG(o);
   else if (o.type === 'video') {

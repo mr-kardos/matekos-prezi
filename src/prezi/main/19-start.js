@@ -57,5 +57,5 @@ window.mprezi = {runUpdateCheck, insertVideo: (data, name) => insertVideo({data,
   gotoSlide, enterEdit, exitEdit, commit, renderAll, buildPptx: () => buildPptx(doc, renderSlide, layoutOf, () => {}),
   buildPdf: m => buildPdf(doc, renderSlide, layoutOf, m, () => {}), renderSlide, packMprezi, unpackMprezi, loadDocument, Anim};
 // for the tests that run the app in a browser (tests/app.e2e.mjs)
-Object.assign(window.mprezi, {startShow, showNext, stopShow, splitAllSteps, mergeAllSteps, commit: () => commit()});
+Object.assign(window.mprezi, {startShow, showNext, stopShow, splitAllSteps, mergeAllSteps, commit: () => commit(), openBuffer: (data, name) => openResult({data, name}), packMprezi: async () => { const blob = await packMprezi(); return new Uint8Array(await blob.arrayBuffer()); }});
 Object.defineProperty(window.mprezi, 'slideCount', {get: () => doc.slides.length});

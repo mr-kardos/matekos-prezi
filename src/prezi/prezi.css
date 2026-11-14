@@ -761,7 +761,8 @@ span.tab .tab-sp{ display:inline-block; height:1px; }
 .cfm-card.upd .updmsg{ color:var(--ink-2); line-height:1.45; margin-bottom:14px; }
 .pop{ max-height:calc(100vh - 16px); overflow-y:auto; }
 /* the options under the selected slide: exactly as wide as the slide */
-.slide-actions{ box-sizing:border-box; width:max-content; min-width:calc(var(--tk) * 1280px); max-width:none; margin-left:22px; flex-wrap:nowrap; justify-content:space-between; }   /* the four buttons always in one row */
+.slide-actions{ box-sizing:border-box; width:calc(var(--tk) * 1280px); max-width:none; margin-left:22px;
+  display:grid; grid-template-columns:repeat(auto-fit, 28px); justify-content:space-between; gap:2px; }   /* as wide as the slide: the buttons go into more rows when they do not fit */
 /* left panel header (as on the right) */
 #slides{ display:flex; flex-direction:column; }
 .lhead{ flex:none; }

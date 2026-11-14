@@ -13,7 +13,7 @@ import 'svg2pdf.js';
 import { familyFiles, fontSet, familyFromCSS } from './fontsets.js';
 import { Anim } from './anim.js';
 import { pieceEls, mathPending, layoutStaticTabs } from './textview.js';
-import { partPieces, partEls, PART_MARK } from './parts.js';
+import { partPieces, partEls, PART_MARK, deepPieces } from './parts.js';
 import { PPTX_SKELETON } from './pptx-skeleton.js';
 import { W, H, flatObjects } from './model.js';
 
@@ -179,7 +179,7 @@ function slidePieces(s, el, model) {
     if (o.type === 'shape') { pieces.push({key, name, svg: wrapSVG(o.w, o.h, child.querySelector('svg').innerHTML), x: o.x, y: o.y, w: o.w, h: o.h, rot: o.rot || 0, opacity}); return; }
     const txt = child.querySelector('.txt');
     if (!tpl && o.type === 'text' && Anim.splitsByParagraph(s, o)) {
-      (txt.dataset.parts ? partPieces(txt) : pieceEls(txt)).forEach((p, i) => {
+      (txt.dataset.parts ? partPieces(txt) : txt.dataset.deep ? deepPieces(txt) : pieceEls(txt)).forEach((p, i) => {
         if (p.set) {                                             // a part of a paragraph: some of its text and formula parts
           const els = partEls(p), rs = els.map(e => e.getBoundingClientRect()).filter(q => q.width || q.height); if (!rs.length) return;
           const PAD = 4, x0 = Math.min(...rs.map(q => q.left)) - PAD, y0 = Math.min(...rs.map(q => q.top)) - PAD, x1 = Math.max(...rs.map(q => q.right)) + PAD, y1 = Math.max(...rs.map(q => q.bottom)) + PAD;

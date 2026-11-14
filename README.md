@@ -1,4 +1,4 @@
-# Matekos Prezi 1.5.6
+# Matekos Prezi 1.5.9
 
 Presentation editor with live inline TeX, the twin of **Matekos Doksi**. Built with **TipTap**
 (text editor), **MathJax 4** (formulas), **MathLive** (visual formula editor) and **Tauri 2**
@@ -156,6 +156,22 @@ Browser test version: `npm run build:web` → one self-contained `dist-web/index
     both ways);
   * the indent buttons move by 0.8 cm;
   * Lektor mód: the labels of indents, spacing and line spacing follow the size of the text they belong to.
+* 1.5.7:
+  * merging steps finds the step slides that only add to the slide before: text boxes are compared without the
+    settings that are only written in some files (null / false), and a box that grows in any other way – text added
+    inside a list item or at the end of a paragraph, a box made wider – is changed at the click (the old box goes,
+    the new one comes in the same moment, exactly as the change of slides looked); a slide that takes something away
+    or changes it is not a step;
+  * left panel: the buttons under the selected slide are as wide as the slide – they go into more rows when the panel
+    is narrow.
+* 1.5.8: merging steps makes one text box of a box that grows from slide to slide (it continues the box before
+  paragraph by paragraph – also a paragraph added inside a list item –, at any width: the merged box has the last
+  width): the box is revealed piece by piece, never two boxes on top of each other, and nothing is made to disappear.
+  New piece kind `byParagraph: 'deep'`: every paragraph is a piece, also inside list items (used when a step ends in
+  the middle of a list item).
+* 1.5.9: the animation numbers on the canvas: one number for every click an object has effects at (pieces that
+  appear together: one number), following numbers as one range; a file with effects older versions do not know
+  says which version it needs (`minVersion`), and an older version warns when opening it.
 
 ## Export
 

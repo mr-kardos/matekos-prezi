@@ -14,7 +14,7 @@ function keyEl(root, key) {
   const el = root.querySelector(`.obj[data-id="${id}"]`);
   if (part == null || !el) return el;
   const txt = el.querySelector('.txt');
-  return (txt.dataset.parts ? partPieces(txt) : pieceEls(txt))[+part];
+  return (txt.dataset.parts ? partPieces(txt) : txt.dataset.deep ? deepPieces(txt) : pieceEls(txt))[+part];
 }
 /** Show / hide an animated piece: an element, or a set of formula parts and text (parts.js). */
 const setVis = (e, v) => { if (e.set) setPartVis(e, v === 'hidden' ? 'hidden' : ''); else e.style.visibility = v; };

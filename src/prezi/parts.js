@@ -103,6 +103,25 @@ function scan(tex) {
 /* ---------- model ---------- */
 const mathBreaks = node => { let k = 0; (function w(x) { if (x.type === 'math') k += markTex(x.attrs?.tex).breaks; (x.content || []).forEach(w); })(node || {}); return k; };
 /** Animation pieces of a text box when its formulas are revealed in parts: paragraphs / list items, plus the formula parts in them. */
+/* "deep": every paragraph is a piece of its own – also a paragraph inside a list item (a box that grew paragraph by
+   paragraph from slide to slide, merged into one: steps.js). */
+/** The paragraphs of a text document in reading order (inside list items too): [{p, path}] – path: the lists around it. */
+export function deepParagraphs(doc) {
+  const out = [];
+  (function walk(n, path) {
+    for (const c of n.content || []) {
+      if (c.type === 'paragraph' || c.type === 'heading') out.push({p: c, path});
+      else if (c.type === 'bulletList' || c.type === 'orderedList') { const {content, ...list} = c; (content || []).forEach((li, i) => { const {content: lc, ...item} = li; walk(li, [...path, {list, item, i}]); }); }
+    }
+  })(doc || {}, []);
+  return out;
+}
+export const deepCount = o => o.type === 'text' ? deepParagraphs(o.doc).length : 1;
+/** The paragraphs of a rendered text box (its list symbols are inside them). */
+export function deepPieces(txt) {
+  const pm = txt.querySelector('.ProseMirror'); if (!pm) return [];
+  return [...pm.querySelectorAll('p, h1, h2, h3')].filter(e => !e.closest('td, th'));
+}
 /** The blocks of a text box as its animation pieces come from them: paragraphs, and list items one by one (an empty
  *  list is one block): [{block, list (the list around it, without its items) | null}]. */
 export function flatBlocks(doc) {

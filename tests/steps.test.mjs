@@ -109,3 +109,27 @@ test('split and merge back: the box revealed by paragraphs comes back as one box
   assert.equal(t.length, 1); assert.equal(t[0].doc.content.length, 3);
   assert.equal(clicksOf(m), clicksOf(s));
 });
+
+test('merge: growing boxes saved differently (unset settings written or not), text added inside a list item, a box made wider', () => {
+  const item = (t, extra = []) => ({ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: t }] }, ...extra] });
+  const list = (...items) => ({ type: 'bulletList', content: items });
+  const tb = (id, w, ...blocks) => ({ id, type: 'text', x: 40, y: 100, w, h: 100, size: 24, doc: { type: 'doc', content: blocks } });
+  // 1 → 2: the same first item, written with its unset settings in one file and without them in the other
+  const a = { id: 'a', template: 'body', objects: [tb('A', 600, { type: 'bulletList', attrs: { bulletChar: '•', start: null }, content: [{ ...item('Első'), attrs: { ghost: false, sameLine: false } }] })], anims: [] };
+  const b = { id: 'b', template: 'body', objects: [tb('B', 600, { type: 'bulletList', attrs: { bulletChar: '•' }, content: [item('Első'), item('Második')] })], anims: [] };
+  // 2 → 3: a paragraph added inside the second item, and the box made wider
+  const c = { id: 'c', template: 'body', objects: [tb('C', 800, { ...list(item('Első'), item('Második', [{ type: 'paragraph', content: [{ type: 'text', text: 'folytatás' }] }])), attrs: { bulletChar: '•' } })], anims: [] };
+  assert.deepEqual(findRuns([a, b, c], sigOf), [[0, 1, 2]]);
+  const m = mergeRun([a, b, c], { uid, sigOf });
+  assert.equal(clicksOf(m), 2);
+  // what is seen at every click: the boxes and their pieces in order
+  const seenNow = st => m.objects.map(o => Anim.pieceKeys(m, o).map(k => st.vis[k] ? 1 : 0).join('')).join(' ');
+  const st = slideStates(m).map(seenNow);
+  assert.equal(m.objects.length, 1, 'one text box'); assert.equal(m.objects[0].w, 800, 'with the last width');
+  assert.deepEqual(st, ['100', '110', '111'], 'paragraph by paragraph – the paragraph added inside the list item too');
+  assert.ok(m.anims.every(x => Anim.EFFECTS[x.effect].cls !== 'exit'), 'nothing disappears');
+  assert.deepEqual(m.anims.map(x => [x.effect, x.trigger, x.byParagraph, x.pieces]), [['appear', 'click', 'deep', [1, 2]]], 'one effect, every paragraph a piece');
+  // a slide that takes something away is not a step
+  const d = { id: 'd', template: 'body', objects: [tb('D', 600, list(item('Más')))], anims: [] };
+  assert.deepEqual(findRuns([c, d], sigOf), []);
+});

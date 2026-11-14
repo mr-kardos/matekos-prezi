@@ -14,7 +14,11 @@ async function packMprezi() {
     const m = media[k]?.match(/^data:([^;]+);base64,(.*)$/); if (!m) continue;
     const name = `media/${k}.${EXT[m[1]] ?? 'bin'}`; z.file(name, m[2], {base64: true, compression: /svg/.test(m[1]) ? 'DEFLATE' : 'STORE'}); files[k] = name;   // pictures and videos are compressed already
   }
-  z.file('manifest.json', JSON.stringify({...doc, app: 'matekos-prezi', media: files}, null, 1));
+  // effects that older versions do not know (every paragraph a piece, only some pieces, applied before the slide):
+  // the file says which version it needs, so a newer file is not shown wrongly without a word
+  const needs = doc.slides.some(sl => sl.anims.some(x => x.byParagraph === 'deep' || Array.isArray(x.pieces) || x.pre)) ? '1.5.8' : null;
+  const {minVersion: _old, ...plain} = doc;
+  z.file('manifest.json', JSON.stringify({...plain, app: 'matekos-prezi', ...(needs ? {minVersion: needs} : {}), media: files}, null, 1));
   return z.generateAsync({type: 'blob', mimeType: 'application/zip', compression: 'DEFLATE'});
 }
 async function unpackMprezi(buf) {
@@ -26,6 +30,9 @@ async function unpackMprezi(buf) {
     md[k] = `data:${mime};base64,` + await z.file(name).async('base64');
   }
   delete m.media; delete m.app;
+  const need = m.minVersion; delete m.minVersion;
+  const newer = (x, y) => { const a = String(x).split('.').map(Number), b = String(y).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); } return false; };
+  if (need && newer(need, APP_VERSION)) setTimeout(() => toast(`Ez a bemutató a Matekos Prezi ${need} vagy újabb verzióját igényli – ebben a verzióban egyes animációk nem jól játszódnak le.`), 600);
   return {doc: migrate(m), media: md};
 }
 /** The title box always shows the presentation's file name (after Save as, opening, renaming). */

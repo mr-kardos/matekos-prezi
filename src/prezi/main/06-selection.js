@@ -35,13 +35,16 @@ function drawSelection() {
 function drawBadges() {
   stage.querySelectorAll('.badges').forEach(b => b.remove());
   if (mode !== 'slides' || !showBadges) return;
-  const s = tgt(), rg = Anim.ranges(Anim.expand(s)), map = {};
-  for (const a of s.anims) if (rg[a.id]) (map[a.target] ??= []).push({r: rg[a.id], cls: Anim.EFFECTS[a.effect].cls});
-  for (const [id, arr] of Object.entries(map)) {
+  // every object: the clicks its effects come at, one number each (several pieces at the same click: one number),
+  // following numbers drawn as one range ("2–5"); entrance / emphasis / exit apart
+  const s = tgt(), list = Anim.expand(s), nums = Anim.numbers(list), map = {};
+  list.forEach((a, i) => { const cls = Anim.EFFECTS[a.effect].cls; if (!(cls in Anim.CLASSES)) return; ((map[a.target] ??= {})[cls] ??= new Set()).add(nums[i]); });
+  const runs = set => { const v = [...set].sort((x, y) => x - y), out = []; for (const n of v) { const r = out[out.length - 1]; if (r && n === r[1] + 1) r[1] = n; else out.push([n, n]); } return out; };
+  for (const [id, byCls] of Object.entries(map)) {
     const o = objById(id); if (!o || o.hidden) continue;
     const b = document.createElement('div'), bb = bounds(o); b.className = 'badges';
     Object.assign(b.style, {left: bb.x + 'px', top: bb.y + 'px'});
-    b.innerHTML = arr.map(({r, cls}) => `<span class="badge ${cls}" title="${Anim.CLASSES[cls]}">${r[0] === r[1] ? r[0] : r[0] + '–' + r[1]}</span>`).join('');
+    b.innerHTML = ['entr', 'emph', 'exit'].filter(c => byCls[c]).flatMap(cls => runs(byCls[cls]).map(r => `<span class="badge ${cls}" title="${Anim.CLASSES[cls]}">${r[0] === r[1] ? r[0] : r[0] + '–' + r[1]}</span>`)).join('');
     stage.appendChild(b);
   }
 }
